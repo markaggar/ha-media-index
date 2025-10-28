@@ -102,3 +102,33 @@ scan_folder:
       selector:
         boolean:
 
+mark_favorite:
+  name: Mark File as Favorite
+  description: Mark a file as favorite (updates EXIF and database)
+  fields:
+    file_path:
+      name: File Path
+      description: Full path to the media file
+      required: true
+      example: "/media/Photo/PhotoLibrary/New/IMG_1234.jpg"
+      selector:
+        text:
+    is_favorite:
+      name: Is Favorite
+      description: True to mark as favorite, False to unmark
+      default: true
+      selector:
+        boolean:
+
+delete_media:
+  name: Delete Media File
+  description: Move a media file to the junk folder (soft delete)
+  fields:
+    file_path:
+      name: File Path
+      description: Full path to the media file to delete
+      required: true
+      example: "/media/Photo/PhotoLibrary/New/IMG_1234.jpg"
+      selector:
+        text:
+

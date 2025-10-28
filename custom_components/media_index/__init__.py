@@ -58,6 +58,15 @@ SERVICE_SCAN_FOLDER_SCHEMA = vol.Schema({
     vol.Optional("force_rescan", default=False): cv.boolean,
 })
 
+SERVICE_MARK_FAVORITE_SCHEMA = vol.Schema({
+    vol.Required("file_path"): cv.string,
+    vol.Optional("is_favorite", default=True): cv.boolean,
+})
+
+SERVICE_DELETE_MEDIA_SCHEMA = vol.Schema({
+    vol.Required("file_path"): cv.string,
+})
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Media Index integration from YAML (not supported)."""
@@ -228,6 +237,88 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # 5. Return location data to caller
         return location_data
     
+    async def handle_mark_favorite(call):
+        """Handle mark_favorite service call."""
+        cache_manager = hass.data[DOMAIN][entry.entry_id]["cache_manager"]
+        file_path = call.data["file_path"]
+        is_favorite = call.data.get("is_favorite", True)
+        
+        _LOGGER.info("Marking file as favorite: %s (favorite=%s)", file_path, is_favorite)
+        
+        try:
+            # Update database
+            await cache_manager.update_favorite(file_path, is_favorite)
+            
+            # TODO: Update EXIF metadata in file (future enhancement)
+            # For now, just update database
+            
+            return {
+                "file_path": file_path,
+                "is_favorite": is_favorite,
+                "status": "success"
+            }
+        except Exception as e:
+            _LOGGER.error("Error marking file as favorite: %s", e)
+            return {
+                "file_path": file_path,
+                "status": "error",
+                "error": str(e)
+            }
+    
+    async def handle_delete_media(call):
+        """Handle delete_media service call."""
+        import shutil
+        
+        cache_manager = hass.data[DOMAIN][entry.entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry.entry_id]["config"]
+        
+        file_path = call.data["file_path"]
+        base_folder = config.get(CONF_BASE_FOLDER, "/media")
+        
+        _LOGGER.info("Deleting media file: %s", file_path)
+        
+        try:
+            # Create junk folder if it doesn't exist
+            junk_folder = Path(base_folder) / "_Junk"
+            junk_folder.mkdir(exist_ok=True)
+            
+            # Get file name and create destination path
+            file_name = Path(file_path).name
+            dest_path = junk_folder / file_name
+            
+            # Handle duplicate names by appending number
+            counter = 1
+            while dest_path.exists():
+                stem = Path(file_path).stem
+                suffix = Path(file_path).suffix
+                dest_path = junk_folder / f"{stem}_{counter}{suffix}"
+                counter += 1
+            
+            # Move file to junk folder
+            await hass.async_add_executor_job(
+                shutil.move,
+                file_path,
+                str(dest_path)
+            )
+            
+            # Remove from database
+            await cache_manager.delete_file(file_path)
+            
+            _LOGGER.info("Moved file to junk folder: %s -> %s", file_path, dest_path)
+            
+            return {
+                "file_path": file_path,
+                "junk_path": str(dest_path),
+                "status": "success"
+            }
+        except Exception as e:
+            _LOGGER.error("Error deleting file: %s", e)
+            return {
+                "file_path": file_path,
+                "status": "error",
+                "error": str(e)
+            }
+    
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         scanner = hass.data[DOMAIN][entry.entry_id]["scanner"]
@@ -280,7 +371,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         supports_response=SupportsResponse.ONLY,
     )
     
-    _LOGGER.info("Registered 4 services")
+    hass.services.async_register(
+        DOMAIN,
+        "mark_favorite",
+        handle_mark_favorite,
+        schema=SERVICE_MARK_FAVORITE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        "delete_media",
+        handle_delete_media,
+        schema=SERVICE_DELETE_MEDIA_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    _LOGGER.info("Registered 6 services")
 
     # Register update listener for config changes
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

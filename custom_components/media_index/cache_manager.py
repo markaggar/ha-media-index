@@ -644,8 +644,73 @@ class CacheManager:
         
         return dict(row) if row else None
     
+    async def update_favorite(self, file_path: str, is_favorite: bool) -> bool:
+        """Update favorite status for a file.
+        
+        Args:
+            file_path: Full path to the file
+            is_favorite: True to mark as favorite, False to unmark
+            
+        Returns:
+            True if successful, False if file not found
+        """
+        favorite_value = 1 if is_favorite else 0
+        
+        async with self._db.execute(
+            "UPDATE media_files SET is_favorited = ? WHERE path = ?",
+            (favorite_value, file_path)
+        ) as cursor:
+            await self._db.commit()
+            rows_affected = cursor.rowcount
+        
+        if rows_affected > 0:
+            _LOGGER.info("Updated favorite status for %s: %s", file_path, is_favorite)
+            return True
+        else:
+            _LOGGER.warning("File not found in database: %s", file_path)
+            return False
+    
+    async def delete_file(self, file_path: str) -> bool:
+        """Delete file record from database.
+        
+        Args:
+            file_path: Full path to the file
+            
+        Returns:
+            True if successful, False if file not found
+        """
+        # First get file_id for deleting related records
+        async with self._db.execute(
+            "SELECT id FROM media_files WHERE path = ?",
+            (file_path,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        
+        if not row:
+            _LOGGER.warning("File not found in database: %s", file_path)
+            return False
+        
+        file_id = row[0]
+        
+        # Delete EXIF data first (foreign key)
+        await self._db.execute(
+            "DELETE FROM exif_data WHERE file_id = ?",
+            (file_id,)
+        )
+        
+        # Delete file record
+        await self._db.execute(
+            "DELETE FROM media_files WHERE id = ?",
+            (file_id,)
+        )
+        
+        await self._db.commit()
+        _LOGGER.info("Deleted file from database: %s", file_path)
+        return True
+    
     async def close(self) -> None:
         """Close database connection."""
         if self._db:
             await self._db.close()
             _LOGGER.info("Cache database connection closed")
+

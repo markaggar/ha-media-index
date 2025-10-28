@@ -82,7 +82,10 @@ class MediaScanner:
         media_files = []
         
         try:
-            for root, _, files in os.walk(scan_path):
+            for root, dirs, files in os.walk(scan_path):
+                # Skip _Junk folder (where deleted files are moved)
+                dirs[:] = [d for d in dirs if d != '_Junk']
+                
                 # Check depth limit
                 if max_depth is not None:
                     depth = root[len(scan_path):].count(os.sep)
@@ -136,18 +139,11 @@ class MediaScanner:
             # Record scan start
             scan_id = await self.cache.record_scan(base_folder, "full")
             
-            # Determine paths to scan
-            scan_paths = []
-            if watched_folders:
-                for folder in watched_folders:
-                    folder_path = os.path.join(base_folder, folder)
-                    if os.path.exists(folder_path):
-                        scan_paths.append(folder_path)
-                    else:
-                        _LOGGER.warning("Watched folder not found: %s", folder_path)
-            else:
-                # Scan entire base folder
-                scan_paths = [base_folder]
+            # Full scan always scans the entire base folder
+            # Watched folders are for file system monitoring only, not for limiting full scans
+            scan_paths = [base_folder]
+            
+            _LOGGER.info("Full scan will cover entire base folder: %s (watched folders are for monitoring only)", base_folder)
             
             # Scan each path (run blocking I/O in executor)
             for scan_path in scan_paths:
