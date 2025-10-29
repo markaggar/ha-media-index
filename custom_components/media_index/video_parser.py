@@ -186,7 +186,7 @@ class VideoMetadataParser:
                 subprocess.run(['exiftool', '-ver'], capture_output=True, check=True)
             except (subprocess.CalledProcessError, FileNotFoundError):
                 _LOGGER.error("exiftool not found - required for MP4 metadata writing")
-                _LOGGER.info("Install with: apt-get install libimage-exiftool-perl")
+                _LOGGER.info("Install with: apk add exiftool (or apt-get install libimage-exiftool-perl on Debian)")
                 return False
             
             # Write both Microsoft Rating (for Windows) and standard Rating tag
