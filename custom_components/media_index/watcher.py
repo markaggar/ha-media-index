@@ -39,7 +39,9 @@ class MediaFileEventHandler(FileSystemEventHandler):
             return
         
         _LOGGER.debug("New media file detected: %s", event.src_path)
-        self.hass.async_create_task(self._handle_new_file(event.src_path))
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.async_create_task, self._handle_new_file(event.src_path)
+        )
     
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification events."""
@@ -50,7 +52,9 @@ class MediaFileEventHandler(FileSystemEventHandler):
             return
         
         _LOGGER.debug("Media file modified: %s", event.src_path)
-        self.hass.async_create_task(self._handle_modified_file(event.src_path))
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.async_create_task, self._handle_modified_file(event.src_path)
+        )
     
     def on_deleted(self, event: FileSystemEvent):
         """Handle file deletion events."""
@@ -61,7 +65,10 @@ class MediaFileEventHandler(FileSystemEventHandler):
             return
         
         _LOGGER.debug("Media file deleted: %s", event.src_path)
-        self.hass.async_create_task(self._handle_deleted_file(event.src_path))
+        # Use call_soon_threadsafe to schedule task from watchdog thread
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.async_create_task, self._handle_deleted_file(event.src_path)
+        )
     
     def on_moved(self, event: FileSystemEvent):
         """Handle file move/rename events."""
@@ -77,11 +84,15 @@ class MediaFileEventHandler(FileSystemEventHandler):
         
         _LOGGER.debug("Media file moved: %s -> %s", event.src_path, event.dest_path)
         
-        # Remove old path and add new path
+        # Remove old path and add new path (use thread-safe scheduling)
         if src_is_media:
-            self.hass.async_create_task(self._handle_deleted_file(event.src_path))
+            self.hass.loop.call_soon_threadsafe(
+                self.hass.async_create_task, self._handle_deleted_file(event.src_path)
+            )
         if dest_is_media:
-            self.hass.async_create_task(self._handle_new_file(event.dest_path))
+            self.hass.loop.call_soon_threadsafe(
+                self.hass.async_create_task, self._handle_new_file(event.dest_path)
+            )
     
     async def _handle_new_file(self, file_path: str):
         """Handle new file addition."""
