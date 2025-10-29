@@ -174,6 +174,7 @@ class VideoMetadataParser:
         """
         import subprocess
         import shutil
+        import os
         
         try:
             from pathlib import Path
@@ -182,9 +183,17 @@ class VideoMetadataParser:
             if path.suffix.lower() not in {'.mp4', '.m4v', '.mov'}:
                 return False
             
-            # Check if exiftool is available using shutil.which (properly checks PATH)
-            if not shutil.which('exiftool'):
-                _LOGGER.error("exiftool not found in PATH - required for MP4 metadata writing")
+            # Check for exiftool - try common locations since PATH may not be set in HA environment
+            exiftool_path = shutil.which('exiftool')
+            if not exiftool_path:
+                # Try common installation paths
+                for possible_path in ['/usr/bin/exiftool', '/usr/local/bin/exiftool']:
+                    if os.path.isfile(possible_path):
+                        exiftool_path = possible_path
+                        break
+            
+            if not exiftool_path:
+                _LOGGER.error("exiftool not found in PATH or common locations - required for MP4 metadata writing")
                 _LOGGER.info("Install with: apk add exiftool (or apt-get install libimage-exiftool-perl on Debian)")
                 return False
             
@@ -192,14 +201,14 @@ class VideoMetadataParser:
             # Microsoft Rating: 0-5 scale (what Windows Explorer displays)
             # Standard Rating: Also 0-5 for compatibility
             cmd = [
-                'exiftool',
+                exiftool_path,  # Use absolute path
                 f'-Microsoft:Rating={rating}',  # Windows-compatible tag
                 f'-Rating={rating}',             # Standard rating tag
                 '-overwrite_original',           # Don't create backup files
                 str(file_path)
             ]
             
-            _LOGGER.debug(f"Writing rating {rating} to {file_path} using exiftool")
+            _LOGGER.debug(f"Writing rating {rating} to {file_path} using exiftool at {exiftool_path}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
             
             if result.returncode == 0:
