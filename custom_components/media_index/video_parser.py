@@ -156,46 +156,20 @@ class VideoMetadataParser:
     def write_rating(file_path: str, rating: int) -> bool:
         """Write rating to video file metadata.
         
-        MP4 Rating Storage for Windows Compatibility:
-        For MP4/MOV files, writes rating using mutagen with iTunes-compatible tags.
-        Note: This writes iTunes tags which work on macOS/iTunes. Windows Explorer
-        requires Microsoft:Rating tag which needs exiftool (not available in HA executor).
+        NOTE: Video rating writes are DISABLED due to technical limitations:
+        - exiftool not accessible in Home Assistant executor thread context
+        - mutagen can corrupt MP4 files when writing custom tags
+        - exiftool requires re-encoding entire video for safe metadata writes
+        
+        Video ratings are persisted in the database only.
+        Use the export/import backup services to preserve ratings across DB resets.
         
         Args:
             file_path: Path to the video file
             rating: Rating value (0-5 stars)
             
         Returns:
-            True if rating was written successfully, False otherwise
+            False (video file writes disabled)
         """
-        if MP4 is None:
-            _LOGGER.warning("mutagen not available, cannot write video metadata")
-            return False
-            
-        try:
-            from pathlib import Path
-            
-            path = Path(file_path)
-            if path.suffix.lower() not in {'.mp4', '.m4v', '.mov'}:
-                return False
-            
-            # Load the MP4 file
-            video = MP4(file_path)
-            
-            # Write rating using standard MP4 freeform atoms
-            # ----:com.apple.iTunes:rate - iTunes rating (0-100 scale)
-            itunes_rating = rating * 20  # Convert 0-5 to 0-100
-            video['----:com.apple.iTunes:rate'] = str(itunes_rating).encode('utf-8')
-            
-            # Also write as simple rating value
-            video['----:com.apple.iTunes:rating'] = str(rating).encode('utf-8')
-            
-            # Save changes
-            video.save()
-            
-            _LOGGER.info(f"Successfully wrote rating {rating} to {file_path} using mutagen (iTunes tags)")
-            return True
-                
-        except Exception as e:
-            _LOGGER.error(f"Failed to write rating for {file_path}: {e}")
-            return False
+        _LOGGER.debug(f"Video rating write skipped for {file_path} (database-only mode)")
+        return False

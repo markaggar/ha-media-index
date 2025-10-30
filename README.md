@@ -20,7 +20,9 @@ A custom Home Assistant integration that indexes media files (images and videos)
 ### ⭐ Favorites & Ratings
 - **Star ratings** (0-5 stars) extracted from EXIF/XMP metadata
 - **Automatic favoriting** of 5-star rated files
-- **Rating persistence** - writes back to image EXIF data
+- **Rating persistence**:
+  - ✅ **Images**: Writes back to EXIF/XMP metadata
+  - ⚠️ **Videos**: Database-only (file writes disabled - see limitations below)
 - **Database tracking** of favorite status
 
 ### 🎲 Random Media Services
@@ -246,6 +248,58 @@ Filter for `media_index` component.
 Database file: `config/.storage/media_index_{entry_id}.db`
 
 To reset the database, delete this file and trigger a rescan.
+
+## Limitations & Known Issues
+
+### Video Rating Persistence
+
+**⚠️ Video ratings are stored in the database only, not written to MP4 files.**
+
+**Why?**
+- `exiftool` (required for Windows-compatible rating tags) is not accessible in Home Assistant's executor thread context
+- `mutagen` library can corrupt MP4 files when writing custom metadata tags
+- Safe MP4 metadata writes with `exiftool` require re-encoding the entire video (too resource-intensive)
+
+**Workaround:**
+- Video favorites/ratings persist in the SQLite database
+- Use the planned export/import services (see Future Enhancements) to backup ratings
+
+### Image Rating Persistence
+
+✅ **Image ratings ARE written to EXIF/XMP metadata** using `piexif` and work reliably.
+
+## Future Enhancements
+
+### Planned Services
+
+#### `media_index.export_ratings`
+Export all ratings to a portable JSON/CSV file for backup or migration.
+
+**Use cases:**
+- Backup before database reset
+- Migrate to another Home Assistant instance
+- Share rating data with external applications
+
+#### `media_index.import_ratings`
+Import ratings from an exported file and apply to matching files.
+
+**Features:**
+- Match files by path or hash
+- Merge with existing ratings
+- Update database and EXIF (for images)
+
+#### `media_index.restore_edited_files`
+Move files from `_Edit` folder back to their original locations.
+
+**How it works:**
+- Track original file paths when moving to `_Edit`
+- Store move history in database or separate log file
+- Service reads history and restores files to original locations
+
+**Use cases:**
+- Complete editing workflow
+- Bulk restore after batch editing
+- Undo accidental moves
 
 ## Development
 
