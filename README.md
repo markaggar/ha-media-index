@@ -58,6 +58,46 @@ A custom Home Assistant integration that indexes media files (images and videos)
 4. Enter your base media folder path (e.g., `/media/Photos`)
 5. Configure optional settings (watched folders, EXIF extraction, geocoding)
 
+### Watched Folders Configuration
+
+**⚠️ IMPORTANT: Watched folders must be specified as RELATIVE paths from your base folder.**
+
+Watched folders allow you to limit file system monitoring to specific subfolders within your base folder. If left empty, the entire base folder is watched.
+
+**Format:** Comma-separated list of relative folder paths
+
+**Example:**
+
+If your base folder is: `/media/Photo/OneDrive`
+
+And you want to watch:
+- `/media/Photo/OneDrive/Mark-Pictures/Samsung Gallery/DCIM/Camera`
+- `/media/Photo/OneDrive/Tanya-Pictures/Samsung Gallery/DCIM/Camera`
+
+**✅ CORRECT Configuration:**
+```
+Mark-Pictures/Samsung Gallery/DCIM/Camera, Tanya-Pictures/Samsung Gallery/DCIM/Camera
+```
+
+**❌ INCORRECT - Do NOT use absolute paths:**
+```
+/media/Photo/OneDrive/Mark-Pictures/Samsung Gallery/DCIM/Camera
+```
+*This will fail because `os.path.join()` treats paths starting with `/` as absolute and ignores the base folder.*
+
+**❌ INCORRECT - Do NOT include base folder in path:**
+```
+media/Photo/OneDrive/Mark-Pictures/Samsung Gallery/DCIM/Camera
+```
+*This will create an invalid path like `/media/Photo/OneDrive/media/Photo/OneDrive/...`*
+
+**Notes:**
+- Paths are relative to your base folder
+- Spaces in folder names are supported
+- Leading/trailing whitespace is automatically trimmed
+- Quotes are not needed (they're stripped automatically)
+- The integration scans the entire base folder regardless, but watches only specified folders for real-time updates
+
 ### Reconfiguration
 
 After setup, you can reconfigure options via:
