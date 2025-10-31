@@ -181,16 +181,26 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     Raises:
         ValueError: If no integration instance found
     """
-    # Check if target specified (new style target selector)
-    # Target is at call.context.target, not in call.data
+    # Check for target in multiple locations (HA passes it differently depending on context)
     entity_id = None
     
-    if hasattr(call, 'context') and hasattr(call.context, 'target'):
+    # Method 1: Check call.data (Developer Tools, automations)
+    if 'target' in call.data:
+        target = call.data['target']
+        if isinstance(target, dict) and 'entity_id' in target:
+            entity_id = target['entity_id']
+            if isinstance(entity_id, list):
+                entity_id = entity_id[0]  # Use first entity
+            _LOGGER.debug("Found target entity in call.data: %s", entity_id)
+    
+    # Method 2: Check call.context.target (some service call contexts)
+    if not entity_id and hasattr(call, 'context') and hasattr(call.context, 'target'):
         target = call.context.target
         if isinstance(target, dict) and 'entity_id' in target:
             entity_id = target['entity_id']
             if isinstance(entity_id, list):
                 entity_id = entity_id[0]  # Use first entity
+            _LOGGER.debug("Found target entity in call.context: %s", entity_id)
     
     if entity_id:
         # Extract entry_id from entity registry
@@ -199,13 +209,15 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
         entity_entry = entity_registry.async_get(entity_id)
         
         if entity_entry and entity_entry.config_entry_id:
-            _LOGGER.debug("Using entry_id from target entity %s: %s", entity_id, entity_entry.config_entry_id)
+            _LOGGER.info("Routing to integration instance from entity %s: %s", entity_id, entity_entry.config_entry_id)
             return entity_entry.config_entry_id
+        else:
+            _LOGGER.warning("Entity %s not found in registry or missing config_entry_id", entity_id)
     
     # Fallback: use first available entry_id (single-instance compatibility)
     if DOMAIN in hass.data and hass.data[DOMAIN]:
         entry_id = next(iter(hass.data[DOMAIN].keys()))
-        _LOGGER.debug("No target specified, using first entry_id: %s", entry_id)
+        _LOGGER.info("No target specified, using first entry_id: %s", entry_id)
         return entry_id
     
     raise ValueError("No Media Index integration instance found")

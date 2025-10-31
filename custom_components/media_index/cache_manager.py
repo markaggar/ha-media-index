@@ -579,7 +579,8 @@ class CacheManager:
         params = []
         
         if folder:
-            query += " AND m.folder LIKE ?"
+            # Use case-insensitive matching for folder paths (handles /media/Photo vs /media/photo)
+            query += " AND LOWER(m.folder) LIKE LOWER(?)"
             params.append(f"{folder}%")
         
         if file_type:
