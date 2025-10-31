@@ -184,16 +184,24 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     # Check for target in multiple locations (HA passes it differently depending on context)
     entity_id = None
     
-    # Method 1: Check call.data (Developer Tools, automations)
+    # Method 1: Check call.data['target'] (Developer Tools, automations, REST API)
     if 'target' in call.data:
         target = call.data['target']
         if isinstance(target, dict) and 'entity_id' in target:
             entity_id = target['entity_id']
             if isinstance(entity_id, list):
                 entity_id = entity_id[0]  # Use first entity
-            _LOGGER.debug("Found target entity in call.data: %s", entity_id)
+            _LOGGER.debug("Found target entity in call.data['target']: %s", entity_id)
     
-    # Method 2: Check call.context.target (some service call contexts)
+    # Method 2: Check call.data['entity_id'] directly (WebSocket with target selector)
+    # HA WebSocket transforms target.entity_id -> call.data['entity_id']
+    if not entity_id and 'entity_id' in call.data:
+        entity_id = call.data['entity_id']
+        if isinstance(entity_id, list):
+            entity_id = entity_id[0]  # Use first entity
+        _LOGGER.debug("Found entity_id directly in call.data: %s", entity_id)
+    
+    # Method 3: Check call.context.target (some service call contexts)
     if not entity_id and hasattr(call, 'context') and hasattr(call.context, 'target'):
         target = call.context.target
         if isinstance(target, dict) and 'entity_id' in target:
@@ -236,6 +244,9 @@ def _register_services(hass: HomeAssistant):
         entry_id = _get_entry_id_from_call(hass, call)
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
         
+        _LOGGER.warning("🔍 get_random_items: entry_id=%s, call.data=%s, target=%s", 
+                       entry_id, call.data, call.data.get("target"))
+        
         items = await cache_manager.get_random_files(
             count=call.data.get("count", 10),
             folder=call.data.get("folder"),
@@ -244,8 +255,10 @@ def _register_services(hass: HomeAssistant):
             date_to=call.data.get("date_to"),
         )
         
-        _LOGGER.info("Retrieved %d random items", len(items))
-        return {"items": items}
+        result = {"items": items}
+        _LOGGER.warning("🔍 Retrieved %d random items from entry_id %s", len(items), entry_id)
+        _LOGGER.warning("🔍 Returning: %s", str(result)[:200])
+        return result
     
     async def handle_get_file_metadata(call):
         """Handle get_file_metadata service call."""
