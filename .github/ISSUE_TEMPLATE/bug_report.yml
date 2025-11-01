@@ -1,0 +1,50 @@
+name: Bug Report
+description: File a bug report for the Media Index integration
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+        
+  - type: input
+    id: version
+    attributes:
+      label: Media Index Version
+      description: What version of the integration are you running?
+      placeholder: e.g., 1.2.0
+    validations:
+      required: true
+      
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Version
+      description: What version of Home Assistant are you running?
+      placeholder: e.g., 2024.11.0
+    validations:
+      required: true
+      
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+      
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Please copy and paste any relevant log output (check Settings -> System -> Logs)
+      render: shell
+      
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Please share your Media Index integration configuration (remove any sensitive paths)
+      render: yaml
