@@ -45,3 +45,4 @@ htmlcov/
 # Local development
 *.local
 .env
+scripts/
