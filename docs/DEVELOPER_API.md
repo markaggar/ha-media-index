@@ -820,24 +820,6 @@ const wsCall = {
    }
    ```
 
-### Issue: Network Share Files Not Detected by Watcher
-
-**Symptom:** New files added to watched folders are not indexed until next scheduled scan.
-
-**Root Cause:** inotify (default file system watcher) does not work on network filesystems (CIFS/SMB/NFS).
-
-**Solution:** Media Index v1.2+ automatically uses `PollingObserver` for network share compatibility. Verify watcher is running:
-
-1. Check integration logs for: `"Using PollingObserver for network filesystem compatibility"`
-2. Verify `watched_folders` configuration in integration options
-3. Check sensor attribute: `watched_folders` should list your folders
-4. Test by adding a file - should be detected within 1-2 seconds
-
-If watcher still not working:
-- Ensure `enable_watcher` is not set to `false` in configuration
-- Check for errors in Home Assistant logs: "Failed to start watcher"
-- Verify folder paths are accessible from HA container
-
 ### Issue: Folder Filter Returns No Results
 
 **Symptom:** Specifying `folder` parameter returns empty array even though files exist in that folder.
