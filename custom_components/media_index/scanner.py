@@ -169,12 +169,22 @@ class MediaScanner:
                         file_id = await self.cache.add_file(metadata)
                         files_added += 1
                         
-                        # Extract and store metadata
+                        # Extract and store metadata (wrap blocking I/O in executor)
                         exif_data = None
                         if metadata['file_type'] == 'image' and file_id > 0:
-                            exif_data = ExifParser.extract_exif(metadata['path'])
+                            if self.hass:
+                                exif_data = await self.hass.async_add_executor_job(
+                                    ExifParser.extract_exif, metadata['path']
+                                )
+                            else:
+                                exif_data = ExifParser.extract_exif(metadata['path'])
                         elif metadata['file_type'] == 'video' and file_id > 0:
-                            exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
+                            if self.hass:
+                                exif_data = await self.hass.async_add_executor_job(
+                                    VideoMetadataParser.extract_metadata, metadata['path']
+                                )
+                            else:
+                                exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
                         
                         if exif_data and file_id > 0:
                             await self.cache.add_exif_data(file_id, exif_data)

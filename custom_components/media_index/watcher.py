@@ -141,7 +141,7 @@ class MediaWatcher:
         self._watched_paths = []
         _LOGGER.info("MediaWatcher initialized")
     
-    def start_watching(self, base_folder: str, watched_folders: Optional[list] = None):
+    async def start_watching(self, base_folder: str, watched_folders: Optional[list] = None):
         """Start watching media folders for changes.
         
         Args:
@@ -181,8 +181,8 @@ class MediaWatcher:
                 self._watched_paths.append(path)
                 _LOGGER.info("Watching for changes: %s", path)
             
-            # Start observer
-            self.observer.start()
+            # Start observer (wrapped to avoid blocking scandir call)
+            await self.hass.async_add_executor_job(self.observer.start)
             _LOGGER.info("File system watcher started")
         
         except Exception as err:

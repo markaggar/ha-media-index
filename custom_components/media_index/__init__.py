@@ -172,7 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Start file system watcher if enabled
     if config.get(CONF_ENABLE_WATCHER, DEFAULT_ENABLE_WATCHER):
         _LOGGER.info("Starting file system watcher")
-        watcher.start_watching(base_folder, watched_folders)
+        await watcher.start_watching(base_folder, watched_folders)
     
     # Register services (only once, on first entry setup)
     if not hass.services.has_service(DOMAIN, SERVICE_GET_RANDOM_ITEMS):
