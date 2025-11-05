@@ -234,6 +234,11 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
         entity_registry = er.async_get(hass)
         entity_entry = entity_registry.async_get(entity_id)
         
+        # If not found and entity_id doesn't end with _total_files, try adding it
+        if not entity_entry and not entity_id.endswith("_total_files"):
+            _LOGGER.debug("Entity %s not found, trying with _total_files suffix", entity_id)
+            entity_entry = entity_registry.async_get(f"{entity_id}_total_files")
+        
         if entity_entry and entity_entry.config_entry_id:
             _LOGGER.info("Routing to integration instance from entity %s: %s", entity_id, entity_entry.config_entry_id)
             return entity_entry.config_entry_id
