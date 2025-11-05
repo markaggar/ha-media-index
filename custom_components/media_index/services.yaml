@@ -45,6 +45,86 @@ get_random_items:
       example: "2023-12-31"
       selector:
         date:
+    priority_new_files:
+      name: Priority New Files
+      description: If true, prioritize recently scanned files before random selection
+      default: false
+      selector:
+        boolean:
+    new_files_threshold_seconds:
+      name: New Files Threshold
+      description: Seconds threshold for considering files "new" (default 3600 = 1 hour)
+      default: 3600
+      selector:
+        number:
+          min: 60
+          max: 86400
+          mode: box
+
+get_ordered_files:
+  name: Get Ordered Media Files
+  description: Get ordered media files with configurable sort field and direction
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    count:
+      name: Count
+      description: Maximum number of files to return
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 1000
+          mode: box
+    folder:
+      name: Folder
+      description: Folder path to filter by (relative to base folder)
+      example: "Photos/2023"
+      selector:
+        text:
+    recursive:
+      name: Recursive
+      description: Include subfolders (sorts across all files when true)
+      default: true
+      selector:
+        boolean:
+    file_type:
+      name: File Type
+      description: Filter by file type (image or video)
+      example: "image"
+      selector:
+        select:
+          options:
+            - "image"
+            - "video"
+    order_by:
+      name: Order By
+      description: Which field to sort by
+      default: "date_taken"
+      selector:
+        select:
+          options:
+            - label: "Date Taken (EXIF)"
+              value: "date_taken"
+            - label: "Filename (Alphabetical)"
+              value: "filename"
+            - label: "Path (Folder Hierarchy)"
+              value: "path"
+            - label: "Modified Time (Filesystem)"
+              value: "modified_time"
+    order_direction:
+      name: Order Direction
+      description: Sort direction (ascending or descending)
+      default: "desc"
+      selector:
+        select:
+          options:
+            - label: "Descending (Newest/Z-A First)"
+              value: "desc"
+            - label: "Ascending (Oldest/A-Z First)"
+              value: "asc"
 
 get_file_metadata:
   name: Get File Metadata

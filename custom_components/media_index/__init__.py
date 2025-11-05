@@ -23,6 +23,7 @@ from .const import (
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
     SERVICE_GET_RANDOM_ITEMS,
+    SERVICE_GET_ORDERED_FILES,
     SERVICE_GET_FILE_METADATA,
     SERVICE_GEOCODE_FILE,
     SERVICE_SCAN_FOLDER,
@@ -50,6 +51,17 @@ SERVICE_GET_RANDOM_ITEMS_SCHEMA = vol.Schema({
     vol.Optional("file_type"): vol.In(["image", "video"]),
     vol.Optional("date_from"): cv.string,
     vol.Optional("date_to"): cv.string,
+    vol.Optional("priority_new_files", default=False): cv.boolean,
+    vol.Optional("new_files_threshold_seconds", default=3600): cv.positive_int,
+}, extra=vol.ALLOW_EXTRA)
+
+SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("count", default=50): cv.positive_int,
+    vol.Optional("folder"): cv.string,
+    vol.Optional("recursive", default=True): cv.boolean,
+    vol.Optional("file_type"): vol.In(["image", "video"]),
+    vol.Optional("order_by", default="date_taken"): vol.In(["date_taken", "filename", "path", "modified_time"]),
+    vol.Optional("order_direction", default="desc"): vol.In(["asc", "desc"]),
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema({
@@ -259,11 +271,33 @@ def _register_services(hass: HomeAssistant):
             file_type=call.data.get("file_type"),
             date_from=call.data.get("date_from"),
             date_to=call.data.get("date_to"),
+            priority_new_files=call.data.get("priority_new_files", False),
+            new_files_threshold_seconds=call.data.get("new_files_threshold_seconds", 3600),
         )
         
         result = {"items": items}
         _LOGGER.warning("🔍 Retrieved %d random items from entry_id %s", len(items), entry_id)
         _LOGGER.warning("🔍 Returning: %s", str(result)[:200])
+        return result
+    
+    async def handle_get_ordered_files(call):
+        """Handle get_ordered_files service call."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        
+        _LOGGER.debug("get_ordered_files: entry_id=%s, call.data=%s", entry_id, call.data)
+        
+        items = await cache_manager.get_ordered_files(
+            count=call.data.get("count", 50),
+            folder=call.data.get("folder"),
+            recursive=call.data.get("recursive", True),
+            file_type=call.data.get("file_type"),
+            order_by=call.data.get("order_by", "date_taken"),
+            order_direction=call.data.get("order_direction", "desc"),
+        )
+        
+        result = {"items": items}
+        _LOGGER.debug("Retrieved %d ordered items from entry_id %s", len(items), entry_id)
         return result
     
     async def handle_get_file_metadata(call):
@@ -639,6 +673,14 @@ def _register_services(hass: HomeAssistant):
         SERVICE_GET_RANDOM_ITEMS,
         handle_get_random_items,
         schema=SERVICE_GET_RANDOM_ITEMS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_ORDERED_FILES,
+        handle_get_ordered_files,
+        schema=SERVICE_GET_ORDERED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     

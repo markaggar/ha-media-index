@@ -536,11 +536,14 @@ class CacheManager:
         folder: str | None = None,
         file_type: str | None = None,
         date_from: str | None = None,
-        date_to: str | None = None
+        date_to: str | None = None,
+        priority_new_files: bool = False,
+        new_files_threshold_seconds: int = 3600
     ) -> list[dict]:
         """Get random media files with optional filters and EXIF data.
         
         Includes geocoding status to enable progressive on-demand geocoding.
+        If priority_new_files=True, prioritizes recently scanned files.
         
         Args:
             count: Number of random files to return
@@ -548,6 +551,8 @@ class CacheManager:
             file_type: Filter by file type ('image' or 'video')
             date_from: Filter by date >= this value (YYYY-MM-DD)
             date_to: Filter by date <= this value (YYYY-MM-DD)
+            priority_new_files: If True, prioritize recently scanned files
+            new_files_threshold_seconds: Threshold in seconds for "new" files (default 1 hour)
             
         Returns:
             List of file records with metadata and EXIF data including:
@@ -556,6 +561,167 @@ class CacheManager:
             - latitude, longitude: float (if has_coordinates)
             - location_name, location_city, location_country: str (if is_geocoded)
             - date_taken: timestamp (if available)
+        """
+        import time
+        
+        if priority_new_files:
+            # Priority queue mode: Get new files first, then fill with random
+            current_time = int(time.time())
+            threshold_time = current_time - new_files_threshold_seconds
+            
+            # Query 1: Get newly scanned files (last_scanned > threshold)
+            new_files_query = """
+                SELECT 
+                    m.*,
+                    e.date_taken,
+                    e.latitude,
+                    e.longitude,
+                    e.location_name,
+                    e.location_city,
+                    e.location_state,
+                    e.location_country,
+                    e.is_favorited,
+                    e.camera_make,
+                    e.camera_model
+                FROM media_files m
+                LEFT JOIN exif_data e ON m.id = e.file_id
+                WHERE m.last_scanned > ?
+                  AND m.folder NOT LIKE '%/_Junk%'
+                  AND m.folder NOT LIKE '%/_Edit%'
+            """
+            params = [threshold_time]
+            
+            if folder:
+                new_files_query += " AND LOWER(m.folder) LIKE LOWER(?)"
+                params.append(f"{folder}%")
+            
+            if file_type:
+                new_files_query += " AND m.file_type = ?"
+                params.append(file_type.lower())
+            
+            if date_from:
+                new_files_query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
+                params.append(str(date_from))
+            
+            if date_to:
+                new_files_query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
+                params.append(str(date_to))
+            
+            new_files_query += " ORDER BY m.last_scanned DESC LIMIT ?"
+            params.append(int(count))
+            
+            _LOGGER.debug("Priority queue query: %s with params: %s", new_files_query, params)
+            
+            async with self._db.execute(new_files_query, tuple(params)) as cursor:
+                new_files_rows = await cursor.fetchall()
+            
+            new_files = [dict(row) for row in new_files_rows]
+            
+            # Query 2: Fill remaining slots with random files (excluding new files)
+            remaining = count - len(new_files)
+            if remaining > 0:
+                exclude_ids = [f['id'] for f in new_files]
+                random_files = await self._get_random_excluding(
+                    count=remaining,
+                    exclude_ids=exclude_ids,
+                    folder=folder,
+                    file_type=file_type,
+                    date_from=date_from,
+                    date_to=date_to
+                )
+                result = new_files + random_files
+            else:
+                result = new_files[:count]
+            
+            # Add geocoding status flags
+            for item in result:
+                item['has_coordinates'] = item.get('latitude') is not None and item.get('longitude') is not None
+                item['is_geocoded'] = item.get('location_city') is not None
+            
+            _LOGGER.debug("Priority queue returned %d new files + %d random files", 
+                         len(new_files), len(result) - len(new_files))
+            return result
+        
+        else:
+            # Standard random mode (backward compatible)
+            query = """
+                SELECT 
+                    m.*,
+                    e.date_taken,
+                    e.latitude,
+                    e.longitude,
+                    e.location_name,
+                    e.location_city,
+                    e.location_state,
+                    e.location_country,
+                    e.is_favorited,
+                    e.camera_make,
+                    e.camera_model
+                FROM media_files m
+                LEFT JOIN exif_data e ON m.id = e.file_id
+                WHERE 1=1
+                    AND m.folder NOT LIKE '%/_Junk%'
+                    AND m.folder NOT LIKE '%/_Edit%'
+            """
+            params = []
+            
+            if folder:
+                # Use case-insensitive matching for folder paths (handles /media/Photo vs /media/photo)
+                query += " AND LOWER(m.folder) LIKE LOWER(?)"
+                params.append(f"{folder}%")
+            
+            if file_type:
+                query += " AND m.file_type = ?"
+                params.append(file_type.lower())
+            
+            if date_from:
+                query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
+                params.append(str(date_from))
+            
+            if date_to:
+                query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
+                params.append(str(date_to))
+            
+            query += " ORDER BY RANDOM() LIMIT ?"
+            params.append(int(count))
+            
+            _LOGGER.debug("Query: %s with params: %s", query, params)
+            
+            async with self._db.execute(query, tuple(params)) as cursor:
+                rows = await cursor.fetchall()
+            
+            # Convert rows to dicts and add geocoding status
+            result = []
+            for row in rows:
+                item = dict(row)
+                # Add progressive geocoding flags
+                item['has_coordinates'] = item.get('latitude') is not None and item.get('longitude') is not None
+                item['is_geocoded'] = item.get('location_city') is not None
+                result.append(item)
+            
+            return result
+    
+    async def _get_random_excluding(
+        self,
+        count: int,
+        exclude_ids: list[int],
+        folder: str | None = None,
+        file_type: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None
+    ) -> list[dict]:
+        """Get random files excluding specified IDs (helper for priority queue).
+        
+        Args:
+            count: Number of files to return
+            exclude_ids: List of file IDs to exclude
+            folder: Optional folder filter
+            file_type: Optional file type filter
+            date_from: Optional date from filter
+            date_to: Optional date to filter
+            
+        Returns:
+            List of random file records excluding specified IDs
         """
         query = """
             SELECT 
@@ -573,13 +739,18 @@ class CacheManager:
             FROM media_files m
             LEFT JOIN exif_data e ON m.id = e.file_id
             WHERE 1=1
-                AND m.folder NOT LIKE '%/_Junk%'
-                AND m.folder NOT LIKE '%/_Edit%'
+              AND m.folder NOT LIKE '%/_Junk%'
+              AND m.folder NOT LIKE '%/_Edit%'
         """
         params = []
         
+        # Exclude new files already selected
+        if exclude_ids:
+            placeholders = ','.join('?' * len(exclude_ids))
+            query += f" AND m.id NOT IN ({placeholders})"
+            params.extend(exclude_ids)
+        
         if folder:
-            # Use case-insensitive matching for folder paths (handles /media/Photo vs /media/photo)
             query += " AND LOWER(m.folder) LIKE LOWER(?)"
             params.append(f"{folder}%")
         
@@ -598,7 +769,97 @@ class CacheManager:
         query += " ORDER BY RANDOM() LIMIT ?"
         params.append(int(count))
         
-        _LOGGER.debug("Query: %s with params: %s", query, params)
+        async with self._db.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+        
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['has_coordinates'] = item.get('latitude') is not None and item.get('longitude') is not None
+            item['is_geocoded'] = item.get('location_city') is not None
+            result.append(item)
+        
+        return result
+    
+    async def get_ordered_files(
+        self,
+        count: int = 50,
+        folder: str | None = None,
+        recursive: bool = True,
+        file_type: str | None = None,
+        order_by: str = "date_taken",
+        order_direction: str = "desc"
+    ) -> list[dict]:
+        """Get ordered media files with configurable sort field and direction.
+        
+        Recursive mode sorts across ALL files regardless of folder boundaries.
+        
+        Args:
+            count: Maximum number of files to return
+            folder: Filter by folder path
+            recursive: Include subfolders (sorts across all files when true)
+            file_type: Filter by file type ('image' or 'video')
+            order_by: Sort field - 'date_taken', 'filename', 'path', 'modified_time'
+            order_direction: Sort direction - 'asc' or 'desc'
+            
+        Returns:
+            List of ordered file records with metadata
+        """
+        query = """
+            SELECT 
+                m.*,
+                e.date_taken,
+                e.latitude,
+                e.longitude,
+                e.location_name,
+                e.location_city,
+                e.location_state,
+                e.location_country,
+                e.is_favorited,
+                e.camera_make,
+                e.camera_model
+            FROM media_files m
+            LEFT JOIN exif_data e ON m.id = e.file_id
+            WHERE 1=1
+              AND m.folder NOT LIKE '%/_Junk%'
+              AND m.folder NOT LIKE '%/_Edit%'
+        """
+        params = []
+        
+        if folder:
+            if recursive:
+                # Include subfolders
+                query += " AND LOWER(m.folder) LIKE LOWER(?)"
+                params.append(f"{folder}%")
+            else:
+                # Exact folder match only
+                query += " AND LOWER(m.folder) = LOWER(?)"
+                params.append(folder)
+        
+        if file_type:
+            query += " AND m.file_type = ?"
+            params.append(file_type.lower())
+        
+        # Determine sort field with fallback
+        if order_by == "date_taken":
+            sort_field = "COALESCE(e.date_taken, m.modified_time)"
+        elif order_by == "filename":
+            sort_field = "m.filename"
+        elif order_by == "path":
+            # Full path for sorting (folder + filename)
+            sort_field = "m.folder || '/' || m.filename"
+        elif order_by == "modified_time":
+            sort_field = "m.modified_time"
+        else:
+            # Default to date_taken
+            sort_field = "COALESCE(e.date_taken, m.modified_time)"
+        
+        # Add sort direction
+        direction = "DESC" if order_direction == "desc" else "ASC"
+        query += f" ORDER BY {sort_field} {direction} LIMIT ?"
+        params.append(int(count))
+        
+        _LOGGER.debug("Ordered query: %s with params: %s", query, params)
         
         async with self._db.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
@@ -607,7 +868,6 @@ class CacheManager:
         result = []
         for row in rows:
             item = dict(row)
-            # Add progressive geocoding flags
             item['has_coordinates'] = item.get('latitude') is not None and item.get('longitude') is not None
             item['is_geocoded'] = item.get('location_city') is not None
             result.append(item)
