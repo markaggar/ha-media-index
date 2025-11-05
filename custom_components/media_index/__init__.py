@@ -262,8 +262,7 @@ def _register_services(hass: HomeAssistant):
         entry_id = _get_entry_id_from_call(hass, call)
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
         
-        _LOGGER.warning("🔍 get_random_items: entry_id=%s, call.data=%s, target=%s", 
-                       entry_id, call.data, call.data.get("target"))
+        _LOGGER.debug("get_random_items: entry_id=%s, call.data=%s", entry_id, call.data)
         
         items = await cache_manager.get_random_files(
             count=call.data.get("count", 10),
@@ -276,8 +275,7 @@ def _register_services(hass: HomeAssistant):
         )
         
         result = {"items": items}
-        _LOGGER.warning("🔍 Retrieved %d random items from entry_id %s", len(items), entry_id)
-        _LOGGER.warning("🔍 Returning: %s", str(result)[:200])
+        _LOGGER.debug("Retrieved %d random items from entry_id %s", len(items), entry_id)
         return result
     
     async def handle_get_ordered_files(call):
