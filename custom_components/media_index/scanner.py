@@ -166,37 +166,51 @@ class MediaScanner:
                 # Add files to cache
                 for metadata in media_files:
                     try:
-                        file_id = await self.cache.add_file(metadata)
-                        files_added += 1
-                        
-                        # Extract and store metadata (wrap blocking I/O in executor)
+                        # Extract EXIF first for images to get width/height/orientation
                         exif_data = None
-                        if metadata['file_type'] == 'image' and file_id > 0:
+                        if metadata['file_type'] == 'image':
                             if self.hass:
                                 exif_data = await self.hass.async_add_executor_job(
                                     ExifParser.extract_exif, metadata['path']
                                 )
                             else:
                                 exif_data = ExifParser.extract_exif(metadata['path'])
+                            
+                            # Add image dimensions to metadata for media_files table
+                            if exif_data:
+                                metadata['width'] = exif_data.get('width')
+                                metadata['height'] = exif_data.get('height')
+                                metadata['orientation'] = exif_data.get('orientation')
+                        
+                        file_id = await self.cache.add_file(metadata)
+                        files_added += 1
+                        
+                        # Store EXIF data in exif_data table
+                        if exif_data and file_id > 0:
+                            await self.cache.add_exif_data(file_id, exif_data)
+                            _LOGGER.debug("Extracted metadata for %s: %s", metadata['filename'], metadata['file_type'])
+                            
+                            # Set is_favorited based on XMP:Rating (5 stars = favorite, < 5 = not favorite)
+                            rating = exif_data.get('rating') or 0
+                            is_favorite = rating >= 5
+                            await self.cache.update_favorite(metadata['path'], is_favorite)
+                            if is_favorite:
+                                _LOGGER.debug("Marked %s as favorite (rating=%d)", metadata['filename'], rating)
                         elif metadata['file_type'] == 'video' and file_id > 0:
+                            # Extract video metadata after adding file
                             if self.hass:
                                 exif_data = await self.hass.async_add_executor_job(
                                     VideoMetadataParser.extract_metadata, metadata['path']
                                 )
                             else:
                                 exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
+                            
+                            if exif_data:
+                                await self.cache.add_exif_data(file_id, exif_data)
                         
+                        # Geocode GPS coordinates if available, enabled, and not already geocoded
+                        # Only run if we have exif_data (from images or videos)
                         if exif_data and file_id > 0:
-                            await self.cache.add_exif_data(file_id, exif_data)
-                            _LOGGER.debug("Extracted metadata for %s: %s", metadata['filename'], metadata['file_type'])
-                            
-                            # Set is_favorited based on XMP:Rating (5 stars = favorite)
-                            rating = exif_data.get('rating') or 0
-                            if rating >= 5:
-                                await self.cache.update_favorite(metadata['path'], True)
-                                _LOGGER.debug("Marked %s as favorite (rating=%d)", metadata['filename'], rating)
-                            
-                            # Geocode GPS coordinates if available, enabled, and not already geocoded
                             has_coords = exif_data.get('latitude') and exif_data.get('longitude')
                             
                             # Check if this file already has geocoded location
@@ -297,19 +311,26 @@ class MediaScanner:
             if not metadata:
                 return False
             
+            # Extract EXIF first for images to get width/height/orientation
+            exif_data = None
+            if metadata['file_type'] == 'image':
+                exif_data = ExifParser.extract_exif(file_path)
+                
+                # Add image dimensions to metadata for media_files table
+                if exif_data:
+                    metadata['width'] = exif_data.get('width')
+                    metadata['height'] = exif_data.get('height')
+                    metadata['orientation'] = exif_data.get('orientation')
+            elif metadata['file_type'] == 'video':
+                exif_data = VideoMetadataParser.extract_metadata(file_path)
+            
             # Add to database
             file_id = await self.cache.add_file(metadata)
             if file_id <= 0:
                 _LOGGER.warning("Failed to add file to database: %s", file_path)
                 return False
             
-            # Extract EXIF/video metadata
-            exif_data = None
-            if metadata['file_type'] == 'image':
-                exif_data = ExifParser.extract_exif(file_path)
-            elif metadata['file_type'] == 'video':
-                exif_data = VideoMetadataParser.extract_metadata(file_path)
-            
+            # Store EXIF/video metadata in exif_data table
             if exif_data:
                 await self.cache.add_exif_data(file_id, exif_data)
                 

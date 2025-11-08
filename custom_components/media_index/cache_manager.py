@@ -87,6 +87,7 @@ class CacheManager:
                 date_taken INTEGER,
                 latitude REAL,
                 longitude REAL,
+                altitude REAL,
                 location_name TEXT,
                 location_city TEXT,
                 location_state TEXT,
@@ -97,6 +98,10 @@ class CacheManager:
                 aperture REAL,
                 shutter_speed TEXT,
                 focal_length REAL,
+                focal_length_35mm INTEGER,
+                exposure_compensation TEXT,
+                metering_mode TEXT,
+                white_balance TEXT,
                 flash TEXT,
                 FOREIGN KEY (file_id) REFERENCES media_files(id) ON DELETE CASCADE
             )
@@ -190,6 +195,33 @@ class CacheManager:
         
         await self._db.commit()
         _LOGGER.debug("Database schema created/verified")
+        
+        # Run migrations for existing databases
+        await self._run_migrations()
+    
+    async def _run_migrations(self) -> None:
+        """Run database migrations for schema updates."""
+        # Check if new columns exist in exif_data table
+        async with self._db.execute("PRAGMA table_info(exif_data)") as cursor:
+            columns = await cursor.fetchall()
+            column_names = [col[1] for col in columns]
+        
+        # Add new EXIF columns if they don't exist
+        new_columns = {
+            'altitude': 'REAL',
+            'focal_length_35mm': 'INTEGER',
+            'exposure_compensation': 'TEXT',
+            'metering_mode': 'TEXT',
+            'white_balance': 'TEXT'
+        }
+        
+        for col_name, col_type in new_columns.items():
+            if col_name not in column_names:
+                _LOGGER.info("Adding column '%s' to exif_data table", col_name)
+                await self._db.execute(f"ALTER TABLE exif_data ADD COLUMN {col_name} {col_type}")
+        
+        await self._db.commit()
+        _LOGGER.debug("Database migrations completed")
     
     async def get_total_files(self) -> int:
         """Get total number of indexed files.
@@ -289,8 +321,12 @@ class CacheManager:
         await self._db.execute("""
             INSERT OR REPLACE INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
-             created_time, last_scanned, orientation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_time, last_scanned, width, height, orientation,
+             is_favorited, rating, rated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                    COALESCE((SELECT is_favorited FROM media_files WHERE path = ?), ?),
+                    COALESCE((SELECT rating FROM media_files WHERE path = ?), ?),
+                    (SELECT rated_at FROM media_files WHERE path = ?))
         """, (
             file_data['path'],
             file_data['filename'],
@@ -300,7 +336,13 @@ class CacheManager:
             file_data['modified_time'],
             file_data.get('created_time'),
             int(datetime.now().timestamp()),
+            file_data.get('width'),
+            file_data.get('height'),
             file_data.get('orientation'),
+            # Preserve existing is_favorited/rating/rated_at if row exists, else use defaults
+            file_data['path'], file_data.get('is_favorited', 0),
+            file_data['path'], file_data.get('rating', 0),
+            file_data['path'],
         ))
         
         await self._db.commit()
@@ -322,28 +364,37 @@ class CacheManager:
             file_id: ID of the file in media_files table
             exif_data: Dictionary with EXIF metadata
         """
-        # Check if EXIF data already exists with geocoded location
-        existing_location = None
+        # Skip if no EXIF data provided
+        if not exif_data:
+            return
+        
+        # Check if EXIF data already exists - preserve geocoded location and favorite data
+        existing_data = None
         async with self._db.execute("""
-            SELECT location_name, location_city, location_state, location_country
+            SELECT location_name, location_city, location_state, location_country,
+                   rating, is_favorited
             FROM exif_data
             WHERE file_id = ?
         """, (file_id,)) as cursor:
             row = await cursor.fetchone()
-            if row and row[1]:  # If location_city is populated
-                existing_location = {
+            if row:
+                existing_data = {
                     'location_name': row[0],
                     'location_city': row[1],
                     'location_state': row[2],
-                    'location_country': row[3]
+                    'location_country': row[3],
+                    'rating': row[4],
+                    'is_favorited': row[5]
                 }
         
         await self._db.execute("""
             INSERT OR REPLACE INTO exif_data 
-            (file_id, camera_make, camera_model, date_taken, latitude, longitude,
+            (file_id, camera_make, camera_model, date_taken, latitude, longitude, altitude,
              location_name, location_city, location_state, location_country,
-             iso, aperture, shutter_speed, focal_length, flash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             rating, is_favorited,
+             iso, aperture, shutter_speed, focal_length, focal_length_35mm,
+             exposure_compensation, metering_mode, white_balance, flash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             file_id,
             exif_data.get('camera_make'),
@@ -351,15 +402,24 @@ class CacheManager:
             exif_data.get('date_taken'),
             exif_data.get('latitude'),
             exif_data.get('longitude'),
-            # Preserve existing geocoded location if available
-            existing_location['location_name'] if existing_location else None,
-            existing_location['location_city'] if existing_location else None,
-            existing_location['location_state'] if existing_location else None,
-            existing_location['location_country'] if existing_location else None,
+            exif_data.get('altitude'),
+            # Preserve existing geocoded location if available, otherwise use None
+            existing_data['location_name'] if existing_data and existing_data.get('location_city') else None,
+            existing_data['location_city'] if existing_data and existing_data.get('location_city') else None,
+            existing_data['location_state'] if existing_data and existing_data.get('location_city') else None,
+            existing_data['location_country'] if existing_data and existing_data.get('location_city') else None,
+            # Use rating from EXIF if present, otherwise preserve existing
+            exif_data.get('rating') if exif_data.get('rating') is not None else (existing_data.get('rating') if existing_data else None),
+            # Use is_favorited from EXIF if present, otherwise preserve existing
+            exif_data.get('is_favorited') if exif_data.get('is_favorited') is not None else (existing_data.get('is_favorited') if existing_data else 0),
             exif_data.get('iso'),
             exif_data.get('aperture'),
             exif_data.get('shutter_speed'),
             exif_data.get('focal_length'),
+            exif_data.get('focal_length_35mm'),
+            exif_data.get('exposure_compensation'),
+            exif_data.get('metering_mode'),
+            exif_data.get('white_balance'),
             exif_data.get('flash'),
         ))
         
@@ -954,11 +1014,12 @@ class CacheManager:
             True if successful, False if file not found
         """
         favorite_value = 1 if is_favorite else 0
+        rating_value = 5 if is_favorite else 0
         
-        # Update media_files table
+        # Update media_files table - set both is_favorited and rating
         async with self._db.execute(
-            "UPDATE media_files SET is_favorited = ? WHERE path = ?",
-            (favorite_value, file_path)
+            "UPDATE media_files SET is_favorited = ?, rating = ? WHERE path = ?",
+            (favorite_value, rating_value, file_path)
         ) as cursor:
             rows_affected = cursor.rowcount
         
@@ -966,9 +1027,9 @@ class CacheManager:
         # exif_data uses file_id (FK to media_files.id), so we need a subquery
         async with self._db.execute(
             """UPDATE exif_data 
-               SET is_favorited = ? 
+               SET is_favorited = ?, rating = ?
                WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
-            (favorite_value, file_path)
+            (favorite_value, rating_value, file_path)
         ) as cursor:
             exif_rows_affected = cursor.rowcount
         

@@ -98,24 +98,24 @@ class MediaFileEventHandler(FileSystemEventHandler):
     async def _handle_new_file(self, file_path: str):
         """Handle new file addition."""
         try:
-            metadata = await self.hass.async_add_executor_job(
-                self.scanner._get_file_metadata, file_path
-            )
-            if metadata:
-                await self.cache.add_file(metadata)
+            # Use scanner's scan_file which properly extracts and stores EXIF
+            success = await self.scanner.scan_file(file_path)
+            if success:
                 _LOGGER.info("Added new file to cache: %s", file_path)
+            else:
+                _LOGGER.warning("Failed to add new file: %s", file_path)
         except Exception as err:
             _LOGGER.error("Failed to add new file %s: %s", file_path, err)
     
     async def _handle_modified_file(self, file_path: str):
         """Handle file modification."""
         try:
-            metadata = await self.hass.async_add_executor_job(
-                self.scanner._get_file_metadata, file_path
-            )
-            if metadata:
-                await self.cache.add_file(metadata)
+            # Use scanner's scan_file which properly extracts and updates EXIF
+            success = await self.scanner.scan_file(file_path)
+            if success:
                 _LOGGER.info("Updated file in cache: %s", file_path)
+            else:
+                _LOGGER.warning("Failed to update file: %s", file_path)
         except Exception as err:
             _LOGGER.error("Failed to update file %s: %s", file_path, err)
     
