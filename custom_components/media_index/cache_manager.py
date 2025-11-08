@@ -667,17 +667,30 @@ class CacheManager:
                 new_files_query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
                 params.append(str(date_to))
             
-            new_files_query += " ORDER BY m.last_scanned DESC LIMIT ?"
-            params.append(int(count))
+            # V5 IMPROVEMENT: Get ALL recent files, then randomly sample
+            # This ensures even distribution - all recent files have equal chance
+            # Fixes "last 20" problem where only first 20 recent files were returned
+            new_files_query += " ORDER BY m.last_scanned DESC"
+            # Note: No LIMIT here - we get all recent files, then sample below
             
-            _LOGGER.debug("Priority queue query: %s with params: %s", new_files_query, params)
+            _LOGGER.debug("Priority queue query (all recent): %s with params: %s", new_files_query, params)
             
             async with self._db.execute(new_files_query, tuple(params)) as cursor:
                 new_files_rows = await cursor.fetchall()
             
-            new_files = [dict(row) for row in new_files_rows]
+            all_new_files = [dict(row) for row in new_files_rows]
+            _LOGGER.debug("Found %d total recent files (within %d sec threshold)", 
+                         len(all_new_files), new_files_threshold_seconds)
             
-            # Query 2: Fill remaining slots with random files (excluding new files)
+            # Randomly sample from recent files (up to count requested)
+            import random
+            if len(all_new_files) > count:
+                new_files = random.sample(all_new_files, count)
+                _LOGGER.debug("Randomly sampled %d from %d recent files", count, len(all_new_files))
+            else:
+                new_files = all_new_files
+            
+            # Query 2: Fill remaining slots with random non-recent files
             remaining = count - len(new_files)
             if remaining > 0:
                 exclude_ids = [f['id'] for f in new_files]
