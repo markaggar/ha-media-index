@@ -391,12 +391,12 @@ def _register_services(hass: HomeAssistant):
         file_path = call.data["file_path"]
         is_favorite = call.data.get("is_favorite", True)
         
-        _LOGGER.warning("🔍 mark_favorite called: path='%s', is_favorite=%s", file_path, is_favorite)
+        _LOGGER.debug("🔍 mark_favorite called: path='%s', is_favorite=%s", file_path, is_favorite)
         
         try:
             # Update database
             db_success = await cache_manager.update_favorite(file_path, is_favorite)
-            _LOGGER.warning("🔍 Database update result: %s", db_success)
+            _LOGGER.debug("🔍 Database update result: %s", db_success)
             
             # Write rating to file metadata
             # Rating 5 = favorite, Rating 0 = unfavorited
@@ -404,20 +404,20 @@ def _register_services(hass: HomeAssistant):
             
             # Determine file type to use appropriate parser
             file_ext = Path(file_path).suffix.lower()
-            _LOGGER.warning("🔍 File extension: %s, rating to write: %d", file_ext, rating)
+            _LOGGER.debug("🔍 File extension: %s, rating to write: %d", file_ext, rating)
             
             if file_ext in {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.heic'}:
-                _LOGGER.warning("🔍 Calling ExifParser.write_rating for: %s", file_path)
+                _LOGGER.debug("🔍 Calling ExifParser.write_rating for: %s", file_path)
                 success = await hass.async_add_executor_job(
                     ExifParser.write_rating, file_path, rating
                 )
-                _LOGGER.warning("🔍 ExifParser.write_rating result: %s", success)
+                _LOGGER.debug("🔍 ExifParser.write_rating result: %s", success)
             elif file_ext in {'.mp4', '.m4v', '.mov'}:
-                _LOGGER.warning("🔍 Calling VideoMetadataParser.write_rating for: %s", file_path)
+                _LOGGER.debug("🔍 Calling VideoMetadataParser.write_rating for: %s", file_path)
                 success = await hass.async_add_executor_job(
                     VideoMetadataParser.write_rating, file_path, rating
                 )
-                _LOGGER.warning("🔍 VideoMetadataParser.write_rating result: %s", success)
+                _LOGGER.debug("🔍 VideoMetadataParser.write_rating result: %s", success)
             else:
                 success = False
                 _LOGGER.warning("Unsupported file type for rating: %s", file_ext)
