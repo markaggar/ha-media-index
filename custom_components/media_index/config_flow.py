@@ -91,11 +91,32 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_SCAN_ON_STARTUP, default=DEFAULT_SCAN_ON_STARTUP
                     ): bool,
                     vol.Optional(
+                        CONF_SCAN_SCHEDULE, default=DEFAULT_SCAN_SCHEDULE
+                    ): vol.In(SCAN_SCHEDULES),
+                    vol.Optional(
                         CONF_EXTRACT_EXIF, default=DEFAULT_EXTRACT_EXIF
                     ): bool,
                     vol.Optional(
                         CONF_GEOCODE_ENABLED, default=DEFAULT_GEOCODE_ENABLED
                     ): bool,
+                    vol.Optional(
+                        CONF_GEOCODE_PRECISION, default=DEFAULT_GEOCODE_PRECISION
+                    ): vol.All(vol.Coerce(int), vol.Range(min=2, max=6)),
+                    vol.Optional(
+                        CONF_GEOCODE_NATIVE_LANGUAGE, default=DEFAULT_GEOCODE_NATIVE_LANGUAGE
+                    ): bool,
+                    vol.Optional(
+                        CONF_MAX_STARTUP_TIME, default=DEFAULT_MAX_STARTUP_TIME
+                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                    vol.Optional(
+                        CONF_CONCURRENT_SCANS, default=DEFAULT_CONCURRENT_SCANS
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Optional(
+                        CONF_BATCH_SIZE, default=DEFAULT_BATCH_SIZE
+                    ): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
+                    vol.Optional(
+                        CONF_CACHE_MAX_AGE, default=DEFAULT_CACHE_MAX_AGE
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 }
             ),
             errors=errors,

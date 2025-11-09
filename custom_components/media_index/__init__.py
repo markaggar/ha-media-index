@@ -1,6 +1,8 @@
 """Media Index integration for Home Assistant."""
+import asyncio
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import voluptuous as vol
@@ -9,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -16,12 +19,18 @@ from .const import (
     CONF_BASE_FOLDER,
     CONF_WATCHED_FOLDERS,
     CONF_SCAN_ON_STARTUP,
+    CONF_SCAN_SCHEDULE,
     CONF_ENABLE_WATCHER,
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
     DEFAULT_ENABLE_WATCHER,
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
+    DEFAULT_SCAN_SCHEDULE,
+    SCAN_SCHEDULE_STARTUP_ONLY,
+    SCAN_SCHEDULE_HOURLY,
+    SCAN_SCHEDULE_DAILY,
+    SCAN_SCHEDULE_WEEKLY,
     SERVICE_GET_RANDOM_ITEMS,
     SERVICE_GET_ORDERED_FILES,
     SERVICE_GET_FILE_METADATA,
@@ -104,6 +113,57 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+def _setup_scheduled_scan(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    scanner: MediaScanner,
+    base_folder: str,
+    watched_folders: list,
+    scan_schedule: str,
+) -> None:
+    """Setup scheduled scanning based on config.
+    
+    Args:
+        hass: Home Assistant instance
+        entry: Config entry
+        scanner: MediaScanner instance
+        base_folder: Base folder path
+        watched_folders: List of watched folders
+        scan_schedule: Schedule type (hourly/daily/weekly)
+    """
+    async def _scheduled_scan_callback(now):
+        """Run scheduled scan if not already running."""
+        # Check if scan already in progress
+        if scanner.is_scanning:
+            _LOGGER.warning(
+                "Scheduled scan skipped - scan already in progress. "
+                "This prevents blocking watch folders and concurrent scans."
+            )
+            return
+        
+        _LOGGER.info("Starting scheduled scan (%s) of %s", scan_schedule, base_folder)
+        await scanner.scan_folder(base_folder, watched_folders)
+    
+    # Determine scan interval
+    if scan_schedule == SCAN_SCHEDULE_HOURLY:
+        interval = timedelta(hours=1)
+    elif scan_schedule == SCAN_SCHEDULE_DAILY:
+        interval = timedelta(days=1)
+    elif scan_schedule == SCAN_SCHEDULE_WEEKLY:
+        interval = timedelta(weeks=1)
+    else:
+        _LOGGER.warning("Unknown scan schedule: %s", scan_schedule)
+        return
+    
+    _LOGGER.info("Setting up scheduled scan: %s (interval=%s)", scan_schedule, interval)
+    
+    # Register the scheduled scan
+    remove_listener = async_track_time_interval(hass, _scheduled_scan_callback, interval)
+    
+    # Store the remove listener so we can cancel on unload
+    entry.async_on_unload(remove_listener)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Media Index from a config entry."""
     _LOGGER.info("Setting up Media Index integration")
@@ -173,6 +233,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if config.get(CONF_ENABLE_WATCHER, DEFAULT_ENABLE_WATCHER):
         _LOGGER.info("Starting file system watcher")
         await watcher.start_watching(base_folder, watched_folders)
+    
+    # Setup scheduled scanning
+    scan_schedule = config.get(CONF_SCAN_SCHEDULE, DEFAULT_SCAN_SCHEDULE)
+    if scan_schedule != SCAN_SCHEDULE_STARTUP_ONLY:
+        _setup_scheduled_scan(hass, entry, scanner, base_folder, watched_folders, scan_schedule)
     
     # Register services (only once, on first entry setup)
     if not hass.services.has_service(DOMAIN, SERVICE_GET_RANDOM_ITEMS):
