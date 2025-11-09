@@ -20,8 +20,8 @@ get_random_items:
           mode: box
     folder:
       name: Folder
-      description: Optional folder path to filter by (relative to base folder)
-      example: "Photos/2023"
+      description: Optional folder path to filter by (full path including base folder)
+      example: "/media/photo/Photos/2023"
       selector:
         text:
     file_type:
@@ -80,8 +80,8 @@ get_ordered_files:
           mode: box
     folder:
       name: Folder
-      description: Folder path to filter by (relative to base folder)
-      example: "Photos/2023"
+      description: Folder path to filter by (full path including base folder)
+      example: "/media/photo/Photos/2023"
       selector:
         text:
     recursive:
@@ -138,7 +138,7 @@ get_file_metadata:
       name: File Path
       description: Full path to the media file
       required: true
-      example: "/media/Photos/vacation.jpg"
+      example: "/media/photo/Photos/2023/vacation.jpg"
       selector:
         text:
 
@@ -188,7 +188,7 @@ scan_folder:
     folder_path:
       name: Folder Path
       description: Folder to scan (defaults to base folder if not specified)
-      example: "/media/Photos"
+      example: "/media/photo/Photos"
       selector:
         text:
     force_rescan:
@@ -210,7 +210,7 @@ mark_favorite:
       name: File Path
       description: Full path to the media file
       required: true
-      example: "/media/Photo/PhotoLibrary/New/IMG_1234.jpg"
+      example: "/media/photo/Photos/2023/vacation.jpg"
       selector:
         text:
     is_favorite:
@@ -232,7 +232,7 @@ delete_media:
       name: File Path
       description: Full path to the media file to delete
       required: true
-      example: "/media/Photo/PhotoLibrary/New/IMG_1234.jpg"
+      example: "/media/photo/Photos/2023/bad hair day.jpg"
       selector:
         text:
 
@@ -248,7 +248,7 @@ mark_for_edit:
       name: File Path
       description: Full path to the media file to mark for editing
       required: true
-      example: "/media/Photo/PhotoLibrary/New/IMG_1234.jpg"
+      example: "/media/photo/Photos/2023/tits out.jpg"
       selector:
         text:
 
@@ -270,6 +270,6 @@ restore_edited_files:
     file_path:
       name: File Path
       description: Optional - restore only this specific file
-      example: "/media/Photo/PhotoLibrary/_Edit/IMG_1234.jpg"
+      example: "/media/photo/Photos/2023/tits out.jpg"
       selector:
         text:

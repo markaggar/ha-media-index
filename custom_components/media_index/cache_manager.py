@@ -318,6 +318,30 @@ class CacheManager:
         Returns:
             File ID
         """
+        # Check if file exists and if modified_time has changed
+        # Only update last_scanned if file is new OR modified_time changed
+        current_time = int(datetime.now().timestamp())
+        
+        async with self._db.execute(
+            "SELECT modified_time, last_scanned FROM media_files WHERE path = ?",
+            (file_data['path'],)
+        ) as cursor:
+            existing_row = await cursor.fetchone()
+        
+        # Determine last_scanned value:
+        # - If file doesn't exist: use current_time (new file)
+        # - If modified_time changed: use current_time (file was modified)
+        # - If modified_time unchanged: preserve existing last_scanned (file hasn't changed)
+        if existing_row is None:
+            # New file - use current timestamp
+            last_scanned_value = current_time
+        elif existing_row[0] != file_data['modified_time']:
+            # File modified - use current timestamp
+            last_scanned_value = current_time
+        else:
+            # File unchanged - preserve existing last_scanned
+            last_scanned_value = existing_row[1]
+        
         await self._db.execute("""
             INSERT OR REPLACE INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
@@ -335,7 +359,7 @@ class CacheManager:
             file_data.get('file_size'),
             file_data['modified_time'],
             file_data.get('created_time'),
-            int(datetime.now().timestamp()),
+            last_scanned_value,  # Use computed value instead of always current_time
             file_data.get('width'),
             file_data.get('height'),
             file_data.get('orientation'),
