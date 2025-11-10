@@ -3,13 +3,20 @@
     "step": {
       "user": {
         "title": "Set up Media Index",
-        "description": "Configure media folder scanning and indexing",
+        "description": "Configure media folder scanning and indexing. Base folder can be any accessible path: /media, network shares, or media-source:// URIs from other integrations.",
         "data": {
-          "base_folder": "Base media folder",
-          "watched_folders": "Watched folders (comma-separated)",
+          "base_folder": "Base media folder (any accessible path: /media, /config/www, network shares, etc.)",
+          "watched_folders": "Watched folders (comma-separated relative paths)",
           "scan_on_startup": "Scan on startup",
+          "scan_schedule": "Scan schedule",
           "extract_exif": "Extract EXIF metadata",
-          "geocode_enabled": "Enable geocoding (GPS to location names)"
+          "geocode_enabled": "Enable geocoding (GPS to location names)",
+          "geocode_precision": "Coordinate precision (2-6 decimal places)",
+          "geocode_native_language": "Use native language names",
+          "max_startup_time": "Max startup scan time (seconds)",
+          "concurrent_scans": "Concurrent scan workers",
+          "batch_size": "Batch size (files per batch)",
+          "cache_max_age_days": "Cache max age (days)"
         }
       }
     },
