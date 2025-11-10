@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Set up Media Index",
-        "description": "Configure media folder scanning and indexing. Base folder can be any accessible path: /media, network shares, or media-source:// URIs from other integrations.",
+        "description": "Configure media folder scanning and indexing. Base folder must be an actual filesystem path, NOT a media-source:// URI. Use the actual path that media_source maps to (e.g., /media, /config/www/local).",
         "data": {
-          "base_folder": "Base media folder (any accessible path: /media, /config/www, network shares, etc.)",
+          "base_folder": "Base media folder (filesystem path: /media, /config/www, NOT media-source://)",
           "watched_folders": "Watched folders (comma-separated relative paths)",
           "scan_on_startup": "Scan on startup",
           "scan_schedule": "Scan schedule",
