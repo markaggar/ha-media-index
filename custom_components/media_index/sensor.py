@@ -88,9 +88,8 @@ class MediaIndexTotalFilesSensor(SensorEntity):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": device_name,
-            "manufacturer": "Media Index Integration",
+            "manufacturer": "markaggar",
             "model": "Media Index",
-            "sw_version": "1.0.0",
         }
     
     async def async_update(self) -> None:
