@@ -47,3 +47,4 @@ htmlcov/
 .env
 scripts/
 test_*.py
+dev-docs/
