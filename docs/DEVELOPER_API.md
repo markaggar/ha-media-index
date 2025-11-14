@@ -91,13 +91,14 @@ const cloudItems = await this.hass.callWS({
 
 **All Media Index services** support the `target` parameter:
 
-- ✅ `get_random_items`
+- ✅ `get_random_items` - Random selection (enhanced in v1.3)
+- ✅ `get_ordered_files` - Sequential retrieval (new in v1.3)
 - ✅ `get_file_metadata`
 - ✅ `mark_favorite`
 - ✅ `delete_media`
 - ✅ `mark_for_edit`
-- ✅ `restore_edited_files`
-- ✅ `geocode_file`
+- ✅ `restore_edited_files` - Restore edited files (enhanced in v1.3)
+- ✅ `geocode_file` - Geocoding (enhanced in v1.3)
 - ✅ `scan_folder`
 
 ### Configuration in Custom Cards
@@ -199,18 +200,21 @@ const response = wsResponse?.response || wsResponse;
 
 Retrieve random media files with optional filtering.
 
+**Enhanced in v1.3**: Added `priority_new_files` parameter for prioritizing recently scanned files.
+
 ```javascript
 const wsResponse = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'get_random_items',
   service_data: {
-    count: 100,                    // Number of items to return
+    count: 100,                    // Number of items to return (1-100)
     folder: '/media/Photo/New',    // Optional: filter by folder
     file_type: 'image',            // Optional: 'image' or 'video'
-    favorites_only: false,         // Optional: only favorited files
     date_from: '2024-01-01',       // Optional: ISO date string
-    date_to: '2024-12-31'          // Optional: ISO date string
+    date_to: '2024-12-31',         // Optional: ISO date string
+    priority_new_files: true,      // v1.3: Prioritize recent files
+    new_files_threshold_seconds: 2592000  // v1.3: 30 days threshold
   },
   return_response: true
 });
@@ -228,6 +232,14 @@ if (response && response.items && Array.isArray(response.items)) {
   });
 }
 ```
+
+**Priority New Files Mode (v1.3):**
+
+When `priority_new_files: true`, uses 70/30 weighted random selection:
+- 70% chance: Select from files scanned within threshold
+- 30% chance: Fall back to older files if not enough recent files
+
+Perfect for "What's New" slideshows that prioritize recent content.
 
 **Response Item Structure:**
 
@@ -260,7 +272,48 @@ if (response && response.items && Array.isArray(response.items)) {
 }
 ```
 
-### 2. Mark File as Favorite
+### 2. Get Ordered Media Files
+
+**New in v1.3** - Retrieve media files in a specific order with cursor-based pagination.
+
+```javascript
+const wsResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'get_ordered_files',
+  service_data: {
+    count: 50,                     // Max items to return (1-1000)
+    folder: '/media/Photo/2023',   // Optional: filter by folder
+    recursive: true,               // Include subfolders
+    file_type: 'image',            // Optional: 'image' or 'video'
+    order_by: 'date_taken',        // 'date_taken', 'filename', 'path', 'modified_time'
+    order_direction: 'desc'        // 'asc' or 'desc'
+  },
+  return_response: true
+});
+
+const response = wsResponse?.response || wsResponse;
+
+if (response && response.items && Array.isArray(response.items)) {
+  console.log(`Received ${response.items.length} ordered items`);
+  
+  response.items.forEach(item => {
+    console.log('Path:', item.path);
+    console.log('Date Taken:', item.date_taken);
+    console.log('Order Value:', item.order_value);  // Value used for ordering
+  });
+}
+```
+
+**Use Cases:**
+- Sequential slideshows (oldest to newest or newest to oldest)
+- Alphabetical file listings
+- Date-sorted photo galleries
+- Folder hierarchy traversal
+
+**Response Structure:** Same as `get_random_items` with additional `order_value` field containing the value used for ordering.
+
+### 3. Mark File as Favorite
 
 Toggle favorite status for a file (writes to database and EXIF).
 
@@ -289,7 +342,7 @@ console.log('Favorite status updated:', response);
 }
 ```
 
-### 3. Delete Media File
+### 4. Delete Media File
 
 Move a file to the `_Junk` folder.
 
@@ -317,7 +370,7 @@ console.log('File deleted:', response);
 }
 ```
 
-### 4. Mark File for Editing
+### 5. Mark File for Editing
 
 Move a file to the `_Edit` folder.
 
@@ -333,7 +386,32 @@ const response = await this.hass.callWS({
 });
 ```
 
-### 5. Get File Metadata
+### 6. Restore Edited Files
+
+**Enhanced in v1.3**: Added `file_path` parameter for single-file restore.
+
+```javascript
+// Restore all edited files
+const response = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'restore_edited_files',
+  return_response: true
+});
+
+// v1.3: Restore specific file only
+const singleResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'restore_edited_files',
+  service_data: {
+    file_path: '/media/Photo/_Edit/vacation.jpg'
+  },
+  return_response: true
+});
+```
+
+### 7. Get File Metadata
 
 Retrieve detailed metadata for a specific file.
 
@@ -351,23 +429,39 @@ const response = await this.hass.callWS({
 console.log('File metadata:', response);
 ```
 
-### 6. Force Geocode File
+### 8. Geocode File or Coordinates
 
-Trigger geocoding for a file with GPS coordinates.
+**Enhanced in v1.3**: Now supports direct lat/lon lookup (not just file_path).
 
 ```javascript
+// Geocode by file ID
 const response = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'geocode_file',
   service_data: {
-    file_path: '/media/Photo/PhotoLibrary/vacation.jpg'
+    file_id: 12345
   },
   return_response: true
 });
+
+// v1.3: Geocode by coordinates directly
+const coordResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'geocode_file',
+  service_data: {
+    latitude: 37.7749,
+    longitude: -122.4194
+  },
+  return_response: true
+});
+
+console.log('Location:', coordResponse.location_name);
+// Output: "San Francisco, California, United States"
 ```
 
-### 7. Trigger Manual Scan
+### 9. Trigger Manual Scan
 
 Start a manual folder scan.
 
@@ -913,3 +1007,67 @@ Test your integration using the Home Assistant Developer Tools:
 - **Media Index Issues**: [GitHub Issues](https://github.com/markaggar/ha-media-index/issues)
 - **Example Implementation**: [ha-media-card source](https://github.com/markaggar/ha-media-card)
 - **Home Assistant WebSocket API**: [HA Developer Docs](https://developers.home-assistant.io/docs/api/websocket)
+
+---
+
+## Version History
+
+### v1.3 Enhancements
+
+#### New Services
+
+- ✨ **`get_ordered_files`** - Sequential file retrieval with configurable ordering
+  - Supports ordering by: date_taken, filename, path, modified_time
+  - Ascending/descending sort direction
+  - Cursor-based pagination for large collections
+  - Perfect for sequential slideshows
+
+#### Enhanced Services
+
+**`get_random_items`**
+
+- Added `priority_new_files` parameter for prioritizing recently scanned files
+- Added `new_files_threshold_seconds` parameter (default: 3600)
+- 70/30 weighted random selection when priority mode enabled
+- Ideal for "What's New" slideshows
+
+**`restore_edited_files`**
+
+- Added `file_path` parameter for single-file restore
+- Can now restore specific files instead of all files in `_Edit`
+
+**`geocode_file`**
+
+- Added `latitude` and `longitude` parameters
+- Now supports direct coordinate lookup without file_path
+- Useful for arbitrary location lookups
+
+#### Performance Improvements
+
+- All blocking I/O operations wrapped in executor jobs (HA 2025.x compatibility)
+- Service call logging changed from WARNING to DEBUG level
+- Optimized EXIF parsing with caching
+- Reduced redundant file system operations
+
+#### Media Card v5 Integration
+
+The v1.3 enhancements are designed to work seamlessly with Media Card v5.0:
+
+- **MediaIndexProvider** uses `get_random_items` with `priority_new_files` mode
+- **SequentialMediaIndexProvider** uses `get_ordered_files` with cursor pagination
+
+### v1.1 Features
+
+- Multi-instance support for independent media libraries
+- Target selector for routing service calls to specific instances
+- Independent SQLite databases per instance
+- Configurable scan schedules per instance
+
+### v1.0 Initial Release
+
+- Core metadata extraction and indexing
+- WebSocket API with `return_response` support
+- EXIF, GPS, and location data
+- File management services (favorite, delete, edit)
+- Geocoding integration
+

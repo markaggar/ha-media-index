@@ -75,7 +75,7 @@ data:
   count: 20
   file_type: image
 
-# Priority for recent files (v5 feature)
+# Priority for recent files (v1.3 feature)
 service: media_index.get_random_items
 data:
   count: 50
@@ -85,7 +85,7 @@ data:
 
 ### `media_index.get_ordered_files`
 
-**New in v5** - Get ordered media files with configurable sort field and direction.
+**New in v1.3** - Get ordered media files with configurable sort field and direction.
 
 **Parameters:**
 - `count` (optional, default: 50): Maximum number of files to return (1-1000)
@@ -220,13 +220,13 @@ data:
 The Media Index services integrate seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
 
 - **`get_random_items`** - Used automatically by Media Card for random slideshow mode
-- **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v5)
+- **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v1.3)
 - **`mark_favorite`** - Called when clicking favorite button on Media Card
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
 
-## v5 Enhancements Summary
+## v1.3 Enhancements Summary
 
 ### New Services
 - ✨ **`get_ordered_files`** - Sequential file retrieval with configurable ordering
