@@ -248,7 +248,7 @@ mark_for_edit:
       name: File Path
       description: Full path to the media file to mark for editing
       required: true
-      example: "/media/photo/Photos/2023/tits out.jpg"
+      example: "/media/photo/Photos/2023/needs_editing.jpg"
       selector:
         text:
 
@@ -270,6 +270,6 @@ restore_edited_files:
     file_path:
       name: File Path
       description: Optional - restore only this specific file
-      example: "/media/photo/Photos/2023/tits out.jpg"
+      example: "/media/photo/Photos/2023/edited_photo.jpg"
       selector:
         text:
