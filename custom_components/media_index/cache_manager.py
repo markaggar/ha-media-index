@@ -215,8 +215,16 @@ class CacheManager:
             'white_balance': 'TEXT'
         }
         
+        # Validate against whitelist to prevent SQL injection
+        allowed_col_names = set(new_columns.keys())
+        allowed_col_types = {"REAL", "INTEGER", "TEXT"}
+        
         for col_name, col_type in new_columns.items():
             if col_name not in column_names:
+                # Additional safety check
+                if col_name not in allowed_col_names or col_type not in allowed_col_types:
+                    _LOGGER.error("Attempted to add invalid column or type: %s %s", col_name, col_type)
+                    continue
                 _LOGGER.info("Adding column '%s' to exif_data table", col_name)
                 await self._db.execute(f"ALTER TABLE exif_data ADD COLUMN {col_name} {col_type}")
         
@@ -843,9 +851,14 @@ class CacheManager:
         
         # Exclude new files already selected
         if exclude_ids:
-            placeholders = ','.join('?' * len(exclude_ids))
-            query += f" AND m.id NOT IN ({placeholders})"
-            params.extend(exclude_ids)
+            # Ensure only integers are used in exclude_ids
+            safe_exclude_ids = [int(x) for x in exclude_ids if isinstance(x, int) or (isinstance(x, str) and x.isdigit())]
+            if len(safe_exclude_ids) != len(exclude_ids):
+                _LOGGER.warning("Some exclude_ids were not integers and have been ignored: %s", set(exclude_ids) - set(safe_exclude_ids))
+            if safe_exclude_ids:
+                placeholders = ','.join('?' * len(safe_exclude_ids))
+                query += f" AND m.id NOT IN ({placeholders})"
+                params.extend(safe_exclude_ids)
         
         if folder:
             query += " AND LOWER(m.folder) LIKE LOWER(?)"
@@ -937,22 +950,19 @@ class CacheManager:
             query += " AND m.file_type = ?"
             params.append(file_type.lower())
         
-        # Determine sort field with fallback
-        if order_by == "date_taken":
-            sort_field = "COALESCE(e.date_taken, m.modified_time)"
-        elif order_by == "filename":
-            sort_field = "m.filename"
-        elif order_by == "path":
-            # Full path for sorting (folder + filename)
-            sort_field = "m.folder || '/' || m.filename"
-        elif order_by == "modified_time":
-            sort_field = "m.modified_time"
-        else:
-            # Default to date_taken
-            sort_field = "COALESCE(e.date_taken, m.modified_time)"
-        
-        # Add sort direction
-        direction = "DESC" if order_direction == "desc" else "ASC"
+        # Use explicit whitelist mapping for sort fields and directions
+        allowed_sort_fields = {
+            "date_taken": "COALESCE(e.date_taken, m.modified_time)",
+            "filename": "m.filename",
+            "path": "m.folder || '/' || m.filename",
+            "modified_time": "m.modified_time",
+        }
+        allowed_directions = {
+            "asc": "ASC",
+            "desc": "DESC",
+        }
+        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
+        direction = allowed_directions.get(order_direction.lower(), "ASC")
         query += f" ORDER BY {sort_field} {direction} LIMIT ?"
         params.append(int(count))
         

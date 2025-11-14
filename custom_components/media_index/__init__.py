@@ -135,7 +135,7 @@ def _setup_scheduled_scan(
         """Run scheduled scan if not already running."""
         # Check if scan already in progress
         if scanner.is_scanning:
-            _LOGGER.warning(
+            _LOGGER.info(
                 "Scheduled scan skipped - scan already in progress. "
                 "This prevents blocking watch folders and concurrent scans."
             )
