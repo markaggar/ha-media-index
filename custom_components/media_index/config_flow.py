@@ -12,6 +12,7 @@ from homeassistant.data_entry_flow import FlowResult
 from .const import (
     DOMAIN,
     CONF_BASE_FOLDER,
+    CONF_MEDIA_SOURCE_URI,
     CONF_WATCHED_FOLDERS,
     CONF_SCAN_ON_STARTUP,
     CONF_SCAN_SCHEDULE,
@@ -85,6 +86,9 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_BASE_FOLDER, default=DEFAULT_BASE_FOLDER
                     ): str,
                     vol.Optional(
+                        CONF_MEDIA_SOURCE_URI, default=""
+                    ): str,
+                    vol.Optional(
                         CONF_WATCHED_FOLDERS, default=""
                     ): str,
                     vol.Optional(
@@ -156,6 +160,10 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         # Get current values (options take precedence over data)
+        current_media_source_uri = self.config_entry.options.get(
+            CONF_MEDIA_SOURCE_URI,
+            self.config_entry.data.get(CONF_MEDIA_SOURCE_URI, ""),
+        )
         current_watched = self.config_entry.options.get(
             CONF_WATCHED_FOLDERS,
             self.config_entry.data.get(CONF_WATCHED_FOLDERS, []),
@@ -207,6 +215,9 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        CONF_MEDIA_SOURCE_URI, default=current_media_source_uri
+                    ): str,
                     vol.Optional(
                         CONF_WATCHED_FOLDERS, default=current_watched_str
                     ): str,

@@ -5,6 +5,7 @@ DOMAIN: Final = "media_index"
 
 # Configuration constants
 CONF_BASE_FOLDER: Final = "base_folder"
+CONF_MEDIA_SOURCE_URI: Final = "media_source_uri"
 CONF_WATCHED_FOLDERS: Final = "watched_folders"
 CONF_SCAN_ON_STARTUP: Final = "scan_on_startup"
 CONF_SCAN_SCHEDULE: Final = "scan_schedule"
