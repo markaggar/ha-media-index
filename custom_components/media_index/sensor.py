@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     DOMAIN,
     CONF_BASE_FOLDER,
+    CONF_MEDIA_SOURCE_URI,
     CONF_GEOCODE_ENABLED,
     CONF_WATCHED_FOLDERS,
     DEFAULT_GEOCODE_ENABLED,
@@ -120,6 +121,7 @@ class MediaIndexTotalFilesSensor(SensorEntity):
         geocode_enabled = config.get(CONF_GEOCODE_ENABLED, DEFAULT_GEOCODE_ENABLED)
         watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
+        media_source_uri = config.get(CONF_MEDIA_SOURCE_URI, "")
         
         self._attr_extra_state_attributes = {
             ATTR_SCAN_STATUS: scan_status,
@@ -129,6 +131,7 @@ class MediaIndexTotalFilesSensor(SensorEntity):
             ATTR_TOTAL_VIDEOS: stats.get("total_videos", 0),
             ATTR_WATCHED_FOLDERS: watched_folders,
             ATTR_MEDIA_PATH: base_folder,
+            "media_source_uri": media_source_uri,
             ATTR_CACHE_SIZE_MB: stats.get("cache_size_mb", 0.0),
             ATTR_GEOCODE_ENABLED: geocode_enabled,
             ATTR_GEOCODE_CACHE_ENTRIES: stats.get("geocode_cache_entries", 0),
