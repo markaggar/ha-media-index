@@ -209,12 +209,15 @@ const wsResponse = await this.hass.callWS({
   service: 'get_random_items',
   service_data: {
     count: 100,                    // Number of items to return (1-100)
-    folder: '/media/Photo/New',    // Optional: filter by folder
+    folder: '/media/Photo/New',    // Optional: filter by folder (path or URI)
+    // v1.4: folder can be either filesystem path OR media-source URI:
+    // folder: 'media-source://media_source/local/photos'
     file_type: 'image',            // Optional: 'image' or 'video'
     date_from: '2024-01-01',       // Optional: ISO date string
     date_to: '2024-12-31',         // Optional: ISO date string
     priority_new_files: true,      // v1.3: Prioritize recent files
-    new_files_threshold_seconds: 2592000  // v1.3: 30 days threshold
+    new_files_threshold_seconds: 2592000,  // v1.3: 30 days threshold
+    recursive: true                // Optional: include subfolders (default: true)
   },
   return_response: true
 });
@@ -247,6 +250,7 @@ Perfect for "What's New" slideshows that prioritize recent content.
 {
   id: 1234,
   path: "/media/Photo/PhotoLibrary/sunset.jpg",
+  media_source_uri: "media-source://media_source/media/Photo/PhotoLibrary/sunset.jpg",  // v1.4
   filename: "sunset.jpg",
   folder: "/media/Photo/PhotoLibrary",
   file_type: "image",
@@ -283,7 +287,9 @@ const wsResponse = await this.hass.callWS({
   service: 'get_ordered_files',
   service_data: {
     count: 50,                     // Max items to return (1-1000)
-    folder: '/media/Photo/2023',   // Optional: filter by folder
+    folder: '/media/Photo/2023',   // Optional: filter by folder (path or URI)
+    // v1.4: folder can be either filesystem path OR media-source URI:
+    // folder: 'media-source://media_source/local/photos/2023'
     recursive: true,               // Include subfolders
     file_type: 'image',            // Optional: 'image' or 'video'
     order_by: 'date_taken',        // 'date_taken', 'filename', 'path', 'modified_time'
@@ -317,7 +323,10 @@ if (response && response.items && Array.isArray(response.items)) {
 
 Toggle favorite status for a file (writes to database and EXIF).
 
+**v1.4+**: Accepts either `file_path` OR `media_source_uri`
+
 ```javascript
+// Using filesystem path
 const response = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
@@ -325,6 +334,18 @@ const response = await this.hass.callWS({
   service_data: {
     file_path: '/media/Photo/PhotoLibrary/sunset.jpg',
     is_favorite: true  // or false to unfavorite
+  },
+  return_response: true
+});
+
+// v1.4: Using media-source URI
+const uriResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'mark_favorite',
+  service_data: {
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/sunset.jpg',
+    is_favorite: true
   },
   return_response: true
 });
@@ -346,13 +367,27 @@ console.log('Favorite status updated:', response);
 
 Move a file to the `_Junk` folder.
 
+**v1.4+**: Accepts either `file_path` OR `media_source_uri`
+
 ```javascript
+// Using filesystem path
 const response = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'delete_media',
   service_data: {
     file_path: '/media/Photo/PhotoLibrary/bad_photo.jpg'
+  },
+  return_response: true
+});
+
+// v1.4: Using media-source URI
+const uriResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'delete_media',
+  service_data: {
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/bad_photo.jpg'
   },
   return_response: true
 });
@@ -374,13 +409,27 @@ console.log('File deleted:', response);
 
 Move a file to the `_Edit` folder.
 
+**v1.4+**: Accepts either `file_path` OR `media_source_uri`
+
 ```javascript
+// Using filesystem path
 const response = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'mark_for_edit',
   service_data: {
     file_path: '/media/Photo/PhotoLibrary/needs_editing.jpg'
+  },
+  return_response: true
+});
+
+// v1.4: Using media-source URI
+const uriResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'mark_for_edit',
+  service_data: {
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/needs_editing.jpg'
   },
   return_response: true
 });
@@ -415,13 +464,27 @@ const singleResponse = await this.hass.callWS({
 
 Retrieve detailed metadata for a specific file.
 
+**v1.4+**: Accepts either `file_path` OR `media_source_uri`
+
 ```javascript
+// Using filesystem path
 const response = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'get_file_metadata',
   service_data: {
     file_path: '/media/Photo/PhotoLibrary/sunset.jpg'
+  },
+  return_response: true
+});
+
+// v1.4: Using media-source URI
+const uriResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'get_file_metadata',
+  service_data: {
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/sunset.jpg'
   },
   return_response: true
 });
@@ -433,9 +496,33 @@ console.log('File metadata:', response);
 
 **Enhanced in v1.3**: Now supports direct lat/lon lookup (not just file_path).
 
+**Enhanced in v1.4**: Accepts `file_path`, `file_id`, OR `media_source_uri`
+
 ```javascript
-// Geocode by file ID
+// Geocode by file path
 const response = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'geocode_file',
+  service_data: {
+    file_path: '/media/Photo/PhotoLibrary/sunset.jpg'
+  },
+  return_response: true
+});
+
+// v1.4: Geocode by media-source URI
+const uriResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'geocode_file',
+  service_data: {
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/sunset.jpg'
+  },
+  return_response: true
+});
+
+// Geocode by file ID
+const idResponse = await this.hass.callWS({
   type: 'call_service',
   domain: 'media_index',
   service: 'geocode_file',
