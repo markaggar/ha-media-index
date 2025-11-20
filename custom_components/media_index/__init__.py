@@ -409,9 +409,22 @@ def _register_services(hass: HomeAssistant):
         
         _LOGGER.debug("get_random_items: entry_id=%s, call.data=%s", entry_id, call.data)
         
+        # Convert folder URI to path if needed
+        folder = call.data.get("folder")
+        if folder and folder.startswith("media-source://"):
+            base_folder = config.get(CONF_BASE_FOLDER)
+            media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
+            
+            try:
+                folder = _convert_uri_to_path(folder, base_folder, media_source_prefix)
+                _LOGGER.debug("Converted folder URI to path: %s", folder)
+            except ValueError as e:
+                _LOGGER.error("Failed to convert folder URI to path: %s", e)
+                return {"items": []}
+        
         items = await cache_manager.get_random_files(
             count=call.data.get("count", 10),
-            folder=call.data.get("folder"),
+            folder=folder,
             recursive=call.data.get("recursive", True),
             file_type=call.data.get("file_type"),
             date_from=call.data.get("date_from"),
@@ -446,9 +459,22 @@ def _register_services(hass: HomeAssistant):
         
         _LOGGER.debug("get_ordered_files: entry_id=%s, call.data=%s", entry_id, call.data)
         
+        # Convert folder URI to path if needed
+        folder = call.data.get("folder")
+        if folder and folder.startswith("media-source://"):
+            base_folder = config.get(CONF_BASE_FOLDER)
+            media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
+            
+            try:
+                folder = _convert_uri_to_path(folder, base_folder, media_source_prefix)
+                _LOGGER.debug("Converted folder URI to path: %s", folder)
+            except ValueError as e:
+                _LOGGER.error("Failed to convert folder URI to path: %s", e)
+                return {"items": []}
+        
         items = await cache_manager.get_ordered_files(
             count=call.data.get("count", 50),
-            folder=call.data.get("folder"),
+            folder=folder,
             recursive=call.data.get("recursive", True),
             file_type=call.data.get("file_type"),
             order_by=call.data.get("order_by", "date_taken"),
