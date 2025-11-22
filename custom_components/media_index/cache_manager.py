@@ -644,8 +644,9 @@ class CacheManager:
             folder: Filter by folder path (supports wildcards with %)
             recursive: If False, only match exact folder (no subfolders)
             file_type: Filter by file type ('image' or 'video')
-            date_from: Filter by date >= this value (YYYY-MM-DD)
-            date_to: Filter by date <= this value (YYYY-MM-DD)
+            date_from: Filter by date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            date_to: Filter by date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            favorites_only: If True, only return files marked as favorites
             priority_new_files: If True, prioritize recently scanned files
             new_files_threshold_seconds: Threshold in seconds for "new" files (default 1 hour)
             
@@ -704,12 +705,13 @@ class CacheManager:
                 new_files_query += " AND e.is_favorited = 1"
             
             # Date filtering: null means "no limit" in that direction
+            # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                new_files_query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
+                new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                 params.append(str(date_from))
             
             if date_to is not None:
-                new_files_query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
+                new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                 params.append(str(date_to))
             
             # V5 IMPROVEMENT: Get ALL recent files, then randomly sample
@@ -804,12 +806,13 @@ class CacheManager:
                 query += " AND e.is_favorited = 1"
             
             # Date filtering: null means "no limit" in that direction
+            # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                 params.append(str(date_from))
             
             if date_to is not None:
-                query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                 params.append(str(date_to))
             
             query += " ORDER BY RANDOM() LIMIT ?"
@@ -906,12 +909,13 @@ class CacheManager:
             query += " AND e.is_favorited = 1"
         
         # Date filtering: null means "no limit" in that direction
+        # Use EXIF date_taken if available, fallback to created_time
         if date_from is not None:
-            query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
+            query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
             params.append(str(date_from))
         
         if date_to is not None:
-            query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
+            query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
             params.append(str(date_to))
         
         query += " ORDER BY RANDOM() LIMIT ?"

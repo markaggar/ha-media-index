@@ -60,8 +60,8 @@ Get random media files from the index (used by Media Card).
 - `count` (optional, default: 1): Number of items to return (1-100)
 - `folder` (optional): Filter by folder (filesystem path or media-source URI)
 - `file_type` (optional): Filter by `image` or `video`
-- `date_from` (optional): ISO date string (YYYY-MM-DD) - null means "no lower limit"
-- `date_to` (optional): ISO date string (YYYY-MM-DD) - null means "no upper limit"
+- `date_from` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no lower limit"
+- `date_to` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no upper limit"
 - `favorites_only` (optional, default: false): Only return files marked as favorites
 - `priority_new_files` (optional, default: false): Prioritize recently scanned files
 - `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files

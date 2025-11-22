@@ -35,13 +35,13 @@ get_random_items:
             - "video"
     date_from:
       name: Date From
-      description: Filter files modified after this date (YYYY-MM-DD)
+      description: Filter files with date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
       example: "2023-01-01"
       selector:
         date:
     date_to:
       name: Date To
-      description: Filter files modified before this date (YYYY-MM-DD)
+      description: Filter files with date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
       example: "2023-12-31"
       selector:
         date:
