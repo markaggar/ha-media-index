@@ -630,6 +630,7 @@ class CacheManager:
         file_type: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        favorites_only: bool = False,
         priority_new_files: bool = False,
         new_files_threshold_seconds: int = 3600
     ) -> list[dict]:
@@ -699,11 +700,15 @@ class CacheManager:
                 new_files_query += " AND m.file_type = ?"
                 params.append(file_type.lower())
             
-            if date_from:
+            if favorites_only:
+                new_files_query += " AND e.is_favorited = 1"
+            
+            # Date filtering: null means "no limit" in that direction
+            if date_from is not None:
                 new_files_query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
                 params.append(str(date_from))
             
-            if date_to:
+            if date_to is not None:
                 new_files_query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
                 params.append(str(date_to))
             
@@ -741,7 +746,8 @@ class CacheManager:
                     recursive=recursive,
                     file_type=file_type,
                     date_from=date_from,
-                    date_to=date_to
+                    date_to=date_to,
+                    favorites_only=favorites_only
                 )
                 result = new_files + random_files
             else:
@@ -794,11 +800,15 @@ class CacheManager:
                 query += " AND m.file_type = ?"
                 params.append(file_type.lower())
             
-            if date_from:
+            if favorites_only:
+                query += " AND e.is_favorited = 1"
+            
+            # Date filtering: null means "no limit" in that direction
+            if date_from is not None:
                 query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
                 params.append(str(date_from))
             
-            if date_to:
+            if date_to is not None:
                 query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
                 params.append(str(date_to))
             
@@ -829,7 +839,8 @@ class CacheManager:
         recursive: bool = True,
         file_type: str | None = None,
         date_from: str | None = None,
-        date_to: str | None = None
+        date_to: str | None = None,
+        favorites_only: bool = False
     ) -> list[dict]:
         """Get random files excluding specified IDs (helper for priority queue).
         
@@ -891,11 +902,15 @@ class CacheManager:
             query += " AND m.file_type = ?"
             params.append(file_type.lower())
         
-        if date_from:
+        if favorites_only:
+            query += " AND e.is_favorited = 1"
+        
+        # Date filtering: null means "no limit" in that direction
+        if date_from is not None:
             query += " AND DATE(m.modified_time, 'unixepoch') >= ?"
             params.append(str(date_from))
         
-        if date_to:
+        if date_to is not None:
             query += " AND DATE(m.modified_time, 'unixepoch') <= ?"
             params.append(str(date_to))
         

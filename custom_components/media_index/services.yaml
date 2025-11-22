@@ -45,6 +45,12 @@ get_random_items:
       example: "2023-12-31"
       selector:
         date:
+    favorites_only:
+      name: Favorites Only
+      description: If true, only return files marked as favorites
+      default: false
+      selector:
+        boolean:
     priority_new_files:
       name: Priority New Files
       description: If true, prioritize recently scanned files before random selection

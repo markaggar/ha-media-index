@@ -444,6 +444,7 @@ def _register_services(hass: HomeAssistant):
             file_type=call.data.get("file_type"),
             date_from=call.data.get("date_from"),
             date_to=call.data.get("date_to"),
+            favorites_only=call.data.get("favorites_only", False),
             priority_new_files=call.data.get("priority_new_files", False),
             new_files_threshold_seconds=call.data.get("new_files_threshold_seconds", 3600),
         )

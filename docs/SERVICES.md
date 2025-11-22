@@ -60,8 +60,9 @@ Get random media files from the index (used by Media Card).
 - `count` (optional, default: 1): Number of items to return (1-100)
 - `folder` (optional): Filter by folder (filesystem path or media-source URI)
 - `file_type` (optional): Filter by `image` or `video`
-- `date_from` (optional): ISO date string (YYYY-MM-DD)
-- `date_to` (optional): ISO date string (YYYY-MM-DD)
+- `date_from` (optional): ISO date string (YYYY-MM-DD) - null means "no lower limit"
+- `date_to` (optional): ISO date string (YYYY-MM-DD) - null means "no upper limit"
+- `favorites_only` (optional, default: false): Only return files marked as favorites
 - `priority_new_files` (optional, default: false): Prioritize recently scanned files
 - `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files
 - `recursive` (optional, default: true): Include subfolders
@@ -94,6 +95,31 @@ data:
   count: 50
   priority_new_files: true
   new_files_threshold_seconds: 2592000  # 30 days
+
+# Only favorites (useful for slideshow of best photos)
+service: media_index.get_random_items
+data:
+  count: 20
+  favorites_only: true
+
+# Date range: files from 2023 (null date_from/date_to means no limit)
+service: media_index.get_random_items
+data:
+  count: 20
+  date_from: "2023-01-01"
+  date_to: "2023-12-31"
+
+# "This month or earlier" (date_from null = no lower limit)
+service: media_index.get_random_items
+data:
+  count: 20
+  date_to: "2024-11-30"
+
+# "This year onwards" (date_to null = no upper limit)
+service: media_index.get_random_items
+data:
+  count: 20
+  date_from: "2024-01-01"
 ```
 
 ### `media_index.get_ordered_files`
