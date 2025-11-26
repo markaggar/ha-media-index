@@ -944,11 +944,18 @@ class CacheManager:
             query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
             params.append(str(date_from))
         
-        if date_to is not None:
-            query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
-            params.append(str(date_to))
-        
-        query += " ORDER BY RANDOM() LIMIT ?"
+            if date_to is not None:
+                # Validate date_to is a valid date string
+                try:
+                    date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
+                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
+                    params.append(date_to_str)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+            
+            query += " ORDER BY RANDOM() LIMIT ?"
         params.append(int(count))
         
         async with self._db.execute(query, tuple(params)) as cursor:
