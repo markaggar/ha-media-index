@@ -1112,19 +1112,16 @@ class CacheManager:
         
         # CRITICAL: Also update exif_data table - this is what get_random_files queries!
         # exif_data uses file_id (FK to media_files.id), so we need a subquery
-        async with self._db.execute(
+        await self._db.execute(
             """UPDATE exif_data 
                SET is_favorited = ?, rating = ?
                WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
             (favorite_value, rating_value, file_path)
-        ) as cursor:
-            exif_rows_affected = cursor.rowcount
+        )
         
         await self._db.commit()
         
         if rows_affected > 0:
-            _LOGGER.info("Updated favorite status for %s: %s (media_files=%d, exif_data=%d rows)", 
-                        file_path, is_favorite, rows_affected, exif_rows_affected)
             return True
         else:
             _LOGGER.warning("File not found in database: %s", file_path)
@@ -1165,7 +1162,6 @@ class CacheManager:
         )
         
         await self._db.commit()
-        _LOGGER.info("Deleted file from database: %s", file_path)
         return True
     
     async def record_file_move(

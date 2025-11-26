@@ -598,19 +598,15 @@ def _register_services(hass: HomeAssistant):
         if not (lat and lon):
             return {"error": "Either file_id, file_path, media_source_uri, or latitude/longitude required"}
         
-        _LOGGER.info("Progressive geocoding request for (%s, %s)", lat, lon)
-        
         # 1. Check geocode cache first (fast)
         cached_location = await cache_manager.get_geocode_cache(lat, lon)
         if cached_location:
-            _LOGGER.info("Cache HIT for (%s, %s): %s", round(lat, 3), round(lon, 3), cached_location.get('location_city'))
             # Update exif_data table with cached result
             if file_id:
                 await cache_manager.update_exif_location(file_id, cached_location)
             return cached_location
         
         # 2. Call Nominatim API (slow, rate-limited)
-        _LOGGER.info("Cache MISS for (%s, %s) - calling Nominatim API", round(lat, 3), round(lon, 3))
         location_data = await geocode_service.reverse_geocode(lat, lon)
         
         if not location_data:
@@ -622,13 +618,6 @@ def _register_services(hass: HomeAssistant):
         # 4. Update exif_data table with new location
         if file_id:
             await cache_manager.update_exif_location(file_id, location_data)
-        
-        _LOGGER.info(
-            "Geocoded (%s, %s) to: %s, %s",
-            lat, lon,
-            location_data.get('location_city'),
-            location_data.get('location_country')
-        )
         
         # 5. Return location data to caller
         return location_data
@@ -780,8 +769,6 @@ def _register_services(hass: HomeAssistant):
             # Remove from database
             await cache_manager.delete_file(file_path)
             
-            _LOGGER.info("Moved file to junk folder: %s -> %s", file_path, dest_path)
-            
             return {
                 "file_path": file_path,
                 "junk_path": str(dest_path),
@@ -860,8 +847,6 @@ def _register_services(hass: HomeAssistant):
             
             # Remove from database (will be re-added on next scan if moved back)
             await cache_manager.delete_file(file_path)
-            
-            _LOGGER.info("Moved file to edit folder: %s -> %s", file_path, dest_path)
             
             return {
                 "file_path": file_path,
