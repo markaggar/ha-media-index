@@ -1,4 +1,5 @@
 """Media file scanner for Home Assistant."""
+import asyncio
 import os
 import logging
 from datetime import datetime
@@ -240,6 +241,10 @@ class MediaScanner:
                                         await self.cache.add_geocode_cache(lat, lon, location_data)
                                         # Update EXIF record
                                         await self.cache.update_exif_location(file_id, location_data)
+                        
+                        # Yield control back to event loop every 10 files to prevent blocking startup
+                        if files_added % 10 == 0:
+                            await asyncio.sleep(0)
                         
                         if files_added % 100 == 0:
                             _LOGGER.info("Scan progress: indexed %d files so far...", files_added)
