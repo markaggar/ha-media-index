@@ -707,12 +707,28 @@ class CacheManager:
             # Date filtering: null means "no limit" in that direction
             # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
-                params.append(str(date_from))
+                # Validate date_from is a valid date string
+                try:
+                    date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
+                    # Quick validation that it looks like a date (YYYY-MM-DD format)
+                    if len(date_from_str) != 10 or date_from_str.count('-') != 2:
+                        raise ValueError(f"Invalid date_from format: {date_from_str}")
+                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
+                    params.append(date_from_str)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if date_to is not None:
-                new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
-                params.append(str(date_to))
+                # Validate date_to is a valid date string
+                try:
+                    date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                    # Quick validation that it looks like a date (YYYY-MM-DD format)
+                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
+                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
+                    params.append(date_to_str)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
             
             # V5 IMPROVEMENT: Get ALL recent files, then randomly sample
             # This ensures even distribution - all recent files have equal chance
@@ -806,12 +822,28 @@ class CacheManager:
             # Date filtering: null means "no limit" in that direction
             # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
-                params.append(str(date_from))
+                # Validate date_from is a valid date string
+                try:
+                    date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
+                    # Quick validation that it looks like a date (YYYY-MM-DD format)
+                    if len(date_from_str) != 10 or date_from_str.count('-') != 2:
+                        raise ValueError(f"Invalid date_from format: {date_from_str}")
+                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
+                    params.append(date_from_str)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if date_to is not None:
-                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
-                params.append(str(date_to))
+                # Validate date_to is a valid date string
+                try:
+                    date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                    # Quick validation that it looks like a date (YYYY-MM-DD format)
+                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
+                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
+                    params.append(date_to_str)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
             
             query += " ORDER BY RANDOM() LIMIT ?"
             params.append(int(count))

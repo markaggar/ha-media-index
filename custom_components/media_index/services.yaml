@@ -266,7 +266,7 @@ delete_media:
       name: File Path
       description: Full filesystem path to the media file (use either this OR media_source_uri)
       required: false
-      example: "/media/photo/Photos/2023/bad hair day.jpg"
+      example: "/media/photo/Photos/2023/bad_hair_day.jpg"
       selector:
         text:
     media_source_uri:

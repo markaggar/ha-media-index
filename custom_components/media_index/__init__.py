@@ -93,21 +93,45 @@ SERVICE_SCAN_FOLDER_SCHEMA = vol.Schema({
     vol.Optional("force_rescan", default=False): cv.boolean,
 }, extra=vol.ALLOW_EXTRA)
 
-SERVICE_MARK_FAVORITE_SCHEMA = vol.Schema({
-    vol.Optional("file_path"): cv.string,
-    vol.Optional("media_source_uri"): cv.string,
-    vol.Optional("is_favorite", default=True): cv.boolean,
-}, extra=vol.ALLOW_EXTRA)
+def _validate_path_or_uri(data):
+    """Validate that at least one of file_path or media_source_uri is provided."""
+    if not data.get("file_path") and not data.get("media_source_uri"):
+        raise vol.Invalid("Either 'file_path' or 'media_source_uri' must be provided")
+    return data
 
-SERVICE_DELETE_MEDIA_SCHEMA = vol.Schema({
-    vol.Optional("file_path"): cv.string,
-    vol.Optional("media_source_uri"): cv.string,
-}, extra=vol.ALLOW_EXTRA)
+SERVICE_MARK_FAVORITE_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+            vol.Optional("is_favorite", default=True): cv.boolean,
+        },
+        _validate_path_or_uri,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
 
-SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema({
-    vol.Optional("file_path"): cv.string,
-    vol.Optional("media_source_uri"): cv.string,
-}, extra=vol.ALLOW_EXTRA)
+SERVICE_DELETE_MEDIA_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+        },
+        _validate_path_or_uri,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
+
+SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+        },
+        _validate_path_or_uri,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
 
 SERVICE_RESTORE_EDITED_FILES_SCHEMA = vol.Schema({
     vol.Optional("folder_filter"): cv.string,  # e.g., "_Edit"
@@ -131,7 +155,10 @@ def _convert_uri_to_path(media_source_uri: str, base_folder: str, media_source_p
         ValueError: If URI doesn't start with configured prefix or if prefix not configured
     """
     if not media_source_prefix:
-        raise ValueError("media_source_uri parameter requires media_source_uri to be configured in sensor settings")
+        raise ValueError(
+            "Using media_source_uri parameter requires the media_source_uri option "
+            "to be configured in integration settings"
+        )
     
     if not media_source_uri.startswith(media_source_prefix):
         raise ValueError(f"URI '{media_source_uri}' does not match configured prefix '{media_source_prefix}'")
@@ -139,11 +166,19 @@ def _convert_uri_to_path(media_source_uri: str, base_folder: str, media_source_p
     # Strip the media_source_prefix and replace with base_folder
     relative_path = media_source_uri[len(media_source_prefix):]
     
-    # Ensure base_folder doesn't end with slash
-    base_folder = base_folder.rstrip("/")
+    # Normalize paths and prevent path traversal attacks
+    import os
+    base_folder_normalized = os.path.normpath(base_folder.rstrip("/"))
+    file_path = os.path.normpath(os.path.join(base_folder_normalized, relative_path.lstrip("/")))
     
-    # Combine to get filesystem path
-    file_path = base_folder + relative_path
+    # Validate that the resulting path is within base_folder
+    base_folder_abs = os.path.abspath(base_folder_normalized)
+    file_path_abs = os.path.abspath(file_path)
+    if not file_path_abs.startswith(base_folder_abs + os.sep) and file_path_abs != base_folder_abs:
+        raise ValueError(
+            f"Path traversal detected: resolved path '{file_path_abs}' "
+            f"is outside the base folder '{base_folder_abs}'"
+        )
     
     return file_path
 
@@ -306,8 +341,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     # Trigger initial scan AFTER HA has fully started (not during setup)
-    config = {**entry.data, **entry.options}
-    base_folder = config.get(CONF_BASE_FOLDER, "/media")
+    # Use config already constructed above
     watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
     
     if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
