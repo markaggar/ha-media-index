@@ -720,20 +720,19 @@ class CacheManager:
             new_files_query += " ORDER BY m.last_scanned DESC"
             # Note: No LIMIT here - we get all recent files, then sample below
             
-            _LOGGER.debug("Priority queue query (all recent): %s with params: %s", new_files_query, params)
+            # Debug logging removed to prevent excessive logs during slideshow
             
             async with self._db.execute(new_files_query, tuple(params)) as cursor:
                 new_files_rows = await cursor.fetchall()
             
             all_new_files = [dict(row) for row in new_files_rows]
-            _LOGGER.debug("Found %d total recent files (within %d sec threshold)", 
-                         len(all_new_files), new_files_threshold_seconds)
+            # Debug: Found X total recent files (logging removed)
             
             # Randomly sample from recent files (up to count requested)
             import random
             if len(all_new_files) > count:
                 new_files = random.sample(all_new_files, count)
-                _LOGGER.debug("Randomly sampled %d from %d recent files", count, len(all_new_files))
+                # Debug: Randomly sampled X from Y recent files (logging removed)
             else:
                 new_files = all_new_files
             
@@ -760,8 +759,7 @@ class CacheManager:
                 item['has_coordinates'] = item.get('latitude') is not None and item.get('longitude') is not None
                 item['is_geocoded'] = item.get('location_city') is not None
             
-            _LOGGER.debug("Priority queue returned %d new files + %d random files", 
-                         len(new_files), len(result) - len(new_files))
+            # Debug: Priority queue returned X new files + Y random files (logging removed)
             return result
         
         else:
@@ -818,7 +816,7 @@ class CacheManager:
             query += " ORDER BY RANDOM() LIMIT ?"
             params.append(int(count))
             
-            _LOGGER.debug("Query: %s with params: %s", query, params)
+            # Debug logging removed to prevent excessive logs during slideshow
             
             async with self._db.execute(query, tuple(params)) as cursor:
                 rows = await cursor.fetchall()
@@ -1008,7 +1006,7 @@ class CacheManager:
         query += f" ORDER BY {sort_field} {direction} LIMIT ?"
         params.append(int(count))
         
-        _LOGGER.debug("Ordered query: %s with params: %s", query, params)
+        # Debug logging removed to prevent excessive logs during slideshow
         
         async with self._db.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
