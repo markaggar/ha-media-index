@@ -166,15 +166,21 @@ def _convert_uri_to_path(media_source_uri: str, base_folder: str, media_source_p
     # Strip the media_source_prefix and replace with base_folder
     relative_path = media_source_uri[len(media_source_prefix):]
     
-    # Normalize paths and prevent path traversal attacks
+    # Prevent path traversal attacks by rejecting any '..' components
     import os
+    from pathlib import PurePath
+    rel_parts = [part for part in PurePath(relative_path).parts if part not in ('', '.')]
+    if any(part == '..' for part in rel_parts):
+        raise ValueError(f"Path traversal detected in URI: '{media_source_uri}' contains '..' in path")
+    
+    # Normalize paths after validation
     base_folder_normalized = os.path.normpath(base_folder.rstrip("/"))
     file_path = os.path.normpath(os.path.join(base_folder_normalized, relative_path.lstrip("/")))
     
     # Validate that the resulting path is within base_folder
     base_folder_abs = os.path.abspath(base_folder_normalized)
     file_path_abs = os.path.abspath(file_path)
-    if not file_path_abs.startswith(base_folder_abs + os.sep) and file_path_abs != base_folder_abs:
+    if not file_path_abs.startswith(base_folder_abs + os.sep):
         raise ValueError(
             f"Path traversal detected: resolved path '{file_path_abs}' "
             f"is outside the base folder '{base_folder_abs}'"
@@ -492,6 +498,14 @@ def _register_services(hass: HomeAssistant):
         )
         
         # Add media_source_uri to each item if configured
+        _add_media_source_uris_to_items(items, config)
+        
+        result = {"items": items}
+        # Debug: Retrieved X random items (logging removed)
+        return result
+    
+    def _add_media_source_uris_to_items(items, config):
+        """Helper to add media_source_uri to each item in list."""
         base_folder = config.get(CONF_BASE_FOLDER)
         media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
         
@@ -504,10 +518,6 @@ def _register_services(hass: HomeAssistant):
                 except ValueError as e:
                     _LOGGER.warning("Failed to convert path to URI for %s: %s", item.get("path"), e)
                     item["media_source_uri"] = ""
-        
-        result = {"items": items}
-        # Debug: Retrieved X random items (logging removed)
-        return result
     
     async def handle_get_ordered_files(call):
         """Handle get_ordered_files service call."""
@@ -540,18 +550,7 @@ def _register_services(hass: HomeAssistant):
         )
         
         # Add media_source_uri to each item if configured
-        base_folder = config.get(CONF_BASE_FOLDER)
-        media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
-        
-        if media_source_prefix and base_folder:
-            for item in items:
-                try:
-                    item["media_source_uri"] = _convert_path_to_uri(
-                        item["path"], base_folder, media_source_prefix
-                    )
-                except ValueError as e:
-                    _LOGGER.warning("Failed to convert path to URI for %s: %s", item.get("path"), e)
-                    item["media_source_uri"] = ""
+        _add_media_source_uris_to_items(items, config)
         
         result = {"items": items}
         # Debug: Retrieved X ordered items (logging removed)
@@ -858,8 +857,6 @@ def _register_services(hass: HomeAssistant):
             }
         
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
-        
-        _LOGGER.info("Marking file for editing: %s", file_path)
         
         try:
             # Create edit folder if it doesn't exist

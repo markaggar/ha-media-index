@@ -707,24 +707,24 @@ class CacheManager:
             # Date filtering: null means "no limit" in that direction
             # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                # Validate date_from is a valid date string
+                # Validate date_from is a valid date string using datetime.strptime
                 try:
+                    from datetime import datetime
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_from_str) != 10 or date_from_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_from format: {date_from_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_from_str, "%Y-%m-%d")
                     new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                     params.append(date_from_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if date_to is not None:
-                # Validate date_to is a valid date string
+                # Validate date_to is a valid date string using datetime.strptime
                 try:
+                    from datetime import datetime
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_to_str, "%Y-%m-%d")
                     new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
@@ -941,19 +941,26 @@ class CacheManager:
         # Date filtering: null means "no limit" in that direction
         # Use EXIF date_taken if available, fallback to created_time
         if date_from is not None:
-            query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
-            params.append(str(date_from))
+            # Validate date_from is a valid date string
+            try:
+                from datetime import datetime
+                date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
+                datetime.strptime(date_from_str, "%Y-%m-%d")
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
+                params.append(date_from_str)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
         
-            if date_to is not None:
-                # Validate date_to is a valid date string
-                try:
-                    date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
-                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_to format: {date_to_str}")
-                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
-                    params.append(date_to_str)
-                except (ValueError, TypeError) as e:
-                    _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+        if date_to is not None:
+            # Validate date_to is a valid date string
+            try:
+                from datetime import datetime
+                date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                datetime.strptime(date_to_str, "%Y-%m-%d")
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
+                params.append(date_to_str)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
             
             query += " ORDER BY RANDOM() LIMIT ?"
         params.append(int(count))
@@ -1151,12 +1158,13 @@ class CacheManager:
         
         # CRITICAL: Also update exif_data table - this is what get_random_files queries!
         # exif_data uses file_id (FK to media_files.id), so we need a subquery
-        await self._db.execute(
+        async with self._db.execute(
             """UPDATE exif_data 
                SET is_favorited = ?, rating = ?
                WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
             (favorite_value, rating_value, file_path)
-        )
+        ) as cursor:
+            pass  # Context manager ensures proper cleanup
         
         await self._db.commit()
         
