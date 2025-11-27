@@ -80,13 +80,33 @@ SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema({
     vol.Optional("media_source_uri"): cv.string,
 }, extra=vol.ALLOW_EXTRA)
 
-SERVICE_GEOCODE_FILE_SCHEMA = vol.Schema({
-    vol.Optional("file_id"): cv.positive_int,
-    vol.Optional("file_path"): cv.string,
-    vol.Optional("media_source_uri"): cv.string,
-    vol.Optional("latitude"): vol.Coerce(float),
-    vol.Optional("longitude"): vol.Coerce(float),
-}, extra=vol.ALLOW_EXTRA)
+def _validate_geocode_params(data):
+    """Validate that at least one identification parameter is provided for geocode_file."""
+    has_file_id = data.get("file_id") is not None
+    has_file_path = data.get("file_path") is not None
+    has_media_source_uri = data.get("media_source_uri") is not None
+    has_coordinates = data.get("latitude") is not None and data.get("longitude") is not None
+    
+    if not (has_file_id or has_file_path or has_media_source_uri or has_coordinates):
+        raise vol.Invalid(
+            "At least one identification parameter must be provided: "
+            "'file_id', 'file_path', 'media_source_uri', or 'latitude'+'longitude'"
+        )
+    return data
+
+SERVICE_GEOCODE_FILE_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_id"): cv.positive_int,
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+            vol.Optional("latitude"): vol.Coerce(float),
+            vol.Optional("longitude"): vol.Coerce(float),
+        },
+        _validate_geocode_params,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
 
 SERVICE_SCAN_FOLDER_SCHEMA = vol.Schema({
     vol.Optional("folder_path"): cv.string,
