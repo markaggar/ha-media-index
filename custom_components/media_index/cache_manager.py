@@ -136,6 +136,11 @@ class CacheManager:
             ON exif_data(latitude, longitude)
         """)
         
+        # Index for favorites filtering
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exif_favorited ON exif_data(is_favorited)
+        """)
+        
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS geocode_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

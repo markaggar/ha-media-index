@@ -39,6 +39,7 @@ from .const import (
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
     SERVICE_RESTORE_EDITED_FILES,
+    SERVICE_CLEANUP_DATABASE,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -921,6 +922,65 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_cleanup_database(call):
+        """Handle cleanup_database service call."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        
+        dry_run = call.data.get("dry_run", True)
+        
+        _LOGGER.info("Cleanup database (dry_run=%s)", dry_run)
+        
+        try:
+            # Get all files from database
+            cursor = await cache_manager._db.execute(
+                "SELECT id, path FROM media_files ORDER BY path"
+            )
+            rows = await cursor.fetchall()
+            
+            stale_files = []
+            checked = 0
+            
+            for row in rows:
+                file_id, file_path = row
+                checked += 1
+                
+                # Check if file exists on filesystem
+                exists = await hass.async_add_executor_job(os.path.exists, file_path)
+                
+                if not exists:
+                    stale_files.append({"id": file_id, "path": file_path})
+                    if not dry_run:
+                        # Remove from database
+                        await cache_manager.remove_file(file_path)
+                        _LOGGER.info("Removed stale entry: %s", file_path)
+                
+                # Yield control every 10 files
+                if checked % 10 == 0:
+                    await asyncio.sleep(0)
+            
+            result = {
+                "status": "completed",
+                "dry_run": dry_run,
+                "checked": checked,
+                "stale_count": len(stale_files),
+                "stale_files": [f["path"] for f in stale_files]
+            }
+            
+            if dry_run:
+                _LOGGER.info("Cleanup dry run: found %d stale files out of %d checked", len(stale_files), checked)
+            else:
+                _LOGGER.info("Cleanup completed: removed %d stale files out of %d checked", len(stale_files), checked)
+            
+            return result
+            
+        except Exception as err:
+            _LOGGER.error("Cleanup database failed: %s", err, exc_info=True)
+            return {
+                "status": "error",
+                "error": str(err)
+            }
+    
     async def handle_restore_edited_files(call):
         """Handle restore_edited_files service call."""
         import shutil
@@ -1115,6 +1175,16 @@ def _register_services(hass: HomeAssistant):
         SERVICE_RESTORE_EDITED_FILES,
         handle_restore_edited_files,
         schema=SERVICE_RESTORE_EDITED_FILES_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        "cleanup_database",
+        handle_cleanup_database,
+        schema=vol.Schema({
+            vol.Optional("dry_run", default=True): cv.boolean,
+        }),
         supports_response=SupportsResponse.ONLY,
     )
     

@@ -321,3 +321,18 @@ restore_edited_files:
       example: "/media/photo/Photos/2023/edited_photo.jpg"
       selector:
         text:
+
+cleanup_database:
+  name: Cleanup Database
+  description: Remove database entries for files that no longer exist on the filesystem
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    dry_run:
+      name: Dry Run
+      description: If true, only report what would be deleted without actually deleting
+      default: true
+      selector:
+        boolean:

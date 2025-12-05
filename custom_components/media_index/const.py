@@ -71,6 +71,7 @@ SERVICE_DELETE_FILE: Final = "delete_file"
 SERVICE_MOVE_FILE: Final = "move_file"
 SERVICE_MARK_FOR_EDIT: Final = "mark_for_edit"
 SERVICE_RESTORE_EDITED_FILES: Final = "restore_edited_files"
+SERVICE_CLEANUP_DATABASE: Final = "cleanup_database"
 
 # Attributes
 ATTR_SCAN_STATUS: Final = "scan_status"
