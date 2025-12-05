@@ -61,7 +61,10 @@ A custom Home Assistant integration that indexes media files (images and videos)
 2. Click **Add Integration**
 3. Search for "Media Index"
 4. Enter your base media folder path (e.g., `/media/Photos`)
-5. Configure optional settings (watched folders, EXIF extraction, geocoding)
+5. If your Media folders in the front end media browse dialogs are not prefixed by 'media-source://media_source/media', then copy and paste the full media-source:// URI (from the HA Media Card config) that points to the same place as the the base media folder you specified in the previous step. It is critical that these both point to the same folder structure, e.g.: 
+   - base media folder: /config/www/local
+   - media source Uri: media-source://media_source/local  
+8. Configure optional settings (watched folders, EXIF extraction, geocoding)
 
 💡 **Multi-Instance Support:** You can add multiple instances with different base folders (e.g., one for Photos, one for Videos) by repeating this process with different folder paths.
 
