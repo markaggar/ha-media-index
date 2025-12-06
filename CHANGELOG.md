@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-12-05
+
+### Added
+
+- **Burst Detection Service**: New `get_burst_photos` service for finding photos taken within a time window
+  - Time-based filtering: ±N seconds around reference photo's timestamp (default ±2 minutes)
+  - GPS-based filtering: Haversine distance calculation for location matching (default 50 meters)
+  - Automatic fallback to time-only matching when GPS data unavailable
+  - Configurable sort order: chronological (`time_asc`) or reverse (`time_desc`)
+  - Returns `seconds_offset` and `distance_meters` for each matching photo
+  - Same-year restriction prevents cross-year matches for burst detection
+  - Designed for Media Card v5.5 "At This Moment" burst review feature
+  - Example use case: Compare rapid-fire shots to select the best photo for keeping
+
+### Service Parameters
+
+- `reference_path` (required): Full filesystem path to reference photo
+- `time_window_seconds` (optional, default 120): Time window in seconds (±)
+- `prefer_same_location` (optional, default true): Enable GPS proximity filtering
+- `location_tolerance_meters` (optional, default 50): Maximum GPS distance for matching
+- `sort_order` (optional, default "time_asc"): Result ordering
+
 ## [1.4.0] - 2025-11-25
 
 ### Added
