@@ -36,7 +36,7 @@ from .const import (
     SERVICE_GET_RANDOM_ITEMS,
     SERVICE_GET_ORDERED_FILES,
     SERVICE_GET_FILE_METADATA,
-    SERVICE_GET_BURST_PHOTOS,
+    SERVICE_GET_RELATED_FILES,
     SERVICE_GEOCODE_FILE,
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
@@ -83,11 +83,21 @@ SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema({
     vol.Optional("media_source_uri"): cv.string,
 }, extra=vol.ALLOW_EXTRA)
 
-SERVICE_GET_BURST_PHOTOS_SCHEMA = vol.Schema({
-    vol.Required("reference_path"): cv.string,
+SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("reference_path"): cv.string,
+    vol.Optional("media_source_uri"): cv.string,
+    vol.Required("mode"): vol.In(["burst", "anniversary"]),
+    
+    # Burst mode parameters
     vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
     vol.Optional("prefer_same_location", default=True): cv.boolean,
     vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
+    
+    # Anniversary mode parameters
+    vol.Optional("window_days", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
+    vol.Optional("years_back", default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+    
+    # Common parameters
     vol.Optional("sort_order", default="time_asc"): vol.In(["time_asc", "time_desc"]),
 }, extra=vol.ALLOW_EXTRA)
 
@@ -620,112 +630,64 @@ def _register_services(hass: HomeAssistant):
             _LOGGER.warning("File not found in index: %s", file_path)
             return {"error": "File not found"}
     
-    async def handle_get_burst_photos(call):
-        """Handle get_burst_photos service call for burst/duplicate detection."""
+    async def handle_get_related_files(call):
+        """Handle get_related_files service call (burst or anniversary mode)."""
         entry_id = _get_entry_id_from_call(hass, call)
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry_id]["config"]
         
-        reference_path = call.data["reference_path"]
-        time_window_seconds = call.data.get("time_window_seconds", 120)
-        prefer_same_location = call.data.get("prefer_same_location", True)
-        location_tolerance_meters = call.data.get("location_tolerance_meters", 50)
+        mode = call.data.get("mode")
+        
+        # Get reference_path from either reference_path parameter or media_source_uri
+        reference_path = call.data.get("reference_path")
+        media_source_uri = call.data.get("media_source_uri")
+        
+        if not reference_path and media_source_uri:
+            # Convert URI to path
+            base_folder = config.get(CONF_BASE_FOLDER)
+            media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
+            
+            try:
+                reference_path = _convert_uri_to_path(media_source_uri, base_folder, media_source_prefix)
+                _LOGGER.info("Converted media_source_uri to path: %s -> %s", media_source_uri, reference_path)
+            except ValueError as e:
+                _LOGGER.error("Failed to convert URI to path: %s", e)
+                return {"error": str(e), "items": []}
+        
+        if not reference_path:
+            return {"error": "Either reference_path or media_source_uri required", "items": []}
+        
         sort_order = call.data.get("sort_order", "time_asc")
         
-        # Get reference photo metadata
-        ref_metadata = await cache_manager.get_file_by_path(reference_path)
-        if not ref_metadata:
-            _LOGGER.warning("Reference file not found: %s", reference_path)
-            return {"error": "Reference file not found", "items": []}
-        
-        ref_date = ref_metadata.get("date_taken")
-        if not ref_date:
-            _LOGGER.warning("Reference file has no date_taken: %s", reference_path)
-            return {"error": "Reference file has no date_taken", "items": []}
-        
-        ref_lat = ref_metadata.get("latitude")
-        ref_lon = ref_metadata.get("longitude")
-        
-        # Build SQL query for burst detection
-        import math
-        
-        # Calculate GPS bounding box for efficiency (if GPS filtering enabled)
-        use_gps = prefer_same_location and ref_lat is not None and ref_lon is not None
-        
-        query = """
-        SELECT *,
-            (julianday(date_taken) - julianday(?)) * 86400 as seconds_offset
-        FROM media_files
-        WHERE
-            date_taken IS NOT NULL
-            AND ABS((julianday(date_taken) - julianday(?)) * 86400) <= ?
-            AND date(date_taken) = date(?)
-        """
-        
-        params = [ref_date, ref_date, time_window_seconds, ref_date]
-        
-        # Add GPS filtering if requested and available
-        if use_gps:
-            # Haversine distance calculation in SQL
-            # Convert meters to approximate lat/lon degrees for initial filtering
-            lat_tolerance = location_tolerance_meters / 111000  # ~111km per degree
-            lon_tolerance = location_tolerance_meters / (111000 * math.cos(math.radians(ref_lat)))
+        if mode == "burst":
+            # Burst detection mode
+            items = await cache_manager.get_burst_photos(
+                reference_path=reference_path,
+                time_window_seconds=call.data.get("time_window_seconds", 120),
+                prefer_same_location=call.data.get("prefer_same_location", True),
+                location_tolerance_meters=call.data.get("location_tolerance_meters", 50),
+                sort_order=sort_order
+            )
+            _LOGGER.info("Found %d burst photos for %s", len(items), reference_path)
             
-            query += """
-            AND latitude IS NOT NULL
-            AND longitude IS NOT NULL
-            AND ABS(latitude - ?) <= ?
-            AND ABS(longitude - ?) <= ?
-            """
-            params.extend([ref_lat, lat_tolerance, ref_lon, lon_tolerance])
+        elif mode == "anniversary":
+            # Anniversary mode - photos from same day across years
+            items = await cache_manager.get_anniversary_photos(
+                reference_path=reference_path,
+                window_days=call.data.get("window_days", 3),
+                years_back=call.data.get("years_back", 15),
+                sort_order=sort_order
+            )
+            _LOGGER.info("Found %d anniversary photos for %s", len(items), reference_path)
         
-        # Add sort order
-        if sort_order == "time_desc":
-            query += " ORDER BY date_taken DESC"
         else:
-            query += " ORDER BY date_taken ASC"
-        
-        # Execute query
-        results = await cache_manager.execute_query(query, params)
-        
-        # If GPS filtering was used, apply precise Haversine distance check
-        filtered_results = []
-        for row in results:
-            if use_gps:
-                # Calculate precise Haversine distance
-                lat = row.get("latitude")
-                lon = row.get("longitude")
-                if lat is not None and lon is not None:
-                    # Haversine formula
-                    lat1_rad = math.radians(ref_lat)
-                    lat2_rad = math.radians(lat)
-                    delta_lat = math.radians(lat - ref_lat)
-                    delta_lon = math.radians(lon - ref_lon)
-                    
-                    a = math.sin(delta_lat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon/2)**2
-                    c = 2 * math.asin(math.sqrt(a))
-                    distance_meters = 6371000 * c  # Earth radius in meters
-                    
-                    if distance_meters <= location_tolerance_meters:
-                        row["distance_meters"] = round(distance_meters, 1)
-                        filtered_results.append(row)
-                else:
-                    # No GPS data - skip this photo
-                    pass
-            else:
-                filtered_results.append(row)
-        
-        _LOGGER.info(
-            "Found %d burst photos for %s (±%ds, GPS=%s)",
-            len(filtered_results),
-            reference_path,
-            time_window_seconds,
-            use_gps
-        )
+            return {"error": f"Invalid mode: {mode}", "items": []}
         
         return {
             "reference_path": reference_path,
-            "count": len(filtered_results),
-            "items": filtered_results
+            "mode": mode,
+            "count": len(items),
+            "items": items
         }
 
     
@@ -1252,9 +1214,9 @@ def _register_services(hass: HomeAssistant):
     
     hass.services.async_register(
         DOMAIN,
-        SERVICE_GET_BURST_PHOTOS,
-        handle_get_burst_photos,
-        schema=SERVICE_GET_BURST_PHOTOS_SCHEMA,
+        SERVICE_GET_RELATED_FILES,
+        handle_get_related_files,
+        schema=SERVICE_GET_RELATED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     

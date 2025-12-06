@@ -1107,6 +1107,174 @@ class CacheManager:
         
         return file_data
     
+    async def get_burst_photos(
+        self,
+        reference_path: str,
+        time_window_seconds: int = 10,
+        prefer_same_location: bool = True,
+        location_tolerance_meters: int = 50,
+        sort_order: str = "time_asc"
+    ) -> list[dict]:
+        """Get burst photos taken near the same time as a reference photo.
+        
+        Args:
+            reference_path: Path to the reference photo
+            time_window_seconds: Time window in seconds (default: 10)
+            prefer_same_location: Prioritize photos at same GPS location (default: True)
+            location_tolerance_meters: GPS tolerance in meters (default: 50)
+            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
+            
+        Returns:
+            List of burst photos with metadata
+        """
+        # Get reference photo metadata
+        reference_file = await self.get_file_by_path(reference_path)
+        if not reference_file:
+            _LOGGER.error("Reference file not found: %s", reference_path)
+            return []
+        
+        # Extract EXIF data from nested object
+        exif_data = reference_file.get('exif', {})
+        if not exif_data:
+            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
+            return []
+        
+        reference_date_taken = exif_data.get('date_taken')
+        if not reference_date_taken:
+            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
+            return []
+        
+        reference_latitude = exif_data.get('latitude')
+        reference_longitude = exif_data.get('longitude')
+        
+        _LOGGER.info(
+            "Burst detection: ref_date=%s, ref_lat=%s, ref_lon=%s, window=%ds",
+            reference_date_taken, reference_latitude, reference_longitude, time_window_seconds
+        )
+        
+        # Build query
+        query = """
+            SELECT 
+                m.id,
+                m.path,
+                m.filename,
+                m.folder,
+                m.file_type,
+                m.file_size,
+                m.modified_time,
+                e.date_taken,
+                e.camera_make,
+                e.camera_model,
+                e.latitude,
+                e.longitude,
+                e.location_city,
+                e.location_state,
+                e.location_country,
+                (e.date_taken - ?) AS seconds_offset
+        """
+        
+        # Add GPS distance calculation if location available
+        if reference_latitude and reference_longitude and prefer_same_location:
+            query += f""",
+                (6371000 * acos(
+                    cos(radians(?)) * cos(radians(e.latitude)) *
+                    cos(radians(e.longitude) - radians(?)) +
+                    sin(radians(?)) * sin(radians(e.latitude))
+                )) AS distance_meters
+            """
+        
+        query += """
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            WHERE m.path != ?
+              AND e.date_taken IS NOT NULL
+              AND ABS(e.date_taken - ?) <= ?
+        """
+        
+        # Add location filter if applicable
+        if reference_latitude and reference_longitude and prefer_same_location:
+            query += f"""
+              AND (6371000 * acos(
+                  cos(radians(?)) * cos(radians(e.latitude)) *
+                  cos(radians(e.longitude) - radians(?)) +
+                  sin(radians(?)) * sin(radians(e.latitude))
+              )) <= ?
+            """
+        
+        # Add sorting
+        if sort_order == "time_desc":
+            query += " ORDER BY e.date_taken DESC"
+        else:
+            query += " ORDER BY e.date_taken ASC"
+        
+        # Build parameters
+        params = [reference_date_taken]
+        
+        if reference_latitude and reference_longitude and prefer_same_location:
+            params.extend([reference_latitude, reference_longitude, reference_latitude])
+        
+        params.extend([reference_path, reference_date_taken, time_window_seconds])
+        
+        if reference_latitude and reference_longitude and prefer_same_location:
+            params.extend([
+                reference_latitude,
+                reference_longitude,
+                reference_latitude,
+                location_tolerance_meters
+            ])
+        
+        # Execute query
+        _LOGGER.info("Burst query params: %s", params)
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        
+        _LOGGER.info("Burst query returned %d rows", len(rows))
+        return [dict(row) for row in rows]
+    
+    async def get_anniversary_photos(
+        self,
+        reference_path: str,
+        window_days: int = 3,
+        years_back: int = 15,
+        sort_order: str = "time_asc"
+    ) -> list[dict]:
+        """Get photos from the same day across years (anniversary mode).
+        
+        Args:
+            reference_path: Path to the reference photo
+            window_days: Days before/after to include (±window, default: 3)
+            years_back: How many years back to search (default: 15)
+            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
+            
+        Returns:
+            List of anniversary photos with metadata
+        """
+        # Get reference photo metadata
+        reference_file = await self.get_file_by_path(reference_path)
+        if not reference_file:
+            _LOGGER.error("Reference file not found: %s", reference_path)
+            return []
+        
+        # Extract EXIF data
+        exif_data = reference_file.get('exif', {})
+        if not exif_data:
+            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
+            return []
+        
+        reference_date_taken = exif_data.get('date_taken')
+        if not reference_date_taken:
+            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
+            return []
+        
+        # TODO: Implement anniversary query
+        # - Extract month/day from reference_date_taken
+        # - Query for photos with same month/day ±window_days across last N years
+        # - Exclude reference photo
+        # - Apply sort_order
+        
+        _LOGGER.warning("Anniversary mode not yet implemented")
+        return []
+    
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.
         

@@ -155,24 +155,42 @@ get_file_metadata:
       selector:
         text:
 
-get_burst_photos:
-  name: Get Burst Photos
-  description: Get photos taken within a time window (and optionally same location) for burst/duplicate detection
+get_related_files:
+  name: Get Related Files
+  description: Get files related to a reference photo (burst detection or anniversary photos from same day across years)
   target:
     entity:
       integration: media_index
       domain: sensor
   fields:
+    mode:
+      name: Mode
+      description: Type of related files to find
+      required: true
+      selector:
+        select:
+          options:
+            - label: "Burst (photos within minutes)"
+              value: "burst"
+            - label: "Anniversary (same day across years)"
+              value: "anniversary"
     reference_path:
       name: Reference File Path
-      description: Full filesystem path to the reference media file
-      required: true
+      description: Full filesystem path to the reference media file (use media_source_uri instead when possible)
+      required: false
       example: "/media/photo/Photos/2023/IMG_1234.jpg"
       selector:
         text:
+    media_source_uri:
+      name: Media Source URI
+      description: Media-source URI for the reference media file (recommended)
+      required: false
+      example: "media-source://media_source/media/photo/Photos/2023/IMG_1234.jpg"
+      selector:
+        text:
     time_window_seconds:
-      name: Time Window
-      description: Time window in seconds (±) around reference photo's timestamp
+      name: Time Window (Burst Mode)
+      description: Time window in seconds (±) around reference photo's timestamp (burst mode only)
       default: 120
       selector:
         number:
@@ -180,19 +198,37 @@ get_burst_photos:
           max: 3600
           mode: box
     prefer_same_location:
-      name: Prefer Same Location
-      description: Filter by GPS proximity if available (fallback to time-only if no GPS)
+      name: Prefer Same Location (Burst Mode)
+      description: Filter by GPS proximity if available (burst mode only, fallback to time-only if no GPS)
       default: true
       selector:
         boolean:
     location_tolerance_meters:
-      name: Location Tolerance
-      description: Maximum distance in meters for GPS matching
+      name: Location Tolerance (Burst Mode)
+      description: Maximum distance in meters for GPS matching (burst mode only)
       default: 50
       selector:
         number:
           min: 10
           max: 1000
+          mode: box
+    window_days:
+      name: Window Days (Anniversary Mode)
+      description: Days before/after reference date to include (anniversary mode only, e.g., 3 = ±3 days)
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 30
+          mode: box
+    years_back:
+      name: Years Back (Anniversary Mode)
+      description: How many years back to search (anniversary mode only)
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 50
           mode: box
     sort_order:
       name: Sort Order
