@@ -1186,8 +1186,7 @@ class CacheManager:
         query += """
             FROM media_files m
             JOIN exif_data e ON m.id = e.file_id
-            WHERE m.path != ?
-              AND e.date_taken IS NOT NULL
+            WHERE e.date_taken IS NOT NULL
               AND ABS(e.date_taken - ?) <= ?
         """
         
@@ -1213,7 +1212,7 @@ class CacheManager:
         if reference_latitude and reference_longitude and prefer_same_location:
             params.extend([reference_latitude, reference_longitude, reference_latitude])
         
-        params.extend([reference_path, reference_date_taken, time_window_seconds])
+        params.extend([reference_date_taken, time_window_seconds])
         
         if reference_latitude and reference_longitude and prefer_same_location:
             params.extend([
