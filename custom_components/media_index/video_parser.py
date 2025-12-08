@@ -43,7 +43,7 @@ class VideoMetadataParser:
                 return None
             
             file_size = os.path.getsize(file_path)
-            _LOGGER.info(f"[VIDEO] Extracting metadata from: {path.name} (size: {file_size} bytes, path: {file_path})")
+            _LOGGER.debug(f"[VIDEO] Extracting metadata from: {path.name} (size: {file_size} bytes, path: {file_path})")
             
             try:
                 video = MP4(file_path)
@@ -53,25 +53,25 @@ class VideoMetadataParser:
                 video = None
                 
             if not video:
-                _LOGGER.warning(f"[VIDEO] Mutagen returned empty object for: {path.name} - will try filename fallback only")
+                _LOGGER.debug(f"[VIDEO] Mutagen returned empty object for: {path.name} - will try filename fallback only")
                 result: Dict[str, Any] = {}
             else:
                 result: Dict[str, Any] = {}
                 
                 # Extract basic video properties from video.info
                 if hasattr(video, 'info') and video.info:
-                    _LOGGER.info(f"[VIDEO] video.info attributes: {dir(video.info)}")
+                    _LOGGER.debug(f"[VIDEO] video.info attributes: {dir(video.info)}")
                     
                     # Duration in seconds
                     if hasattr(video.info, 'length'):
                         result['duration'] = round(video.info.length, 2)
-                        _LOGGER.info(f"[VIDEO] Duration: {result['duration']}s")
+                        _LOGGER.debug(f"[VIDEO] Duration: {result['duration']}s")
                     
                     # Dimensions (width x height)
                     if hasattr(video.info, 'width') and hasattr(video.info, 'height'):
                         result['width'] = video.info.width
                         result['height'] = video.info.height
-                        _LOGGER.info(f"[VIDEO] Dimensions: {result['width']}x{result['height']}")
+                        _LOGGER.debug(f"[VIDEO] Dimensions: {result['width']}x{result['height']}")
             
             # Extract creation date from MP4 atoms
             # MP4 files store creation dates in the movie/media/track header atoms
@@ -112,13 +112,13 @@ class VideoMetadataParser:
                 for tag in qt_tags:
                     if tag in video and video[tag]:
                         creation_date_str = str(video[tag][0])
-                        _LOGGER.info(f"[VIDEO] Found {tag}: {creation_date_str}")
+                        _LOGGER.debug(f"[VIDEO] Found {tag}: {creation_date_str}")
                         parsed_date = VideoMetadataParser._parse_datetime(creation_date_str)
                         if parsed_date:
                             try:
                                 dt = datetime.strptime(parsed_date, '%Y-%m-%d %H:%M:%S')
                                 creation_timestamp = int(dt.timestamp())
-                                _LOGGER.info(f"[VIDEO] Extracted date from {tag}: {datetime.fromtimestamp(creation_timestamp)}")
+                                _LOGGER.debug(f"[VIDEO] Extracted date from {tag}: {datetime.fromtimestamp(creation_timestamp)}")
                                 break
                             except ValueError:
                                 pass
@@ -151,7 +151,7 @@ class VideoMetadataParser:
                                 dt = datetime.strptime(date_str, '%Y%m%d')
                             
                             creation_timestamp = int(dt.timestamp())
-                            _LOGGER.info(f"[VIDEO] Extracted date from filename: {datetime.fromtimestamp(creation_timestamp)}")
+                            _LOGGER.debug(f"[VIDEO] Extracted date from filename: {datetime.fromtimestamp(creation_timestamp)}")
                             break
                         except ValueError as e:
                             _LOGGER.debug(f"[VIDEO] Failed to parse date from pattern {pattern}: {e}")
@@ -169,7 +169,7 @@ class VideoMetadataParser:
                     # This gives us the "oldest" timestamp which is likely closer to actual creation
                     fs_timestamp = min(stat.st_ctime, stat.st_mtime)
                     result['date_taken'] = int(fs_timestamp)
-                    _LOGGER.warning(f"[VIDEO] No date in metadata or filename for {path.name} - using filesystem date: {datetime.fromtimestamp(fs_timestamp)}")
+                    _LOGGER.debug(f"[VIDEO] No date in metadata or filename for {path.name} - using filesystem date: {datetime.fromtimestamp(fs_timestamp)}")
                 except Exception as e:
                     _LOGGER.error(f"[VIDEO] Failed to get filesystem dates for {path.name}: {e}")
                     # Even if filesystem check fails, don't give up - return partial result
@@ -179,13 +179,13 @@ class VideoMetadataParser:
             # MP4 files can store GPS in com.apple.quicktime.location.ISO6709 or XMP
             if video and 'com.apple.quicktime.location.ISO6709' in video:
                 iso6709 = video['com.apple.quicktime.location.ISO6709'][0]
-                _LOGGER.info(f"[VIDEO] Found GPS (ISO6709): {iso6709}")
+                _LOGGER.debug(f"[VIDEO] Found GPS (ISO6709): {iso6709}")
                 coords = VideoMetadataParser._parse_iso6709(iso6709)
                 if coords:
                     result['latitude'] = coords[0]
                     result['longitude'] = coords[1]
                     result['has_coordinates'] = True
-                    _LOGGER.info(f"[VIDEO] GPS coordinates: {coords[0]}, {coords[1]}")
+                    _LOGGER.debug(f"[VIDEO] GPS coordinates: {coords[0]}, {coords[1]}")
             
             # Extract rating
             # iTunes-style rating is stored in 'rate' or '----:com.apple.iTunes:rating'
@@ -198,21 +198,21 @@ class VideoMetadataParser:
                     if rate_value:
                         # Convert 0-100 to 0-5 stars
                         rating = int(rate_value / 20)
-                        _LOGGER.info(f"[VIDEO] Found rating (rate): {rating} stars")
+                        _LOGGER.debug(f"[VIDEO] Found rating (rate): {rating} stars")
             
                 # Try custom iTunes rating tag
                 if rating is None and '----:com.apple.iTunes:rating' in video:
                     rating_bytes = video['----:com.apple.iTunes:rating'][0]
                     try:
                         rating = int(rating_bytes.decode('utf-8'))
-                        _LOGGER.info(f"[VIDEO] Found rating (iTunes): {rating} stars")
+                        _LOGGER.debug(f"[VIDEO] Found rating (iTunes): {rating} stars")
                     except (ValueError, UnicodeDecodeError):
                         pass
             
             if rating is not None and 0 <= rating <= 5:
                 result['rating'] = rating
             
-            _LOGGER.info(f"[VIDEO] Extraction complete - found {len(result)} metadata fields: {list(result.keys())}")
+            _LOGGER.debug(f"[VIDEO] Extraction complete - found {len(result)} metadata fields: {list(result.keys())}")
             return result if result else None
             
         except Exception as e:
