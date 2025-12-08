@@ -160,7 +160,20 @@ class VideoMetadataParser:
             if creation_timestamp:
                 result['date_taken'] = creation_timestamp
             else:
-                _LOGGER.warning(f"[VIDEO] No creation date found for: {path.name}")
+                # Final fallback: Use filesystem created_time (earliest of ctime/mtime)
+                # This ensures videos always have a date_taken for proper sorting
+                import os
+                try:
+                    stat = os.stat(file_path)
+                    # Use the earlier of creation time or modification time
+                    # This gives us the "oldest" timestamp which is likely closer to actual creation
+                    fs_timestamp = min(stat.st_ctime, stat.st_mtime)
+                    result['date_taken'] = int(fs_timestamp)
+                    _LOGGER.warning(f"[VIDEO] No date in metadata or filename for {path.name} - using filesystem date: {datetime.fromtimestamp(fs_timestamp)}")
+                except Exception as e:
+                    _LOGGER.error(f"[VIDEO] Failed to get filesystem dates for {path.name}: {e}")
+                    # Even if filesystem check fails, don't give up - return partial result
+                    pass
             
             # Extract GPS coordinates from XMP if available
             # MP4 files can store GPS in com.apple.quicktime.location.ISO6709 or XMP
