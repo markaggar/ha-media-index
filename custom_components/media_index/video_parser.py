@@ -181,20 +181,20 @@ class VideoMetadataParser:
             if video:
                 # Try iTunes rating first (0-5 stars * 20 = 0-100)
                 if 'rate' in video:
-                rate_value = video['rate'][0] if video['rate'] else None
-                if rate_value:
-                    # Convert 0-100 to 0-5 stars
-                    rating = int(rate_value / 20)
-                    _LOGGER.info(f"[VIDEO] Found rating (rate): {rating} stars")
+                    rate_value = video['rate'][0] if video['rate'] else None
+                    if rate_value:
+                        # Convert 0-100 to 0-5 stars
+                        rating = int(rate_value / 20)
+                        _LOGGER.info(f"[VIDEO] Found rating (rate): {rating} stars")
             
                 # Try custom iTunes rating tag
                 if rating is None and '----:com.apple.iTunes:rating' in video:
-                rating_bytes = video['----:com.apple.iTunes:rating'][0]
-                try:
-                    rating = int(rating_bytes.decode('utf-8'))
-                    _LOGGER.info(f"[VIDEO] Found rating (iTunes): {rating} stars")
-                except (ValueError, UnicodeDecodeError):
-                    pass
+                    rating_bytes = video['----:com.apple.iTunes:rating'][0]
+                    try:
+                        rating = int(rating_bytes.decode('utf-8'))
+                        _LOGGER.info(f"[VIDEO] Found rating (iTunes): {rating} stars")
+                    except (ValueError, UnicodeDecodeError):
+                        pass
             
             if rating is not None and 0 <= rating <= 5:
                 result['rating'] = rating
