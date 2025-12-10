@@ -76,6 +76,26 @@ class VideoMetadataParser:
                                         result['date_taken'] = int(parsed_dt.timestamp())
                                         _LOGGER.debug(f"[VIDEO] Extracted datetime from {field}: {parsed_dt}")
                                         break
+                            
+                            # Extract GPS coordinates from xyz field (ISO 6709 format)
+                            if hasattr(track, 'xyz') and track.xyz:
+                                _LOGGER.debug(f"[VIDEO] Found GPS (xyz/ISO6709): {track.xyz}")
+                                coords = VideoMetadataParser._parse_iso6709(track.xyz)
+                                if coords:
+                                    result['latitude'] = coords[0]
+                                    result['longitude'] = coords[1]
+                                    result['has_coordinates'] = True
+                                    _LOGGER.debug(f"[VIDEO] GPS coordinates: {coords[0]}, {coords[1]}")
+                            
+                            # Extract rating (if available)
+                            if hasattr(track, 'rating') and track.rating:
+                                try:
+                                    rating = int(track.rating)
+                                    if 0 <= rating <= 5:
+                                        result['rating'] = rating
+                                        _LOGGER.debug(f"[VIDEO] Found rating: {rating}/5")
+                                except (ValueError, TypeError):
+                                    pass
                         
                         # Extract video dimensions and duration
                         if track.track_type == "Video":
