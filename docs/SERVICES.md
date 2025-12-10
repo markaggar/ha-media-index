@@ -120,7 +120,33 @@ service: media_index.get_random_items
 data:
   count: 20
   date_from: "2024-01-01"
+
+# Anniversary mode: Photos from same date across all years (Through the Years)
+service: media_index.get_random_items
+data:
+  count: 100
+  anniversary_month: "*"
+  anniversary_day: "25"
+  anniversary_window_days: 3
+
+# Anniversary mode: Photos from December 25 across all years, ±7 day window
+service: media_index.get_random_items
+data:
+  count: 100
+  anniversary_month: "12"
+  anniversary_day: "25"
+  anniversary_window_days: 7
 ```
+
+**Anniversary Mode Parameters (v1.5+):**
+- `anniversary_month` (optional): Month for anniversary matching (`"01"`-`"12"` or `"*"` for any month)
+- `anniversary_day` (optional): Day for anniversary matching (`"01"`-`"31"` or `"*"` for any day)
+- `anniversary_window_days` (optional, default: 0): Expand ±N days around target date
+
+**Use cases:**
+- Through the Years feature in Media Card - show photos from today's date across all years
+- Holiday memories - "All December 25th photos from any year"
+- Birthday/anniversary retrospectives with adjustable date tolerance
 
 ### `media_index.get_ordered_files`
 
@@ -177,6 +203,85 @@ data:
 service: media_index.get_file_metadata
 data:
   media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/sunset.jpg
+```
+
+### `media_index.get_related_files`
+
+**New in v1.5** - Find related photos by date/time or burst detection mode.
+
+**Parameters:**
+- `mode` (required): `"burst"` for burst detection
+- `reference_path` (optional): Filesystem path to reference photo
+- `media_source_uri` (optional): Media-source URI (alternative to reference_path)
+- `time_window_seconds` (optional, default: 120): Time window in seconds (±)
+- `prefer_same_location` (optional, default: true): Enable GPS proximity filtering
+- `location_tolerance_meters` (optional, default: 50): Maximum GPS distance for matching
+- `sort_order` (optional, default: "time_asc"): Result ordering (`time_asc` or `time_desc`)
+
+**Note:** Provide either `reference_path` OR `media_source_uri`
+
+**Returns:** List of related photos with `seconds_offset`, `distance_meters`, `is_favorited`, `rating`, and `media_source_uri`
+
+**Use cases:**
+- Burst Review feature in Media Card - compare rapid-fire shots to select the best photo
+- Find photos taken at the same location and time
+- Review burst sequences with GPS filtering
+
+**Examples:**
+```yaml
+# Find burst photos within ±2 minutes (default)
+service: media_index.get_related_files
+data:
+  mode: burst
+  media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
+
+# Custom time window and GPS tolerance
+service: media_index.get_related_files
+data:
+  mode: burst
+  media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
+  time_window_seconds: 300
+  location_tolerance_meters: 100
+
+# Time-only matching (disable GPS filtering)
+service: media_index.get_related_files
+data:
+  mode: burst
+  media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
+  prefer_same_location: false
+```
+
+### `media_index.update_burst_metadata`
+
+**New in v1.5** - Save burst review session data to file metadata for historical tracking.
+
+**Parameters:**
+- `burst_files` (required): List of all file URIs in the burst group
+- `favorited_files` (required): List of file URIs marked as favorites during review
+
+**Returns:**
+- `files_updated`: Number of files updated
+- `burst_count`: Total files in burst
+- `favorites_count`: Number of favorited files
+
+**How it works:**
+- Writes `burst_favorites` (JSON array of filenames) to all files in the burst
+- Writes `burst_count` (integer) to record total files at review time
+- Metadata persists even if files are deleted or parameters change
+- Enables historical tracking and future features
+
+**Example:**
+```yaml
+service: media_index.update_burst_metadata
+data:
+  burst_files:
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1235.jpg
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1236.jpg
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1237.jpg
+  favorited_files:
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1235.jpg
+    - media-source://media_source/media/Photo/PhotoLibrary/IMG_1236.jpg
 ```
 
 ## File Management Services
@@ -317,11 +422,30 @@ data:
 The Media Index services integrate seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
 
 - **`get_random_items`** - Used automatically by Media Card for random slideshow mode
+  - Anniversary mode (v1.5+) powers "Through the Years" feature
 - **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v1.3)
+- **`get_related_files`** (v1.5+) - Powers "Burst Review" feature for reviewing rapid-fire photos
+- **`update_burst_metadata`** (v1.5+) - Saves burst review favorites to file metadata
 - **`mark_favorite`** - Called when clicking favorite button on Media Card
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
+
+## v1.5 Enhancements Summary
+
+### New Services
+- ✨ **`get_related_files`** - Burst detection with time-based and GPS-based filtering
+- ✨ **`update_burst_metadata`** - Persist burst review session data to file metadata
+
+### Enhanced Services
+- 📅 **`get_random_items`** - Added anniversary mode for "Through the Years" features
+  - New parameters: `anniversary_month`, `anniversary_day`, `anniversary_window_days`
+  - Cross-year date matching with adjustable window
+
+### Use Cases
+- Burst Review - Compare rapid-fire shots taken at same moment
+- Through the Years - View photos from same date across all years
+- Historical tracking - Burst favorites persist in file metadata
 
 ## v1.3 Enhancements Summary
 

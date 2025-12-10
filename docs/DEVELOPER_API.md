@@ -91,8 +91,10 @@ const cloudItems = await this.hass.callWS({
 
 **All Media Index services** support the `target` parameter:
 
-- ✅ `get_random_items` - Random selection (enhanced in v1.3)
+- ✅ `get_random_items` - Random selection (enhanced in v1.3, anniversary mode in v1.5)
 - ✅ `get_ordered_files` - Sequential retrieval (new in v1.3)
+- ✅ `get_related_files` - Burst detection and related photos (new in v1.5)
+- ✅ `update_burst_metadata` - Save burst review session data (new in v1.5)
 - ✅ `get_file_metadata`
 - ✅ `mark_favorite`
 - ✅ `delete_media`
@@ -217,7 +219,11 @@ const wsResponse = await this.hass.callWS({
     date_to: '2024-12-31',         // Optional: ISO date string
     priority_new_files: true,      // v1.3: Prioritize recent files
     new_files_threshold_seconds: 2592000,  // v1.3: 30 days threshold
-    recursive: true                // Optional: include subfolders (default: true)
+    recursive: true,               // Optional: include subfolders (default: true)
+    // v1.5: Anniversary mode for "Through the Years" feature
+    // anniversary_month: '*',     // '*' or '01'-'12'
+    // anniversary_day: '25',      // '*' or '01'-'31'
+    // anniversary_window_days: 3  // ±N days tolerance
   },
   return_response: true
 });
@@ -319,7 +325,115 @@ if (response && response.items && Array.isArray(response.items)) {
 
 **Response Structure:** Same as `get_random_items` with additional `order_value` field containing the value used for ordering.
 
-### 3. Mark File as Favorite
+### 3. Get Related Files (Burst Detection)
+
+**New in v1.5** - Find photos taken at the same time and location (burst detection).
+
+```javascript
+const wsResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'get_related_files',
+  service_data: {
+    mode: 'burst',
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg',
+    time_window_seconds: 120,           // ±2 minutes (default)
+    prefer_same_location: true,         // Enable GPS filtering
+    location_tolerance_meters: 50,      // Max distance (default)
+    sort_order: 'time_asc'             // Chronological order
+  },
+  return_response: true
+});
+
+const response = wsResponse?.response || wsResponse;
+
+if (response && response.items && Array.isArray(response.items)) {
+  console.log(`Found ${response.items.length} burst photos`);
+  
+  response.items.forEach(item => {
+    console.log('Path:', item.path);
+    console.log('Seconds offset:', item.seconds_offset);
+    console.log('Distance (meters):', item.distance_meters);
+    console.log('Is favorited:', item.is_favorited);
+    console.log('Rating:', item.rating);
+  });
+}
+```
+
+**Response Item Structure:**
+
+```javascript
+{
+  id: 1235,
+  path: "/media/Photo/PhotoLibrary/IMG_1235.jpg",
+  media_source_uri: "media-source://media_source/media/Photo/PhotoLibrary/IMG_1235.jpg",
+  filename: "IMG_1235.jpg",
+  folder: "/media/Photo/PhotoLibrary",
+  file_type: "image",
+  media_content_type: "image/jpeg",
+  date_taken: "2024-10-15T14:30:15",
+  seconds_offset: 15,          // 15 seconds after reference photo
+  distance_meters: 2.5,        // 2.5 meters from reference location
+  is_favorited: false,
+  rating: 0,
+  metadata: { /* ... EXIF data ... */ }
+}
+```
+
+**Use Cases:**
+- Burst Review feature - compare rapid-fire shots
+- Find all photos from a specific moment
+- GPS-filtered photo sequences
+
+### 4. Update Burst Metadata
+
+**New in v1.5** - Save burst review session data to file metadata.
+
+```javascript
+const wsResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'update_burst_metadata',
+  service_data: {
+    burst_files: [
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg',
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1235.jpg',
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1236.jpg',
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1237.jpg'
+    ],
+    favorited_files: [
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1235.jpg',
+      'media-source://media_source/media/Photo/PhotoLibrary/IMG_1236.jpg'
+    ]
+  },
+  return_response: true
+});
+
+const response = wsResponse?.response || wsResponse;
+
+console.log('Burst metadata saved:', {
+  files_updated: response.files_updated,
+  burst_count: response.burst_count,
+  favorites_count: response.favorites_count
+});
+```
+
+**Response:**
+
+```javascript
+{
+  files_updated: 4,
+  burst_count: 4,
+  favorites_count: 2
+}
+```
+
+**What gets saved:**
+- `burst_favorites`: JSON array of favorited filenames (stored in all burst files)
+- `burst_count`: Total files in burst at review time (stored in all burst files)
+- Metadata persists even if files are deleted or parameters change
+
+### 5. Mark File as Favorite
 
 Toggle favorite status for a file (writes to database and EXIF).
 
@@ -363,7 +477,7 @@ console.log('Favorite status updated:', response);
 }
 ```
 
-### 4. Delete Media File
+### 6. Delete Media File
 
 Move a file to the `_Junk` folder.
 
@@ -405,7 +519,7 @@ console.log('File deleted:', response);
 }
 ```
 
-### 5. Mark File for Editing
+### 7. Mark File for Editing
 
 Move a file to the `_Edit` folder.
 
@@ -435,7 +549,7 @@ const uriResponse = await this.hass.callWS({
 });
 ```
 
-### 6. Restore Edited Files
+### 8. Restore Edited Files
 
 **Enhanced in v1.3**: Added `file_path` parameter for single-file restore.
 
@@ -460,7 +574,7 @@ const singleResponse = await this.hass.callWS({
 });
 ```
 
-### 7. Get File Metadata
+### 9. Get File Metadata
 
 Retrieve detailed metadata for a specific file.
 
@@ -492,7 +606,7 @@ const uriResponse = await this.hass.callWS({
 console.log('File metadata:', response);
 ```
 
-### 8. Geocode File or Coordinates
+### 10. Geocode File or Coordinates
 
 **Enhanced in v1.3**: Now supports direct lat/lon lookup (not just file_path).
 
