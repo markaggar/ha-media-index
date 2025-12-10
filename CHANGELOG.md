@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SQL date component matching: `strftime('%m', ...)` and `strftime('%d', ...)` for cross-year queries
   - Designed for Media Card v5.5+ "Through the Years" feature showing photos from same date across all years
 
+- **Database Cleanup Service**: New `cleanup_database` service for maintenance
+  - Validates all database entries against filesystem
+  - Removes entries for files that no longer exist
+  - Dry-run mode by default for safe testing (`dry_run: true`)
+  - Returns list of stale files found/removed with counts
+  - Solves 404 errors from moved/deleted files
+  - Useful after bulk file operations outside Home Assistant
+
+- **Favorites Index**: Added database index on `is_favorited` column
+  - Improves query performance when using `favorites_only` filter
+  - Optimizes Media Card v5.5+ filtering features
+
 ### Fixed
 
 - **Video Metadata Extraction**

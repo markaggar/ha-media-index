@@ -871,24 +871,22 @@ class CacheManager:
             # Date filtering: null means "no limit" in that direction
             # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                # Validate date_from is a valid date string
+                # Validate date_from is a valid date string using datetime.strptime
                 try:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_from_str) != 10 or date_from_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_from format: {date_from_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_from_str, "%Y-%m-%d")
                     query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                     params.append(date_from_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if date_to is not None:
-                # Validate date_to is a valid date string
+                # Validate date_to is a valid date string using datetime.strptime
                 try:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_to_str, "%Y-%m-%d")
                     query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
@@ -906,10 +904,12 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append(f"CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN {day_min} AND {day_max}")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                            params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append(f"CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = {day_int}")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                            params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
                 # else: wildcard "*" means any day - no condition added
@@ -918,7 +918,8 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append(f"CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = {month_int}")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
                 # else: wildcard "*" means any month - no condition added
@@ -1258,8 +1259,8 @@ class CacheManager:
         reference_longitude = exif_data.get('longitude')
         
         _LOGGER.info(
-            "Burst detection: ref_date=%s, ref_lat=%s, ref_lon=%s, window=%ds",
-            reference_date_taken, reference_latitude, reference_longitude, time_window_seconds
+            "Burst detection: ref_date=%s, location_present=%s, window=%ds",
+            reference_date_taken, reference_latitude is not None and reference_longitude is not None, time_window_seconds
         )
         
         # Build query

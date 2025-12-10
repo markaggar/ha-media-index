@@ -64,6 +64,7 @@ SERVICE_GET_RANDOM_ITEMS_SCHEMA = vol.Schema({
     vol.Optional("folder"): cv.string,
     vol.Optional("recursive", default=True): cv.boolean,
     vol.Optional("file_type"): vol.In(["image", "video"]),
+    vol.Optional("favorites_only", default=False): cv.boolean,
     vol.Optional("date_from"): cv.string,
     vol.Optional("date_to"): cv.string,
     vol.Optional("anniversary_month"): cv.string,  # "1"-"12" or "*"
@@ -82,10 +83,7 @@ SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
     vol.Optional("order_direction", default="desc"): vol.In(["asc", "desc"]),
 }, extra=vol.ALLOW_EXTRA)
 
-SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema({
-    vol.Optional("file_path"): cv.string,
-    vol.Optional("media_source_uri"): cv.string,
-}, extra=vol.ALLOW_EXTRA)
+# Note: SERVICE_GET_FILE_METADATA_SCHEMA defined later after _validate_path_or_uri function
 
 SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
     vol.Optional("reference_path"): cv.string,
@@ -143,6 +141,17 @@ def _validate_path_or_uri(data):
     if not data.get("file_path") and not data.get("media_source_uri"):
         raise vol.Invalid("Either 'file_path' or 'media_source_uri' must be provided")
     return data
+
+SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+        },
+        _validate_path_or_uri,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
 
 SERVICE_MARK_FAVORITE_SCHEMA = vol.Schema(
     vol.All(
@@ -212,7 +221,6 @@ def _convert_uri_to_path(media_source_uri: str, base_folder: str, media_source_p
     relative_path = media_source_uri[len(media_source_prefix):]
     
     # Prevent path traversal attacks by rejecting any '..' components
-    import os
     from pathlib import PurePath
     rel_parts = [part for part in PurePath(relative_path).parts if part not in ('', '.')]
     if any(part == '..' for part in rel_parts):
@@ -1025,10 +1033,10 @@ def _register_services(hass: HomeAssistant):
         
         try:
             # Get all files from database
-            cursor = await cache_manager._db.execute(
+            async with cache_manager._db.execute(
                 "SELECT id, path FROM media_files ORDER BY path"
-            )
-            rows = await cursor.fetchall()
+            ) as cursor:
+                rows = await cursor.fetchall()
             
             stale_files = []
             checked = 0
@@ -1342,7 +1350,7 @@ def _register_services(hass: HomeAssistant):
     
     hass.services.async_register(
         DOMAIN,
-        "cleanup_database",
+        SERVICE_CLEANUP_DATABASE,
         handle_cleanup_database,
         schema=vol.Schema({
             vol.Optional("dry_run", default=True): cv.boolean,

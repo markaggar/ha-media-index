@@ -1,5 +1,7 @@
 """Video metadata parser for MP4, MOV, and other video formats."""
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -37,7 +39,6 @@ class VideoMetadataParser:
                 return None
             
             # Check if file exists and is readable
-            import os
             if not os.path.exists(file_path):
                 _LOGGER.error(f"[VIDEO] File not found: {file_path}")
                 return None
@@ -94,8 +95,9 @@ class VideoMetadataParser:
                             attr_val = getattr(video, attr_name)
                             if attr_val and isinstance(attr_val, (int, float)) and attr_val > 0:
                                 _LOGGER.debug(f"[VIDEO] Found time attribute: {attr_name} = {attr_val}")
-                        except:
-                            pass
+                        except AttributeError as attr_error:
+                            # Ignore errors when probing attributes, but log for debugging
+                            _LOGGER.debug(f"[VIDEO] Error accessing attribute {attr_name}: {attr_error}")
                             
             except Exception as e:
                 _LOGGER.debug(f"[VIDEO] Failed to inspect MP4 atoms: {e}")
@@ -120,14 +122,13 @@ class VideoMetadataParser:
                                 creation_timestamp = int(dt.timestamp())
                                 _LOGGER.debug(f"[VIDEO] Extracted date from {tag}: {datetime.fromtimestamp(creation_timestamp)}")
                                 break
-                            except ValueError:
-                                pass
+                            except ValueError as e:
+                                _LOGGER.debug(f"[VIDEO] Failed to parse date from {tag}: {parsed_date} ({e})")
+            
             
             # Method 3: Fallback to filename date extraction (YYYYMMDD_HHMMSS pattern)
             if not creation_timestamp:
-                import re
-                filename = path.stem  # Filename without extension
-                _LOGGER.debug(f"[VIDEO] Attempting filename date extraction from: {filename}")
+                filename = path.stem  # Filename without extensionxtraction from: {filename}")
                 
                 # Match patterns like: 20221204_184255, 2022-12-04_18-42-55, etc.
                 patterns = [
@@ -173,7 +174,6 @@ class VideoMetadataParser:
                 except Exception as e:
                     _LOGGER.error(f"[VIDEO] Failed to get filesystem dates for {path.name}: {e}")
                     # Even if filesystem check fails, don't give up - return partial result
-                    pass
             
             # Extract GPS coordinates from XMP if available
             # MP4 files can store GPS in com.apple.quicktime.location.ISO6709 or XMP
@@ -206,8 +206,8 @@ class VideoMetadataParser:
                     try:
                         rating = int(rating_bytes.decode('utf-8'))
                         _LOGGER.debug(f"[VIDEO] Found rating (iTunes): {rating} stars")
-                    except (ValueError, UnicodeDecodeError):
-                        pass
+                    except (ValueError, UnicodeDecodeError) as e:
+                        _LOGGER.debug(f"[VIDEO] Failed to decode iTunes rating for {path.name}: {e}")
             
             if rating is not None and 0 <= rating <= 5:
                 result['rating'] = rating

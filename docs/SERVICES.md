@@ -417,6 +417,48 @@ data:
   longitude: -122.4194
 ```
 
+### `media_index.cleanup_database`
+
+Remove database entries for files that no longer exist on the filesystem (v1.5+).
+
+**When to use:**
+- After moving or deleting files outside Home Assistant
+- To fix 404 errors in Media Card from stale database entries
+- As periodic maintenance to keep database in sync with filesystem
+
+**Parameters:**
+- `dry_run` (optional, default: true): If true, only reports stale files without removing them
+
+**Returns:**
+- `files_checked`: Total number of files validated
+- `stale_files`: List of files no longer on filesystem
+- `files_removed`: Number of database entries deleted (0 if dry_run=true)
+
+**Examples:**
+```yaml
+# Safe preview - see what would be removed
+service: media_index.cleanup_database
+data:
+  dry_run: true
+
+# Actually remove stale entries
+service: media_index.cleanup_database
+data:
+  dry_run: false
+```
+
+**Response example:**
+```json
+{
+  "files_checked": 15234,
+  "files_removed": 42,
+  "stale_files": [
+    {"id": 123, "path": "/media/Photo/deleted_file.jpg"},
+    {"id": 456, "path": "/media/Photo/moved_file.jpg"}
+  ]
+}
+```
+
 ## Service Usage with Media Card
 
 The Media Index services integrate seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
