@@ -59,13 +59,16 @@ Get random media files from the index (used by Media Card).
 **Parameters:**
 - `count` (optional, default: 1): Number of items to return (1-100)
 - `folder` (optional): Filter by folder (filesystem path or media-source URI)
+- `recursive` (optional, default: true): Include subfolders when filtering by folder
 - `file_type` (optional): Filter by `image` or `video`
+- `favorites_only` (optional, default: false): Only return files marked as favorites
 - `date_from` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no lower limit"
 - `date_to` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no upper limit"
-- `favorites_only` (optional, default: false): Only return files marked as favorites
+- `anniversary_month` (optional): Month for anniversary matching (`"01"`-`"12"` or `"*"` for any month)
+- `anniversary_day` (optional): Day for anniversary matching (`"01"`-`"31"` or `"*"` for any day)
+- `anniversary_window_days` (optional, default: 0): Expand ±N days around target date for anniversary matching
 - `priority_new_files` (optional, default: false): Prioritize recently scanned files
-- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files
-- `recursive` (optional, default: true): Include subfolders
+- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files (1 hour) 
 
 **Returns:** List of media items with metadata (includes `media_source_uri` in v1.4+)
 
@@ -210,12 +213,20 @@ data:
 **New in v1.5** - Find related photos by date/time or burst detection mode.
 
 **Parameters:**
-- `mode` (required): `"burst"` for burst detection
+- `mode` (required): `"burst"` for burst detection or `"anniversary"` for same-day photos across years
 - `reference_path` (optional): Filesystem path to reference photo
 - `media_source_uri` (optional): Media-source URI (alternative to reference_path)
-- `time_window_seconds` (optional, default: 120): Time window in seconds (±)
-- `prefer_same_location` (optional, default: true): Enable GPS proximity filtering
-- `location_tolerance_meters` (optional, default: 50): Maximum GPS distance for matching
+
+**Burst Mode Parameters:**
+- `time_window_seconds` (optional, default: 120): Time window in seconds (±) around reference timestamp
+- `prefer_same_location` (optional, default: true): Enable GPS proximity filtering (fallback to time-only if no GPS)
+- `location_tolerance_meters` (optional, default: 50): Maximum GPS distance in meters for matching
+
+**Anniversary Mode Parameters:**
+- `window_days` (optional, default: 3): Days before/after reference date to include (±N days)
+- `years_back` (optional, default: 15): How many years back to search
+
+**Common Parameters:**
 - `sort_order` (optional, default: "time_asc"): Result ordering (`time_asc` or `time_desc`)
 
 **Note:** Provide either `reference_path` OR `media_source_uri`

@@ -47,13 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Video Metadata Extraction**
-  - Enhanced video parser with comprehensive filename date extraction fallback
-  - Extracts dates from patterns: `YYYYMMDD_HHMMSS`, `YYYYMMDD-HHMMSS`, `YYYYMMDD`
-  - Final fallback to filesystem dates (`min(ctime, mtime)`) ensures all videos have `date_taken`
-  - Prevents null `date_taken` values that caused incorrect sort order in sequential mode
-  - Gracefully handles mutagen MP4 parsing failures (returns empty objects for some files)
+- **Video Metadata Extraction** (Enhanced in v1.5.0)
+  - **NEW**: Integrated `pymediainfo` library for reliable datetime extraction from MP4/MOV files
+  - **Primary method**: MediaInfo `encoded_date` field (proven to work on all tested videos)
+  - **Fallback methods**: Filename patterns → filesystem timestamps
+  - Successfully extracts `Create Date` from MP4 video headers (verified on Android, Samsung, and iPhone videos)
+  - Tested datetime formats: "2020-05-16 03:37:57 UTC", "2025-07-06 01:28:44"
+  - Extracts dimensions, duration, rating, and GPS coordinates from mutagen tags
+  - Gracefully handles mutagen MP4 parsing failures with pymediainfo fallback
   - All logging changed from info/warning to debug level to reduce system log noise
+  - Prevents null `date_taken` values that caused incorrect sort order in sequential mode
   - Fixes infinite video replay loop when videos with null dates appeared at position 1
 
 ### Service Parameters

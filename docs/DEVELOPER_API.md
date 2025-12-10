@@ -214,16 +214,17 @@ const wsResponse = await this.hass.callWS({
     folder: '/media/Photo/New',    // Optional: filter by folder (path or URI)
     // v1.4: folder can be either filesystem path OR media-source URI:
     // folder: 'media-source://media_source/local/photos'
+    recursive: true,               // Optional: include subfolders (default: true)
     file_type: 'image',            // Optional: 'image' or 'video'
+    favorites_only: false,         // Optional: only favorited files (default: false)
     date_from: '2024-01-01',       // Optional: ISO date string
     date_to: '2024-12-31',         // Optional: ISO date string
     priority_new_files: true,      // v1.3: Prioritize recent files
     new_files_threshold_seconds: 2592000,  // v1.3: 30 days threshold
-    recursive: true,               // Optional: include subfolders (default: true)
     // v1.5: Anniversary mode for "Through the Years" feature
-    // anniversary_month: '*',     // '*' or '01'-'12'
-    // anniversary_day: '25',      // '*' or '01'-'31'
-    // anniversary_window_days: 3  // ±N days tolerance
+    // anniversary_month: '*',     // Optional: '01'-'12' or '*' for any month
+    // anniversary_day: '25',      // Optional: '01'-'31' or '*' for any day
+    // anniversary_window_days: 3  // Optional: ±N days tolerance (default: 0)
   },
   return_response: true
 });
@@ -325,9 +326,11 @@ if (response && response.items && Array.isArray(response.items)) {
 
 **Response Structure:** Same as `get_random_items` with additional `order_value` field containing the value used for ordering.
 
-### 3. Get Related Files (Burst Detection)
+### 3. Get Related Files (Burst Detection & Anniversary Mode)
 
-**New in v1.5** - Find photos taken at the same time and location (burst detection).
+**New in v1.5** - Find photos taken at the same time and location (burst mode) or from the same date across years (anniversary mode).
+
+**Burst Mode Example:**
 
 ```javascript
 const wsResponse = await this.hass.callWS({
@@ -338,9 +341,9 @@ const wsResponse = await this.hass.callWS({
     mode: 'burst',
     media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg',
     time_window_seconds: 120,           // ±2 minutes (default)
-    prefer_same_location: true,         // Enable GPS filtering
-    location_tolerance_meters: 50,      // Max distance (default)
-    sort_order: 'time_asc'             // Chronological order
+    prefer_same_location: true,         // Enable GPS filtering (default)
+    location_tolerance_meters: 50,      // Max distance in meters (default)
+    sort_order: 'time_asc'             // Chronological order (default)
   },
   return_response: true
 });
@@ -356,6 +359,37 @@ if (response && response.items && Array.isArray(response.items)) {
     console.log('Distance (meters):', item.distance_meters);
     console.log('Is favorited:', item.is_favorited);
     console.log('Rating:', item.rating);
+  });
+}
+```
+
+**Anniversary Mode Example:**
+
+```javascript
+const wsResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'get_related_files',
+  service_data: {
+    mode: 'anniversary',
+    media_source_uri: 'media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg',
+    window_days: 3,                     // ±3 days around reference date (default)
+    years_back: 15,                     // Search up to 15 years back (default)
+    sort_order: 'time_desc'            // Newest first (or 'time_asc')
+  },
+  return_response: true
+});
+
+const response = wsResponse?.response || wsResponse;
+
+if (response && response.items && Array.isArray(response.items)) {
+  console.log(`Found ${response.items.length} anniversary photos`);
+  
+  response.items.forEach(item => {
+    console.log('Path:', item.path);
+    console.log('Date taken:', item.date_taken);
+    console.log('Years ago:', item.years_ago);  // How many years before reference
+    console.log('Is favorited:', item.is_favorited);
   });
 }
 ```
@@ -384,6 +418,8 @@ if (response && response.items && Array.isArray(response.items)) {
 - Burst Review feature - compare rapid-fire shots
 - Find all photos from a specific moment
 - GPS-filtered photo sequences
+- "Through the Years" feature - photos from same date across multiple years
+- Anniversary retrospectives with date tolerance
 
 ### 4. Update Burst Metadata
 
@@ -662,7 +698,7 @@ console.log('Location:', coordResponse.location_name);
 // Output: "San Francisco, California, United States"
 ```
 
-### 9. Trigger Manual Scan
+### 11. Trigger Manual Scan
 
 Start a manual folder scan.
 
@@ -678,6 +714,67 @@ const response = await this.hass.callWS({
   return_response: true
 });
 ```
+
+### 12. Cleanup Database
+
+**New in v1.5** - Remove database entries for files that no longer exist on the filesystem.
+
+```javascript
+// Preview mode - see what would be removed
+const previewResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'cleanup_database',
+  service_data: {
+    dry_run: true  // Default: true (safe preview mode)
+  },
+  return_response: true
+});
+
+const preview = previewResponse?.response || previewResponse;
+
+console.log(`Would remove ${preview.stale_files.length} stale entries`);
+preview.stale_files.forEach(file => {
+  console.log(`Stale: ${file.path} (ID: ${file.id})`);
+});
+
+// Actually remove stale entries
+const cleanupResponse = await this.hass.callWS({
+  type: 'call_service',
+  domain: 'media_index',
+  service: 'cleanup_database',
+  service_data: {
+    dry_run: false  // Actually delete stale entries
+  },
+  return_response: true
+});
+
+const result = cleanupResponse?.response || cleanupResponse;
+
+console.log('Cleanup complete:', {
+  files_checked: result.files_checked,
+  files_removed: result.files_removed,
+  stale_files_count: result.stale_files.length
+});
+```
+
+**Response:**
+
+```javascript
+{
+  files_checked: 15234,
+  files_removed: 42,  // 0 if dry_run=true
+  stale_files: [
+    { id: 123, path: "/media/Photo/deleted_file.jpg" },
+    { id: 456, path: "/media/Photo/moved_file.jpg" }
+  ]
+}
+```
+
+**Use Cases:**
+- After bulk file operations outside Home Assistant
+- Fix 404 errors from stale database entries
+- Periodic maintenance to sync database with filesystem
 
 ## Response Handling
 
