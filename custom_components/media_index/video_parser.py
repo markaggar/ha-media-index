@@ -109,13 +109,6 @@ class VideoMetadataParser:
                             
                             _LOGGER.debug(f"[VIDEO] Dimensions: {result.get('width')}x{result.get('height')}, "
                                         f"Duration: {result.get('duration')}s")
-                        
-                        # Extract GPS coordinates
-                        if track.track_type == "General":
-                            # Check for GPS data in various formats
-                            if hasattr(track, 'xyz'):
-                                _LOGGER.debug(f"[VIDEO] Found xyz GPS: {track.xyz}")
-                                # Parse GPS coordinates if present
                             
                 except Exception as e:
                     _LOGGER.debug(f"[VIDEO] pymediainfo extraction failed: {e}, falling back to mutagen")
