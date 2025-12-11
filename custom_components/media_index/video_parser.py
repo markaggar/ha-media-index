@@ -9,8 +9,16 @@ from typing import Any, Dict, Optional
 try:
     from pymediainfo import MediaInfo
     PYMEDIAINFO_AVAILABLE = True
+    # Test if MediaInfo library is actually available
+    try:
+        MediaInfo.can_parse()
+        _LOGGER.info("[VIDEO] ✅ pymediainfo AND MediaInfo library are both available")
+    except Exception as e:
+        _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo installed but MediaInfo library missing: {e}")
+        PYMEDIAINFO_AVAILABLE = False
 except ImportError:
     PYMEDIAINFO_AVAILABLE = False
+    _LOGGER.warning("[VIDEO] ❌ pymediainfo Python package not installed")
 
 try:
     from mutagen.mp4 import MP4
