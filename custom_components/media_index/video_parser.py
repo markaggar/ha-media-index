@@ -59,6 +59,7 @@ class VideoMetadataParser:
             # METHOD 1: pymediainfo - Most reliable for datetime extraction
             # ===================================================================
             if PYMEDIAINFO_AVAILABLE:
+                _LOGGER.info(f"[VIDEO] ✅ pymediainfo is AVAILABLE, attempting extraction for {Path(file_path).name}")
                 try:
                     media_info = MediaInfo.parse(file_path)
                     
@@ -110,7 +111,9 @@ class VideoMetadataParser:
                                         f"Duration: {result.get('duration')}s")
                             
                 except Exception as e:
-                    _LOGGER.debug(f"[VIDEO] pymediainfo extraction failed: {e}, falling back to mutagen")
+                    _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {e}, falling back to mutagen")
+            else:
+                _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             
             # ===================================================================
             # METHOD 2: mutagen - For additional metadata (rating, etc.)
