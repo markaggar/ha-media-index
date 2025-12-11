@@ -13,7 +13,7 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **File type detection** for images (JPG, PNG, HEIC, etc.) and videos (MP4, MOV, AVI, etc.)
 - **Real-time monitoring** with file system watcher for instant updates
 - **EXIF metadata extraction** for images (GPS, date taken, camera info)
-- **Video metadata extraction** for MP4/MOV files (creation date, GPS coordinates)
+- **Video metadata extraction** for MP4/MOV files (creation date, GPS coordinates - see installation prerequisites below)
 
 ### 🌍 Geocoding
 - **Reverse geocoding** of GPS coordinates to location names
@@ -33,8 +33,16 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Smart random selection** with exclusion tracking
 - **Ordered selection** by date, path, filename ascending or descending
 - **Filter by** folder, file type, date range, favorites
+- **Anniversary mode** for "Through the Years" features - find photos from the same date across all years
 - **Session management** to avoid repetition within slideshow sessions
 - **Efficient querying** from SQLite database
+
+### 📸 Burst Detection & Review
+- **Time-based burst detection** - find photos taken within ±N seconds of a reference photo (default ±2 minutes)
+- **GPS-based filtering** - match photos by location proximity using Haversine distance (default 50 meters)
+- **Automatic fallback** to time-only matching when GPS data unavailable
+- **Burst metadata persistence** - save favorite selections and burst counts to file metadata
+- **Historical tracking** - burst review data persists even if files are deleted
 
 ### 🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
@@ -43,17 +51,55 @@ A custom Home Assistant integration that indexes media files (images and videos)
 
 ## Installation
 
+### Prerequisites
+
+**For Video Metadata Extraction (GPS, Date):**
+
+The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. This library is **NOT automatically installed** by HACS.
+
+**Home Assistant OS/Supervised (Docker):**
+```bash
+# SSH into your Home Assistant container or use the Terminal add-on available in Home Assistant OS
+docker exec -it homeassistant bash
+
+# Install libmediainfo
+apk add libmediainfo
+
+# Exit and restart Home Assistant
+exit
+```
+
+**Home Assistant Core (Manual Install):**
+```bash
+# Debian/Ubuntu
+sudo apt-get install libmediainfo-dev
+
+# Fedora/RHEL
+sudo dnf install libmediainfo-devel
+
+# macOS
+brew install media-info
+```
+
+**Note:** If `libmediainfo` is not installed, video metadata extraction will be limited (no GPS or date extraction from videos). Image metadata extraction is unaffected.
+
 ### HACS (Recommended)
+
+[![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=markaggar&repository=ha-media-index&category=integration)
+
+or
+
 1. Open HACS in Home Assistant
 2. Click "Integrations"
-3. Click the three dots in the top right and select "Custom repositories"
-4. Add `https://github.com/markaggar/ha-media-index` as an Integration
-5. Click "Install"
+3. Search for 'Media Index'
+4. Click "Install"
+5. **Install libmediainfo** (see Prerequisites above if you need video metadata)
 6. Restart Home Assistant
 
 ### Manual
 1. Copy the `custom_components/media_index` folder to your Home Assistant `custom_components` directory
-2. Restart Home Assistant
+2. **Install libmediainfo** (see Prerequisites above if you need video metadata)
+3. Restart Home Assistant
 
 ## Configuration
 
@@ -61,7 +107,10 @@ A custom Home Assistant integration that indexes media files (images and videos)
 2. Click **Add Integration**
 3. Search for "Media Index"
 4. Enter your base media folder path (e.g., `/media/Photos`)
-5. Configure optional settings (watched folders, EXIF extraction, geocoding)
+5. If your Media folders in the front end media browse dialogs are not prefixed by 'media-source://media_source/media', then copy and paste the full media-source:// URI (from the HA Media Card config) that points to the same place as the base media folder you specified in the previous step. It is critical that these both point to the same folder structure, e.g.: 
+   - base media folder: /config/www/local
+   - media source URI: media-source://media_source/local  
+6. Configure optional settings (watched folders, EXIF extraction, geocoding)
 
 💡 **Multi-Instance Support:** You can add multiple instances with different base folders (e.g., one for Photos, one for Videos) by repeating this process with different folder paths.
 
@@ -129,7 +178,9 @@ service: media_index.restore_edited_files
 
 The integration provides additional services for advanced use cases and Media Card integration. See [SERVICES.md](docs/SERVICES.md) for complete documentation of all available services including:
 
-- `get_random_items` - Random media selection (used by Media Card)
+- `get_random_items` - Random media selection with anniversary mode support (used by Media Card)
+- `get_related_files` - Find related photos by date/time or burst detection mode
+- `update_burst_metadata` - Save burst review session data to file metadata
 - `mark_favorite` - Toggle favorite status
 - `delete_media` - Move files to `_Junk` folder
 - `mark_for_edit` - Move files to `_Edit` folder

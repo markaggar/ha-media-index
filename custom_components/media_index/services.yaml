@@ -45,6 +45,27 @@ get_random_items:
       example: "2023-12-31"
       selector:
         date:
+    anniversary_month:
+      name: Anniversary Month
+      description: "Filter by month (1-12) across any year. Use with anniversary_day for 'On This Day' queries. Supports wildcard: use '*' for any month."
+      example: "12"
+      selector:
+        text:
+    anniversary_day:
+      name: Anniversary Day
+      description: "Filter by day of month (1-31) across any year. Use with anniversary_month for 'On This Day' queries. Supports wildcard: use '*' for any day."
+      example: "25"
+      selector:
+        text:
+    anniversary_window_days:
+      name: Anniversary Window Days
+      description: "Expand anniversary match by ±N days. E.g., anniversary_day=7 with window=3 matches days 4-10."
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 31
+          mode: box
     favorites_only:
       name: Favorites Only
       description: If true, only return files marked as favorites
@@ -154,6 +175,91 @@ get_file_metadata:
       example: "media-source://media_source/media/photo/Photos/2023/vacation.jpg"
       selector:
         text:
+
+get_related_files:
+  name: Get Related Files
+  description: Get files related to a reference photo (burst detection - photos taken within minutes)
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    mode:
+      name: Mode
+      description: Type of related files to find
+      required: true
+      selector:
+        select:
+          options:
+            - label: "Burst (photos within minutes)"
+              value: "burst"
+    reference_path:
+      name: Reference File Path
+      description: Full filesystem path to the reference media file (use media_source_uri instead when possible)
+      required: false
+      example: "/media/photo/Photos/2023/IMG_1234.jpg"
+      selector:
+        text:
+    media_source_uri:
+      name: Media Source URI
+      description: Media-source URI for the reference media file (recommended)
+      required: false
+      example: "media-source://media_source/media/photo/Photos/2023/IMG_1234.jpg"
+      selector:
+        text:
+    time_window_seconds:
+      name: Time Window (Burst Mode)
+      description: Time window in seconds (±) around reference photo's timestamp (burst mode only)
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 3600
+          mode: box
+    prefer_same_location:
+      name: Prefer Same Location (Burst Mode)
+      description: Filter by GPS proximity if available (burst mode only, fallback to time-only if no GPS)
+      default: true
+      selector:
+        boolean:
+    location_tolerance_meters:
+      name: Location Tolerance (Burst Mode)
+      description: Maximum distance in meters for GPS matching (burst mode only)
+      default: 50
+      selector:
+        number:
+          min: 10
+          max: 1000
+          mode: box
+    window_days:
+      name: Window Days (Anniversary Mode)
+      description: Days before/after reference date to include (anniversary mode only, e.g., 3 = ±3 days)
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 30
+          mode: box
+    years_back:
+      name: Years Back (Anniversary Mode)
+      description: How many years back to search (anniversary mode only)
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 50
+          mode: box
+    sort_order:
+      name: Sort Order
+      description: How to order results
+      default: "time_asc"
+      selector:
+        select:
+          options:
+            - label: "Time Ascending (Chronological)"
+              value: "time_asc"
+            - label: "Time Descending (Reverse)"
+              value: "time_desc"
 
 geocode_file:
   name: Geocode File
@@ -321,3 +427,41 @@ restore_edited_files:
       example: "/media/photo/Photos/2023/edited_photo.jpg"
       selector:
         text:
+
+cleanup_database:
+  name: Cleanup Database
+  description: Remove database entries for files that no longer exist on the filesystem
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    dry_run:
+      name: Dry Run
+      description: If true, only report what would be deleted without actually deleting
+      default: true
+      selector:
+        boolean:
+
+update_burst_metadata:
+  name: Update Burst Metadata
+  description: Write burst_favorites metadata to all files in a burst group
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    burst_files:
+      name: Burst Files
+      description: List of all file URIs in the burst group
+      required: true
+      example: ["media-source://media_source/media/photo/burst/IMG_001.jpg", "media-source://media_source/media/photo/burst/IMG_002.jpg"]
+      selector:
+        object:
+    favorited_files:
+      name: Favorited Files
+      description: List of file URIs that were marked as favorites
+      required: true
+      example: ["media-source://media_source/media/photo/burst/IMG_001.jpg"]
+      selector:
+        object:

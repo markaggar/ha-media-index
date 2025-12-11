@@ -1,19 +1,36 @@
 """Video metadata parser for MP4, MOV, and other video formats."""
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+_LOGGER = logging.getLogger(__name__)
+
+try:
+    from pymediainfo import MediaInfo
+    PYMEDIAINFO_AVAILABLE = True
+    # Test if MediaInfo library is actually available
+    try:
+        MediaInfo.can_parse()
+        _LOGGER.info("[VIDEO] ✅ pymediainfo AND MediaInfo library are both available")
+    except Exception as e:
+        _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo installed but MediaInfo library missing: {e}")
+        PYMEDIAINFO_AVAILABLE = False
+except ImportError:
+    PYMEDIAINFO_AVAILABLE = False
+    _LOGGER.warning("[VIDEO] ❌ pymediainfo Python package not installed")
+
 try:
     from mutagen.mp4 import MP4
+    MUTAGEN_AVAILABLE = True
 except ImportError:
-    MP4 = None
-
-_LOGGER = logging.getLogger(__name__)
+    MUTAGEN_AVAILABLE = False
 
 
 class VideoMetadataParser:
-    """Extract metadata from video files using mutagen."""
+    """Extract metadata from video files using pymediainfo and mutagen."""
 
     @staticmethod
     def extract_metadata(file_path: str) -> Optional[Dict[str, Any]]:
@@ -25,146 +42,235 @@ class VideoMetadataParser:
         Returns:
             Dictionary containing extracted metadata, or None if extraction fails
         """
-        if MP4 is None:
-            _LOGGER.warning("mutagen not available, cannot extract video metadata")
+        if not PYMEDIAINFO_AVAILABLE and not MUTAGEN_AVAILABLE:
+            _LOGGER.warning("Neither pymediainfo nor mutagen available, cannot extract video metadata")
             return None
             
         try:
             # Only process video files
             path = Path(file_path)
-            if path.suffix.lower() not in {'.mp4', '.m4v', '.mov'}:
+            if path.suffix.lower() not in {'.mp4', '.m4v', '.mov', '.avi', '.mkv'}:
+                _LOGGER.debug(f"Skipping non-video file: {file_path}")
                 return None
-                
-            video = MP4(file_path)
-            if not video:
+            
+            # Check if file exists and is readable
+            if not os.path.exists(file_path):
+                _LOGGER.error(f"[VIDEO] File not found: {file_path}")
                 return None
-                
+            
+            file_size = os.path.getsize(file_path)
+            _LOGGER.debug(f"[VIDEO] Extracting metadata from: {path.name} (size: {file_size} bytes)")
+            
             result: Dict[str, Any] = {}
             
-            # Extract creation date from MP4 atoms
-            # MP4 files store creation dates in the movie/media/track header atoms
-            # These are stored as seconds since midnight, January 1, 1904 UTC (MP4 epoch)
-            creation_timestamp = None
-            
-            # Try to access raw MP4 atoms through mutagen's internal structure
-            # The 'tags' attribute contains the moov.udta.meta atoms
-            # We need to access moov.mvhd (Movie Header) for creation_time
-            try:
-                # Method 1: Try to access movie header creation time from file atoms
-                # mutagen stores this in the MP4.info object
-                if hasattr(video, 'info'):
-                    # Check for various time fields that might be present
-                    for time_attr in ['creation_time', 'modification_time']:
-                        if hasattr(video.info, time_attr):
-                            timestamp = getattr(video.info, time_attr)
-                            if timestamp and timestamp > 0:
-                                # MP4 timestamps are seconds since 1904-01-01 00:00:00 UTC
-                                # Convert to Unix timestamp (seconds since 1970-01-01)
-                                # Difference between 1904 and 1970 is 2,082,844,800 seconds
-                                MP4_EPOCH_OFFSET = 2082844800
-                                unix_timestamp = timestamp - MP4_EPOCH_OFFSET
-                                
-                                # Sanity check: timestamp should be reasonable (after 1990, before 2050)
-                                if 631152000 < unix_timestamp < 2524608000:  # 1990-01-01 to 2050-01-01
-                                    creation_timestamp = unix_timestamp
-                                    _LOGGER.debug(f"Extracted {time_attr} from MP4: {unix_timestamp} ({datetime.fromtimestamp(unix_timestamp)})")
-                                    break
-            except Exception as e:
-                _LOGGER.debug(f"Failed to extract creation time from MP4 atoms: {e}")
-            
-            # Method 2: Try QuickTime metadata tags (for files created by Apple devices)
-            if not creation_timestamp and 'com.apple.quicktime.creationdate' in video:
-                creation_date_str = video['com.apple.quicktime.creationdate'][0]
-                parsed_date = VideoMetadataParser._parse_datetime(creation_date_str)
-                if parsed_date:
-                    try:
-                        dt = datetime.strptime(parsed_date, '%Y-%m-%d %H:%M:%S')
-                        creation_timestamp = int(dt.timestamp())
-                    except ValueError:
-                        pass
-            
-            # Method 3: Try copyright date (©day) as fallback
-            if not creation_timestamp and '©day' in video and video['©day']:
-                creation_date_str = video['©day'][0]
-                parsed_date = VideoMetadataParser._parse_datetime(creation_date_str)
-                if parsed_date:
-                    try:
-                        dt = datetime.strptime(parsed_date, '%Y-%m-%d %H:%M:%S')
-                        creation_timestamp = int(dt.timestamp())
-                    except ValueError:
-                        pass
-            
-            if creation_timestamp:
-                result['date_taken'] = creation_timestamp
-            
-            # Extract GPS coordinates from XMP if available
-            # MP4 files can store GPS in com.apple.quicktime.location.ISO6709 or XMP
-            if 'com.apple.quicktime.location.ISO6709' in video:
-                iso6709 = video['com.apple.quicktime.location.ISO6709'][0]
-                coords = VideoMetadataParser._parse_iso6709(iso6709)
-                if coords:
-                    result['latitude'] = coords[0]
-                    result['longitude'] = coords[1]
-                    result['has_coordinates'] = True
-            
-            # Extract rating
-            # iTunes-style rating is stored in 'rate' or '----:com.apple.iTunes:rating'
-            rating = None
-            
-            # Try iTunes rating first (0-5 stars * 20 = 0-100)
-            if 'rate' in video:
-                rate_value = video['rate'][0] if video['rate'] else None
-                if rate_value:
-                    # Convert 0-100 to 0-5 stars
-                    rating = int(rate_value / 20)
-            
-            # Try custom iTunes rating tag
-            if rating is None and '----:com.apple.iTunes:rating' in video:
-                rating_bytes = video['----:com.apple.iTunes:rating'][0]
+            # ===================================================================
+            # METHOD 1: pymediainfo - Most reliable for datetime extraction
+            # ===================================================================
+            if PYMEDIAINFO_AVAILABLE:
+                _LOGGER.info(f"[VIDEO] ✅ pymediainfo is AVAILABLE, attempting extraction for {Path(file_path).name}")
                 try:
-                    rating = int(rating_bytes.decode('utf-8'))
-                except (ValueError, UnicodeDecodeError):
-                    pass
+                    media_info = MediaInfo.parse(file_path)
+                    
+                    for track in media_info.tracks:
+                        # Extract datetime from General track
+                        if track.track_type == "General":
+                            # Priority order for datetime fields
+                            datetime_fields = ['encoded_date', 'tagged_date', 'recorded_date', 'mastered_date']
+                            for field in datetime_fields:
+                                value = getattr(track, field, None)
+                                if value:
+                                    _LOGGER.debug(f"[VIDEO] Found {field}: {value}")
+                                    parsed_dt = VideoMetadataParser._parse_mediainfo_datetime(value)
+                                    if parsed_dt:
+                                        result['date_taken'] = int(parsed_dt.timestamp())
+                                        _LOGGER.debug(f"[VIDEO] Extracted datetime from {field}: {parsed_dt}")
+                                        break
+                            
+                            # Extract GPS coordinates (check both xyz and recorded_location fields)
+                            gps_iso6709 = None
+                            if hasattr(track, 'recorded_location') and track.recorded_location:
+                                gps_iso6709 = track.recorded_location
+                                _LOGGER.debug(f"[VIDEO] Found GPS in recorded_location field")
+                            elif hasattr(track, 'xyz') and track.xyz:
+                                gps_iso6709 = track.xyz
+                                _LOGGER.debug(f"[VIDEO] Found GPS in xyz field")
+                            
+                            if gps_iso6709:
+                                coords = VideoMetadataParser._parse_iso6709(gps_iso6709)
+                                if coords:
+                                    result['latitude'] = coords[0]
+                                    result['longitude'] = coords[1]
+                                    _LOGGER.debug(f"[VIDEO] GPS coordinates extracted successfully")
+                                else:
+                                    _LOGGER.warning(f"[VIDEO] Failed to parse ISO6709 GPS format")
+                            
+                            # Extract rating (if available)
+                            if hasattr(track, 'rating') and track.rating:
+                                try:
+                                    rating = int(track.rating)
+                                    if 0 <= rating <= 5:
+                                        result['rating'] = rating
+                                        _LOGGER.debug(f"[VIDEO] Found rating: {rating}/5")
+                                except (ValueError, TypeError):
+                                    pass
+                        
+                        # Extract video dimensions and duration
+                        if track.track_type == "Video":
+                            if track.width:
+                                result['width'] = track.width
+                            if track.height:
+                                result['height'] = track.height
+                            if track.duration:
+                                # Duration is in milliseconds, convert to seconds
+                                result['duration'] = round(track.duration / 1000.0, 2)
+                            
+                            _LOGGER.debug(f"[VIDEO] Dimensions: {result.get('width')}x{result.get('height')}, "
+                                        f"Duration: {result.get('duration')}s")
+                            
+                except Exception as e:
+                    _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {e}, falling back to mutagen")
+            else:
+                _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             
-            if rating is not None and 0 <= rating <= 5:
-                result['rating'] = rating
+            # ===================================================================
+            # METHOD 2: mutagen - For additional metadata (rating, etc.)
+            # ===================================================================
+            if MUTAGEN_AVAILABLE and path.suffix.lower() in {'.mp4', '.m4v', '.mov'}:
+                try:
+                    video = MP4(file_path)
+                    
+                    # Extract rating from mutagen tags
+                    # iTunes-style rating is stored in 'rate' or '----:com.apple.iTunes:rating'
+                    if 'rate' in video and video['rate']:
+                        rate_value = video['rate'][0]
+                        if rate_value:
+                            # Convert 0-100 to 0-5 stars
+                            result['rating'] = int(rate_value / 20)
+                            _LOGGER.debug(f"[VIDEO] Found rating (rate): {result['rating']} stars")
+                
+                    # Try custom iTunes rating tag
+                    if 'rating' not in result and '----:com.apple.iTunes:rating' in video:
+                        rating_bytes = video['----:com.apple.iTunes:rating'][0]
+                        try:
+                            rating = int(rating_bytes.decode('utf-8'))
+                            if 0 <= rating <= 5:
+                                result['rating'] = rating
+                                _LOGGER.debug(f"[VIDEO] Found rating (iTunes): {rating} stars")
+                        except (ValueError, UnicodeDecodeError) as e:
+                            _LOGGER.debug(f"[VIDEO] Failed to decode iTunes rating: {e}")
+                    
+                    # Extract GPS coordinates
+                    if 'com.apple.quicktime.location.ISO6709' in video:
+                        iso6709 = video['com.apple.quicktime.location.ISO6709'][0]
+                        _LOGGER.debug(f"[VIDEO] Found GPS (ISO6709 via mutagen): {iso6709}")
+                        coords = VideoMetadataParser._parse_iso6709(iso6709)
+                        if coords:
+                            result['latitude'] = coords[0]
+                            result['longitude'] = coords[1]
+                            _LOGGER.debug(f"[VIDEO] GPS coordinates from mutagen: {coords[0]}, {coords[1]}")
+                    
+                    # If pymediainfo didn't find duration/dimensions, try mutagen
+                    if 'duration' not in result and hasattr(video, 'info') and hasattr(video.info, 'length'):
+                        result['duration'] = round(video.info.length, 2)
+                    
+                    if 'width' not in result and hasattr(video, 'info'):
+                        if hasattr(video.info, 'width'):
+                            result['width'] = video.info.width
+                        if hasattr(video.info, 'height'):
+                            result['height'] = video.info.height
+                    
+                except Exception as e:
+                    _LOGGER.debug(f"[VIDEO] mutagen extraction failed: {e}")
             
+            # ===================================================================
+            # METHOD 3: Filename pattern extraction (fallback for datetime)
+            # ===================================================================
+            if 'date_taken' not in result:
+                filename = path.stem  # Filename without extension
+                _LOGGER.debug(f"[VIDEO] Trying filename datetime extraction from: {filename}")
+                
+                # Match patterns like: 20221204_184255, 2022-12-04_18-42-55, etc.
+                patterns = [
+                    r'(\d{8})_(\d{6})',      # 20221204_184255
+                    r'(\d{8})-(\d{6})',      # 20221204-184255
+                    r'(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})',  # 2022-12-04_18-42-55
+                    r'(\d{8})',              # 20221204 (date only)
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, filename)
+                    if match:
+                        try:
+                            if len(match.groups()) == 2:
+                                date_str = match.group(1).replace('-', '')
+                                time_str = match.group(2).replace('-', '')
+                                dt_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} {time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+                                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                            else:
+                                date_str = match.group(1).replace('-', '')
+                                dt = datetime.strptime(date_str, '%Y%m%d')
+                            
+                            result['date_taken'] = int(dt.timestamp())
+                            _LOGGER.debug(f"[VIDEO] Extracted date from filename: {dt}")
+                            break
+                        except ValueError as e:
+                            _LOGGER.debug(f"[VIDEO] Failed to parse date from pattern {pattern}: {e}")
+                            continue
+            
+            # ===================================================================
+            # METHOD 4: Filesystem timestamp (final fallback)
+            # ===================================================================
+            if 'date_taken' not in result:
+                try:
+                    stat = os.stat(file_path)
+                    # Use the earlier of creation time or modification time
+                    fs_timestamp = min(stat.st_ctime, stat.st_mtime)
+                    result['date_taken'] = int(fs_timestamp)
+                    _LOGGER.debug(f"[VIDEO] No date in metadata or filename - using filesystem date: {datetime.fromtimestamp(fs_timestamp)}")
+                except Exception as e:
+                    _LOGGER.error(f"[VIDEO] Failed to get filesystem dates: {e}")
+            
+            _LOGGER.debug(f"[VIDEO] Extraction complete - found {len(result)} metadata fields: {list(result.keys())}")
             return result if result else None
             
         except Exception as e:
-            _LOGGER.debug(f"Failed to extract video metadata from {file_path}: {e}")
+            _LOGGER.error(f"[VIDEO] Failed to extract video metadata from {file_path}: {e}", exc_info=True)
             return None
     
     @staticmethod
-    def _parse_datetime(date_str: str) -> Optional[str]:
-        """Parse datetime from various video metadata formats.
+    def _parse_mediainfo_datetime(date_str: str) -> Optional[datetime]:
+        """Parse datetime from MediaInfo encoded_date field.
+        
+        MediaInfo typically returns: "2020-05-16 03:37:57 UTC" or "2025-07-06 01:28:44"
         
         Args:
-            date_str: Date string from video metadata
+            date_str: Date string from MediaInfo
             
         Returns:
-            ISO format datetime string, or None if parsing fails
+            datetime object, or None if parsing fails
         """
         if not date_str:
             return None
-            
-        # Try common video metadata date formats
+        
+        # Remove " UTC" suffix if present
+        date_str = date_str.replace(' UTC', '').strip()
+        
+        # Try common MediaInfo formats
         date_formats = [
+            '%Y-%m-%d %H:%M:%S',       # 2020-05-16 03:37:57
             '%Y-%m-%dT%H:%M:%SZ',      # ISO 8601 with Z
             '%Y-%m-%dT%H:%M:%S',       # ISO 8601 without timezone
-            '%Y-%m-%d %H:%M:%S',       # Standard datetime
             '%Y-%m-%d',                # Date only
         ]
         
         for fmt in date_formats:
             try:
-                dt = datetime.strptime(date_str, fmt)
-                return dt.strftime('%Y-%m-%d %H:%M:%S')
+                return datetime.strptime(date_str, fmt)
             except ValueError:
                 continue
-                
-        # If no format matches, return original string
-        return date_str
+        
+        _LOGGER.debug(f"[VIDEO] Could not parse MediaInfo datetime: {date_str}")
+        return None
     
     @staticmethod
     def _parse_iso6709(iso6709_str: str) -> Optional[tuple[float, float]]:

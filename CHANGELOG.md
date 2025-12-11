@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-12-06
+
+### Added
+
+- **Burst Detection Mode**: New `mode: burst` parameter for `get_related_files` service
+  - Time-based filtering: ±N seconds around reference photo's timestamp (default ±2 minutes)
+  - GPS-based filtering: Haversine distance calculation for location matching (default 50 meters)
+  - Automatic fallback to time-only matching when GPS data unavailable
+  - Configurable sort order: chronological (`time_asc`) or reverse (`time_desc`)
+  - Returns `seconds_offset` and `distance_meters` for each matching photo
+  - Same-year restriction prevents cross-year matches for burst detection
+  - Designed for Media Card v5.5+ "Burst Review" feature
+  - Example use case: Compare rapid-fire shots to select the best photo for keeping
+
+- **Burst Metadata Persistence**: New `update_burst_metadata` service for tracking burst review sessions
+  - Writes `burst_favorites` (JSON array of favorited filenames) to all files in a burst group
+  - Writes `burst_count` (integer) to record total files in burst at review time
+  - Enables historical tracking even if files are later deleted or parameters change
+  - New database columns: `exif_data.burst_favorites` (TEXT), `exif_data.burst_count` (INTEGER)
+  - Database migration automatically adds columns to existing installations
+
+- **Anniversary Mode Support**: Enhanced `get_random_items` service for "On This Day" features
+  - New parameters: `anniversary_month`, `anniversary_day`, `anniversary_window_days`
+  - Wildcards supported: Use `"*"` for any month/day to find all photos matching pattern
+  - Window expansion: `anniversary_window_days` adds ±N days tolerance around target date
+  - SQL date component matching: `strftime('%m', ...)` and `strftime('%d', ...)` for cross-year queries
+  - Designed for Media Card v5.5+ "Through the Years" feature showing photos from same date across all years
+
+- **Database Cleanup Service**: New `cleanup_database` service for maintenance
+  - Validates all database entries against filesystem
+  - Removes entries for files that no longer exist
+  - Dry-run mode by default for safe testing (`dry_run: true`)
+  - Returns list of stale files found/removed with counts
+  - Solves 404 errors from moved/deleted files
+  - Useful after bulk file operations outside Home Assistant
+
+- **Favorites Index**: Added database index on `is_favorited` column
+  - Improves query performance when using `favorites_only` filter
+  - Optimizes Media Card v5.5+ filtering features
+
+### Fixed
+
+- **Video Metadata Extraction** (Enhanced in v1.5.0)
+  - **NEW**: Integrated `pymediainfo` library for comprehensive video metadata extraction
+  - **Extracts from pymediainfo**:
+    - DateTime: `encoded_date`, `tagged_date`, `recorded_date`, `mastered_date` fields
+    - GPS: `recorded_location` field (Android/Samsung) or `xyz` field (other formats)
+    - Dimensions: `width` and `height` from Video track (now properly saved to database)
+    - Duration: Converted from milliseconds to seconds (now properly saved to database)
+    - Rating: 0-5 star rating from General track
+  - **Fallback methods**: 
+    - Rating: mutagen MP4 tags (iTunes-style rating)
+    - DateTime: Filename patterns → filesystem timestamps
+  - **System Requirements**: Requires `libmediainfo` system library (see README Prerequisites)
+  - **Fixed**: Video dimensions and duration now saved to `media_files` table (previously only in exif_data)
+  - Successfully tested on Android, Samsung, and iPhone videos
+  - Tested datetime formats: "2020-05-16 03:37:57 UTC", "2025-07-06 01:28:44"
+  - All logging changed from info/warning to debug level to reduce system log noise
+  - Prevents null `date_taken` values that caused incorrect sort order in sequential mode
+  - Fixes infinite video replay loop when videos with null dates appeared at position 1
+
+### Service Parameters
+
+**get_related_files** (burst mode):
+- `mode` (required): Set to `"burst"` for burst detection
+- `reference_path` or `media_source_uri` (required): Reference photo path or URI
+- `time_window_seconds` (optional, default 120): Time window in seconds (±)
+- `prefer_same_location` (optional, default true): Enable GPS proximity filtering
+- `location_tolerance_meters` (optional, default 50): Maximum GPS distance for matching
+- `sort_order` (optional, default "time_asc"): Result ordering
+
+**update_burst_metadata**:
+- `burst_files` (required): List of all file URIs in the burst group
+- `favorited_files` (required): List of file URIs marked as favorites
+- Returns: `files_updated`, `burst_count`, `favorites_count`
+
+### Changed
+
+- **get_related_files Service**: Now includes `is_favorited` and `rating` fields in burst results
+- **get_related_files Service**: Now includes `media_source_uri` for all returned items
+- **Service Schema**: Added `extra=vol.ALLOW_EXTRA` to allow `entity_id` from target parameter
+
+### Technical Details
+
+- URI to path conversion uses configured `base_folder` and `media_source_uri` settings
+- Favorited filenames stored (not full paths) for portability
+- Empty favorites stored as `NULL` rather than empty JSON array
+- All files in burst receive same metadata regardless of individual favorite status
+
 ## [1.4.0] - 2025-11-25
 
 ### Added

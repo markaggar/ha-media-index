@@ -3,6 +3,7 @@ import aiosqlite
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,6 +137,11 @@ class CacheManager:
             ON exif_data(latitude, longitude)
         """)
         
+        # Index for favorites filtering
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exif_favorited ON exif_data(is_favorited)
+        """)
+        
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS geocode_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,7 +218,9 @@ class CacheManager:
             'focal_length_35mm': 'INTEGER',
             'exposure_compensation': 'TEXT',
             'metering_mode': 'TEXT',
-            'white_balance': 'TEXT'
+            'white_balance': 'TEXT',
+            'burst_favorites': 'TEXT',
+            'burst_count': 'INTEGER'
         }
         
         # Validate against whitelist to prevent SQL injection
@@ -353,9 +361,9 @@ class CacheManager:
         await self._db.execute("""
             INSERT OR REPLACE INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
-             created_time, last_scanned, width, height, orientation,
+             created_time, duration, last_scanned, width, height, orientation,
              is_favorited, rating, rated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
                     COALESCE((SELECT is_favorited FROM media_files WHERE path = ?), ?),
                     COALESCE((SELECT rating FROM media_files WHERE path = ?), ?),
                     (SELECT rated_at FROM media_files WHERE path = ?))
@@ -367,6 +375,7 @@ class CacheManager:
             file_data.get('file_size'),
             file_data['modified_time'],
             file_data.get('created_time'),
+            file_data.get('duration'),
             last_scanned_value,  # Use computed value instead of always current_time
             file_data.get('width'),
             file_data.get('height'),
@@ -630,6 +639,9 @@ class CacheManager:
         file_type: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        anniversary_month: str | None = None,
+        anniversary_day: str | None = None,
+        anniversary_window_days: int = 0,
         favorites_only: bool = False,
         priority_new_files: bool = False,
         new_files_threshold_seconds: int = 3600
@@ -646,6 +658,9 @@ class CacheManager:
             file_type: Filter by file type ('image' or 'video')
             date_from: Filter by date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
             date_to: Filter by date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            anniversary_month: Filter by month (1-12) or "*" for any month across years
+            anniversary_day: Filter by day (1-31) or "*" for any day across years
+            anniversary_window_days: Expand anniversary match by ±N days (default 0)
             favorites_only: If True, only return files marked as favorites
             priority_new_files: If True, prioritize recently scanned files
             new_files_threshold_seconds: Threshold in seconds for "new" files (default 1 hour)
@@ -709,7 +724,6 @@ class CacheManager:
             if date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
                 try:
-                    from datetime import datetime
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_from_str, "%Y-%m-%d")
@@ -721,7 +735,6 @@ class CacheManager:
             if date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
                 try:
-                    from datetime import datetime
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_to_str, "%Y-%m-%d")
@@ -729,6 +742,41 @@ class CacheManager:
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+            
+            # Anniversary filtering: Match month/day across years (supports wildcards)
+            if anniversary_month is not None or anniversary_day is not None:
+                ann_conditions = []
+                
+                # Apply window to day if specified (e.g., day 7 ±3 = days 4-10)
+                if anniversary_day and anniversary_day != "*":
+                    try:
+                        day_int = int(anniversary_day)
+                        if anniversary_window_days > 0:
+                            # Generate day range with window
+                            day_min = max(1, day_int - anniversary_window_days)
+                            day_max = min(31, day_int + anniversary_window_days)
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                            params.extend([day_min, day_max])
+                        else:
+                            # Exact day match
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                            params.append(day_int)
+                    except ValueError:
+                        _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
+                # else: wildcard "*" means any day - no condition added
+                
+                # Month matching (no window for month)
+                if anniversary_month and anniversary_month != "*":
+                    try:
+                        month_int = int(anniversary_month)
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        params.append(month_int)
+                    except ValueError:
+                        _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
+                # else: wildcard "*" means any month - no condition added
+                
+                if ann_conditions:
+                    new_files_query += " AND (" + " AND ".join(ann_conditions) + ")"
             
             # V5 IMPROVEMENT: Get ALL recent files, then randomly sample
             # This ensures even distribution - all recent files have equal chance
@@ -764,6 +812,9 @@ class CacheManager:
                     file_type=file_type,
                     date_from=date_from,
                     date_to=date_to,
+                    anniversary_month=anniversary_month,
+                    anniversary_day=anniversary_day,
+                    anniversary_window_days=anniversary_window_days,
                     favorites_only=favorites_only
                 )
                 result = new_files + random_files
@@ -822,28 +873,61 @@ class CacheManager:
             # Date filtering: null means "no limit" in that direction
             # Use EXIF date_taken if available, fallback to created_time
             if date_from is not None:
-                # Validate date_from is a valid date string
+                # Validate date_from is a valid date string using datetime.strptime
                 try:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_from_str) != 10 or date_from_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_from format: {date_from_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_from_str, "%Y-%m-%d")
                     query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                     params.append(date_from_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if date_to is not None:
-                # Validate date_to is a valid date string
+                # Validate date_to is a valid date string using datetime.strptime
                 try:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
-                    # Quick validation that it looks like a date (YYYY-MM-DD format)
-                    if len(date_to_str) != 10 or date_to_str.count('-') != 2:
-                        raise ValueError(f"Invalid date_to format: {date_to_str}")
+                    # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
+                    datetime.strptime(date_to_str, "%Y-%m-%d")
                     query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+            
+            # Anniversary filtering: Match month/day across years (supports wildcards)
+            if anniversary_month is not None or anniversary_day is not None:
+                ann_conditions = []
+                
+                # Apply window to day if specified (e.g., day 7 ±3 = days 4-10)
+                if anniversary_day and anniversary_day != "*":
+                    try:
+                        day_int = int(anniversary_day)
+                        if anniversary_window_days > 0:
+                            # Generate day range with window
+                            day_min = max(1, day_int - anniversary_window_days)
+                            day_max = min(31, day_int + anniversary_window_days)
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                            params.extend([day_min, day_max])
+                        else:
+                            # Exact day match
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                            params.append(day_int)
+                    except ValueError:
+                        _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
+                # else: wildcard "*" means any day - no condition added
+                
+                # Month matching (no window for month)
+                if anniversary_month and anniversary_month != "*":
+                    try:
+                        month_int = int(anniversary_month)
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        params.append(month_int)
+                    except ValueError:
+                        _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
+                # else: wildcard "*" means any month - no condition added
+                
+                if ann_conditions:
+                    query += " AND (" + " AND ".join(ann_conditions) + ")"
             
             query += " ORDER BY RANDOM() LIMIT ?"
             params.append(int(count))
@@ -873,6 +957,9 @@ class CacheManager:
         file_type: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        anniversary_month: str | None = None,
+        anniversary_day: str | None = None,
+        anniversary_window_days: int = 0,
         favorites_only: bool = False
     ) -> list[dict]:
         """Get random files excluding specified IDs (helper for priority queue).
@@ -885,6 +972,9 @@ class CacheManager:
             file_type: Optional file type filter
             date_from: Optional date from filter
             date_to: Optional date to filter
+            anniversary_month: Filter by month (1-12) or "*" for any
+            anniversary_day: Filter by day (1-31) or "*" for any
+            anniversary_window_days: Expand anniversary match by ±N days
             
         Returns:
             List of random file records excluding specified IDs
@@ -943,7 +1033,6 @@ class CacheManager:
         if date_from is not None:
             # Validate date_from is a valid date string
             try:
-                from datetime import datetime
                 date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                 datetime.strptime(date_from_str, "%Y-%m-%d")
                 query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
@@ -954,15 +1043,45 @@ class CacheManager:
         if date_to is not None:
             # Validate date_to is a valid date string
             try:
-                from datetime import datetime
                 date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                 datetime.strptime(date_to_str, "%Y-%m-%d")
                 query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                 params.append(date_to_str)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+        
+        # Anniversary filtering: Match month/day across years (supports wildcards)
+        if anniversary_month is not None or anniversary_day is not None:
+            ann_conditions = []
             
-            query += " ORDER BY RANDOM() LIMIT ?"
+            # Apply window to day if specified
+            if anniversary_day and anniversary_day != "*":
+                try:
+                    day_int = int(anniversary_day)
+                    if anniversary_window_days > 0:
+                        day_min = max(1, day_int - anniversary_window_days)
+                        day_max = min(31, day_int + anniversary_window_days)
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                        params.extend([day_min, day_max])
+                    else:
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        params.append(day_int)
+                except ValueError:
+                    _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
+            
+            # Month matching (no window for month)
+            if anniversary_month and anniversary_month != "*":
+                try:
+                    month_int = int(anniversary_month)
+                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                    params.append(month_int)
+                except ValueError:
+                    _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
+            
+            if ann_conditions:
+                query += " AND (" + " AND ".join(ann_conditions) + ")"
+        
+        query += " ORDER BY RANDOM() LIMIT ?"
         params.append(int(count))
         
         async with self._db.execute(query, tuple(params)) as cursor:
@@ -1102,6 +1221,175 @@ class CacheManager:
         
         return file_data
     
+    async def get_burst_photos(
+        self,
+        reference_path: str,
+        time_window_seconds: int = 10,
+        prefer_same_location: bool = True,
+        location_tolerance_meters: int = 50,
+        sort_order: str = "time_asc"
+    ) -> list[dict]:
+        """Get burst photos taken near the same time as a reference photo.
+        
+        Args:
+            reference_path: Path to the reference photo
+            time_window_seconds: Time window in seconds (default: 10)
+            prefer_same_location: Prioritize photos at same GPS location (default: True)
+            location_tolerance_meters: GPS tolerance in meters (default: 50)
+            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
+            
+        Returns:
+            List of burst photos with metadata
+        """
+        # Get reference photo metadata
+        reference_file = await self.get_file_by_path(reference_path)
+        if not reference_file:
+            _LOGGER.error("Reference file not found: %s", reference_path)
+            return []
+        
+        # Extract EXIF data from nested object
+        exif_data = reference_file.get('exif', {})
+        if not exif_data:
+            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
+            return []
+        
+        reference_date_taken = exif_data.get('date_taken')
+        if not reference_date_taken:
+            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
+            return []
+        
+        reference_latitude = exif_data.get('latitude')
+        reference_longitude = exif_data.get('longitude')
+        
+        _LOGGER.info(
+            "Burst detection: ref_date=%s, location_present=%s, window=%ds",
+            reference_date_taken, reference_latitude is not None and reference_longitude is not None, time_window_seconds
+        )
+        
+        # Build query
+        query = """
+            SELECT 
+                m.id,
+                m.path,
+                m.filename,
+                m.folder,
+                m.file_type,
+                m.file_size,
+                m.modified_time,
+                e.date_taken,
+                e.camera_make,
+                e.camera_model,
+                e.latitude,
+                e.longitude,
+                e.location_city,
+                e.location_state,
+                e.location_country,
+                e.is_favorited,
+                e.rating,
+                (e.date_taken - ?) AS seconds_offset
+        """
+        
+        # Add GPS distance calculation if location available
+        if reference_latitude and reference_longitude and prefer_same_location:
+            query += f""",
+                (6371000 * acos(
+                    cos(radians(?)) * cos(radians(e.latitude)) *
+                    cos(radians(e.longitude) - radians(?)) +
+                    sin(radians(?)) * sin(radians(e.latitude))
+                )) AS distance_meters
+            """
+        
+        query += """
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            WHERE e.date_taken IS NOT NULL
+              AND ABS(e.date_taken - ?) <= ?
+        """
+        
+        # Add location filter if applicable
+        if reference_latitude and reference_longitude and prefer_same_location:
+            query += f"""
+              AND (6371000 * acos(
+                  cos(radians(?)) * cos(radians(e.latitude)) *
+                  cos(radians(e.longitude) - radians(?)) +
+                  sin(radians(?)) * sin(radians(e.latitude))
+              )) <= ?
+            """
+        
+        # Add sorting
+        if sort_order == "time_desc":
+            query += " ORDER BY e.date_taken DESC"
+        else:
+            query += " ORDER BY e.date_taken ASC"
+        
+        # Build parameters
+        params = [reference_date_taken]
+        
+        if reference_latitude and reference_longitude and prefer_same_location:
+            params.extend([reference_latitude, reference_longitude, reference_latitude])
+        
+        params.extend([reference_date_taken, time_window_seconds])
+        
+        if reference_latitude and reference_longitude and prefer_same_location:
+            params.extend([
+                reference_latitude,
+                reference_longitude,
+                reference_latitude,
+                location_tolerance_meters
+            ])
+        
+        # Execute query
+        _LOGGER.info("Burst query params: %s", params)
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        
+        _LOGGER.info("Burst query returned %d rows", len(rows))
+        return [dict(row) for row in rows]
+    
+    async def get_anniversary_photos(
+        self,
+        reference_path: str,
+        window_days: int = 3,
+        years_back: int = 15,
+        sort_order: str = "time_asc"
+    ) -> list[dict]:
+        """Get photos from the same day across years (anniversary mode).
+        
+        Args:
+            reference_path: Path to the reference photo
+            window_days: Days before/after to include (±window, default: 3)
+            years_back: How many years back to search (default: 15)
+            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
+            
+        Returns:
+            List of anniversary photos with metadata
+        """
+        # Get reference photo metadata
+        reference_file = await self.get_file_by_path(reference_path)
+        if not reference_file:
+            _LOGGER.error("Reference file not found: %s", reference_path)
+            return []
+        
+        # Extract EXIF data
+        exif_data = reference_file.get('exif', {})
+        if not exif_data:
+            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
+            return []
+        
+        reference_date_taken = exif_data.get('date_taken')
+        if not reference_date_taken:
+            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
+            return []
+        
+        # TODO: Implement anniversary query
+        # - Extract month/day from reference_date_taken
+        # - Query for photos with same month/day ±window_days across last N years
+        # - Exclude reference photo
+        # - Apply sort_order
+        
+        _LOGGER.warning("Anniversary mode not yet implemented")
+        return []
+    
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.
         
@@ -1173,6 +1461,52 @@ class CacheManager:
         else:
             _LOGGER.warning("File not found in database: %s", file_path)
             return False
+    
+    async def update_burst_metadata(self, burst_paths: list, favorited_paths: list) -> int:
+        """Update burst_favorites and burst_count metadata for all files in a burst group.
+        
+        Args:
+            burst_paths: List of all file paths in the burst
+            favorited_paths: List of file paths that were marked as favorites
+            
+        Returns:
+            Number of files successfully updated
+        """
+        import json
+        
+        # Store favorited filenames (not full paths) for portability
+        favorited_filenames = [Path(p).name for p in favorited_paths]
+        favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
+        burst_count = len(burst_paths)
+        
+        updated_count = 0
+        
+        for file_path in burst_paths:
+            try:
+                # Update exif_data table with burst_favorites JSON and burst_count
+                async with self._db.execute(
+                    """UPDATE exif_data 
+                       SET burst_favorites = ?, burst_count = ?
+                       WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
+                    (favorites_json, burst_count, file_path)
+                ) as cursor:
+                    if cursor.rowcount > 0:
+                        updated_count += 1
+                        
+            except Exception as e:
+                _LOGGER.warning("Failed to update burst metadata for %s: %s", file_path, e)
+        
+        await self._db.commit()
+        
+        _LOGGER.debug(
+            "Updated burst metadata for %d/%d files (burst_count=%d, %d favorited)", 
+            updated_count, 
+            len(burst_paths),
+            burst_count,
+            len(favorited_filenames)
+        )
+        
+        return updated_count
     
     async def delete_file(self, file_path: str) -> bool:
         """Delete file record from database.

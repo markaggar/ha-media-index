@@ -1,4 +1,5 @@
 """Media Index integration for Home Assistant."""
+import asyncio
 import logging
 import os
 from datetime import timedelta
@@ -35,10 +36,13 @@ from .const import (
     SERVICE_GET_RANDOM_ITEMS,
     SERVICE_GET_ORDERED_FILES,
     SERVICE_GET_FILE_METADATA,
+    SERVICE_GET_RELATED_FILES,
     SERVICE_GEOCODE_FILE,
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
     SERVICE_RESTORE_EDITED_FILES,
+    SERVICE_CLEANUP_DATABASE,
+    SERVICE_UPDATE_BURST_METADATA,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -60,8 +64,12 @@ SERVICE_GET_RANDOM_ITEMS_SCHEMA = vol.Schema({
     vol.Optional("folder"): cv.string,
     vol.Optional("recursive", default=True): cv.boolean,
     vol.Optional("file_type"): vol.In(["image", "video"]),
+    vol.Optional("favorites_only", default=False): cv.boolean,
     vol.Optional("date_from"): cv.string,
     vol.Optional("date_to"): cv.string,
+    vol.Optional("anniversary_month"): cv.string,  # "1"-"12" or "*"
+    vol.Optional("anniversary_day"): cv.string,    # "1"-"31" or "*"
+    vol.Optional("anniversary_window_days", default=0): cv.positive_int,
     vol.Optional("priority_new_files", default=False): cv.boolean,
     vol.Optional("new_files_threshold_seconds", default=3600): cv.positive_int,
 }, extra=vol.ALLOW_EXTRA)
@@ -75,9 +83,24 @@ SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
     vol.Optional("order_direction", default="desc"): vol.In(["asc", "desc"]),
 }, extra=vol.ALLOW_EXTRA)
 
-SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema({
-    vol.Optional("file_path"): cv.string,
+# Note: SERVICE_GET_FILE_METADATA_SCHEMA defined later after _validate_path_or_uri function
+
+SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("reference_path"): cv.string,
     vol.Optional("media_source_uri"): cv.string,
+    vol.Required("mode"): vol.In(["burst", "anniversary"]),
+    
+    # Burst mode parameters
+    vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
+    vol.Optional("prefer_same_location", default=True): cv.boolean,
+    vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
+    
+    # Anniversary mode parameters
+    vol.Optional("window_days", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
+    vol.Optional("years_back", default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+    
+    # Common parameters
+    vol.Optional("sort_order", default="time_asc"): vol.In(["time_asc", "time_desc"]),
 }, extra=vol.ALLOW_EXTRA)
 
 def _validate_geocode_params(data):
@@ -118,6 +141,17 @@ def _validate_path_or_uri(data):
     if not data.get("file_path") and not data.get("media_source_uri"):
         raise vol.Invalid("Either 'file_path' or 'media_source_uri' must be provided")
     return data
+
+SERVICE_GET_FILE_METADATA_SCHEMA = vol.Schema(
+    vol.All(
+        {
+            vol.Optional("file_path"): cv.string,
+            vol.Optional("media_source_uri"): cv.string,
+        },
+        _validate_path_or_uri,
+    ),
+    extra=vol.ALLOW_EXTRA,
+)
 
 SERVICE_MARK_FAVORITE_SCHEMA = vol.Schema(
     vol.All(
@@ -187,7 +221,6 @@ def _convert_uri_to_path(media_source_uri: str, base_folder: str, media_source_p
     relative_path = media_source_uri[len(media_source_prefix):]
     
     # Prevent path traversal attacks by rejecting any '..' components
-    import os
     from pathlib import PurePath
     rel_parts = [part for part in PurePath(relative_path).parts if part not in ('', '.')]
     if any(part == '..' for part in rel_parts):
@@ -513,6 +546,9 @@ def _register_services(hass: HomeAssistant):
             file_type=call.data.get("file_type"),
             date_from=call.data.get("date_from"),
             date_to=call.data.get("date_to"),
+            anniversary_month=call.data.get("anniversary_month"),
+            anniversary_day=call.data.get("anniversary_day"),
+            anniversary_window_days=call.data.get("anniversary_window_days", 0),
             favorites_only=call.data.get("favorites_only", False),
             priority_new_files=call.data.get("priority_new_files", False),
             new_files_threshold_seconds=call.data.get("new_files_threshold_seconds", 3600),
@@ -608,6 +644,69 @@ def _register_services(hass: HomeAssistant):
         else:
             _LOGGER.warning("File not found in index: %s", file_path)
             return {"error": "File not found"}
+    
+    async def handle_get_related_files(call):
+        """Handle get_related_files service call (burst or anniversary mode)."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry_id]["config"]
+        
+        mode = call.data.get("mode")
+        
+        # Get reference_path from either reference_path parameter or media_source_uri
+        reference_path = call.data.get("reference_path")
+        media_source_uri = call.data.get("media_source_uri")
+        
+        if not reference_path and media_source_uri:
+            # Convert URI to path
+            base_folder = config.get(CONF_BASE_FOLDER)
+            media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
+            
+            try:
+                reference_path = _convert_uri_to_path(media_source_uri, base_folder, media_source_prefix)
+                _LOGGER.info("Converted media_source_uri to path: %s -> %s", media_source_uri, reference_path)
+            except ValueError as e:
+                _LOGGER.error("Failed to convert URI to path: %s", e)
+                return {"error": str(e), "items": []}
+        
+        if not reference_path:
+            return {"error": "Either reference_path or media_source_uri required", "items": []}
+        
+        sort_order = call.data.get("sort_order", "time_asc")
+        
+        if mode == "burst":
+            # Burst detection mode
+            items = await cache_manager.get_burst_photos(
+                reference_path=reference_path,
+                time_window_seconds=call.data.get("time_window_seconds", 120),
+                prefer_same_location=call.data.get("prefer_same_location", True),
+                location_tolerance_meters=call.data.get("location_tolerance_meters", 50),
+                sort_order=sort_order
+            )
+            _LOGGER.info("Found %d burst photos for %s", len(items), reference_path)
+            
+        elif mode == "anniversary":
+            # Anniversary mode - NOT YET IMPLEMENTED
+            _LOGGER.error("Anniversary mode is not yet implemented")
+            return {
+                "error": "Anniversary mode is not yet implemented. Use 'burst' mode or anniversary filters in get_random_items service.",
+                "items": []
+            }
+        
+        else:
+            return {"error": f"Invalid mode: {mode}", "items": []}
+        
+        # Add media_source_uri to all items
+        _add_media_source_uris_to_items(items, config)
+        
+        return {
+            "reference_path": reference_path,
+            "mode": mode,
+            "count": len(items),
+            "items": items
+        }
+
+    
     
     async def handle_geocode_file(call):
         """Handle geocode_file service call for progressive geocoding."""
@@ -921,6 +1020,65 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_cleanup_database(call):
+        """Handle cleanup_database service call."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        
+        dry_run = call.data.get("dry_run", True)
+        
+        _LOGGER.info("Cleanup database (dry_run=%s)", dry_run)
+        
+        try:
+            # Get all files from database
+            async with cache_manager._db.execute(
+                "SELECT id, path FROM media_files ORDER BY path"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            
+            stale_files = []
+            checked = 0
+            
+            for row in rows:
+                file_id, file_path = row
+                checked += 1
+                
+                # Check if file exists on filesystem
+                exists = await hass.async_add_executor_job(os.path.exists, file_path)
+                
+                if not exists:
+                    stale_files.append({"id": file_id, "path": file_path})
+                    if not dry_run:
+                        # Remove from database
+                        await cache_manager.delete_file(file_path)
+                        _LOGGER.info("Removed stale entry: %s", file_path)
+                
+                # Yield control every 10 files
+                if checked % 10 == 0:
+                    await asyncio.sleep(0)
+            
+            result = {
+                "status": "completed",
+                "dry_run": dry_run,
+                "checked": checked,
+                "stale_count": len(stale_files),
+                "stale_files": [f["path"] for f in stale_files]
+            }
+            
+            if dry_run:
+                _LOGGER.info("Cleanup dry run: found %d stale files out of %d checked", len(stale_files), checked)
+            else:
+                _LOGGER.info("Cleanup completed: removed %d stale files out of %d checked", len(stale_files), checked)
+            
+            return result
+            
+        except Exception as err:
+            _LOGGER.error("Cleanup database failed: %s", err, exc_info=True)
+            return {
+                "status": "error",
+                "error": str(err)
+            }
+    
     async def handle_restore_edited_files(call):
         """Handle restore_edited_files service call."""
         import shutil
@@ -1025,6 +1183,68 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_update_burst_metadata(call):
+        """Handle update_burst_metadata service call."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry_id]["config"]
+        
+        base_folder = config.get(CONF_BASE_FOLDER, "/media")
+        media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
+        
+        burst_files = call.data.get("burst_files", [])
+        favorited_files = call.data.get("favorited_files", [])
+        
+        _LOGGER.info(
+            "update_burst_metadata: %d burst files, %d favorited", 
+            len(burst_files), 
+            len(favorited_files)
+        )
+        
+        try:
+            # Convert URIs to filesystem paths
+            burst_paths = []
+            for uri in burst_files:
+                try:
+                    path = _convert_uri_to_path(uri, base_folder, media_source_prefix)
+                    if path:
+                        burst_paths.append(path)
+                except Exception as e:
+                    _LOGGER.warning("Failed to convert URI %s: %s", uri, e)
+            
+            favorited_paths = []
+            for uri in favorited_files:
+                try:
+                    path = _convert_uri_to_path(uri, base_folder, media_source_prefix)
+                    if path:
+                        favorited_paths.append(path)
+                except Exception as e:
+                    _LOGGER.warning("Failed to convert URI %s: %s", uri, e)
+            
+            # Update burst metadata in database
+            updated_count = await cache_manager.update_burst_metadata(burst_paths, favorited_paths)
+            
+            _LOGGER.info(
+                "Updated burst metadata for %d files (burst_count=%d, %d favorited)", 
+                updated_count,
+                len(burst_paths), 
+                len(favorited_paths)
+            )
+            
+            return {
+                "status": "success",
+                "files_updated": updated_count,
+                "burst_count": len(burst_paths),
+                "favorites_count": len(favorited_paths)
+            }
+            
+        except Exception as e:
+            _LOGGER.error("Error in update_burst_metadata service: %s", e)
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
@@ -1067,6 +1287,14 @@ def _register_services(hass: HomeAssistant):
         SERVICE_GET_FILE_METADATA,
         handle_get_file_metadata,
         schema=SERVICE_GET_FILE_METADATA_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_RELATED_FILES,
+        handle_get_related_files,
+        schema=SERVICE_GET_RELATED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
     
@@ -1115,6 +1343,27 @@ def _register_services(hass: HomeAssistant):
         SERVICE_RESTORE_EDITED_FILES,
         handle_restore_edited_files,
         schema=SERVICE_RESTORE_EDITED_FILES_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CLEANUP_DATABASE,
+        handle_cleanup_database,
+        schema=vol.Schema({
+            vol.Optional("dry_run", default=True): cv.boolean,
+        }),
+        supports_response=SupportsResponse.ONLY,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_BURST_METADATA,
+        handle_update_burst_metadata,
+        schema=vol.Schema({
+            vol.Required("burst_files"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Required("favorited_files"): vol.All(cv.ensure_list, [cv.string]),
+        }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
     
