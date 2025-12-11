@@ -52,13 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Extracts from pymediainfo**:
     - DateTime: `encoded_date`, `tagged_date`, `recorded_date`, `mastered_date` fields
     - GPS: `recorded_location` field (Android/Samsung) or `xyz` field (other formats)
-    - Dimensions: `width` and `height` from Video track
-    - Duration: Converted from milliseconds to seconds
+    - Dimensions: `width` and `height` from Video track (now properly saved to database)
+    - Duration: Converted from milliseconds to seconds (now properly saved to database)
     - Rating: 0-5 star rating from General track
   - **Fallback methods**: 
     - Rating: mutagen MP4 tags (iTunes-style rating)
     - DateTime: Filename patterns → filesystem timestamps
   - **System Requirements**: Requires `libmediainfo` system library (see README Prerequisites)
+  - **Fixed**: Video dimensions and duration now saved to `media_files` table (previously only in exif_data)
   - Successfully tested on Android, Samsung, and iPhone videos
   - Tested datetime formats: "2020-05-16 03:37:57 UTC", "2025-07-06 01:28:44"
   - All logging changed from info/warning to debug level to reduce system log noise

@@ -182,6 +182,20 @@ class MediaScanner:
                                 metadata['width'] = exif_data.get('width')
                                 metadata['height'] = exif_data.get('height')
                                 metadata['orientation'] = exif_data.get('orientation')
+                        elif metadata['file_type'] == 'video':
+                            # Extract video metadata BEFORE adding file to get dimensions/duration
+                            if self.hass:
+                                exif_data = await self.hass.async_add_executor_job(
+                                    VideoMetadataParser.extract_metadata, metadata['path']
+                                )
+                            else:
+                                exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
+                            
+                            # Add video dimensions/duration to metadata for media_files table
+                            if exif_data:
+                                metadata['width'] = exif_data.get('width')
+                                metadata['height'] = exif_data.get('height')
+                                metadata['duration'] = exif_data.get('duration')
                         
                         file_id = await self.cache.add_file(metadata)
                         files_added += 1
@@ -196,17 +210,6 @@ class MediaScanner:
                             is_favorite = rating >= 5
                             await self.cache.update_favorite(metadata['path'], is_favorite)
                             # Favorite marking logged in summary only
-                        elif metadata['file_type'] == 'video' and file_id > 0:
-                            # Extract video metadata after adding file
-                            if self.hass:
-                                exif_data = await self.hass.async_add_executor_job(
-                                    VideoMetadataParser.extract_metadata, metadata['path']
-                                )
-                            else:
-                                exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
-                            
-                            if exif_data:
-                                await self.cache.add_exif_data(file_id, exif_data)
                         
                         # Geocode GPS coordinates if available, enabled, and not already geocoded
                         # Only run if we have exif_data (from images or videos)

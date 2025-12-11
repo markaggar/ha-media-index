@@ -361,9 +361,9 @@ class CacheManager:
         await self._db.execute("""
             INSERT OR REPLACE INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
-             created_time, last_scanned, width, height, orientation,
+             created_time, duration, last_scanned, width, height, orientation,
              is_favorited, rating, rated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
                     COALESCE((SELECT is_favorited FROM media_files WHERE path = ?), ?),
                     COALESCE((SELECT rating FROM media_files WHERE path = ?), ?),
                     (SELECT rated_at FROM media_files WHERE path = ?))
@@ -375,6 +375,7 @@ class CacheManager:
             file_data.get('file_size'),
             file_data['modified_time'],
             file_data.get('created_time'),
+            file_data.get('duration'),
             last_scanned_value,  # Use computed value instead of always current_time
             file_data.get('width'),
             file_data.get('height'),
