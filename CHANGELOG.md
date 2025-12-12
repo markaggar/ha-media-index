@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Database Bloat Prevention**: Added automatic SQLite VACUUM operations
+  - VACUUM now runs automatically after `cleanup_database` service completes (when `dry_run=false`)
+  - Weekly automatic VACUUM scheduled to reclaim space from deleted/updated rows
+  - Fixes database file growing indefinitely due to SQLite's copy-on-write behavior
+  - Returns `db_size_before_mb`, `db_size_after_mb`, and `space_reclaimed_mb` in cleanup response
+  - Resolves issue where 22MB database held only 172 files due to accumulated ghost data
+
+- **Cleanup Database Service Schema**: Fixed schema to allow `entity_id` parameter
+  - Added `extra=vol.ALLOW_EXTRA` to service schema
+  - Resolves "extra keys not allowed @ data['entity_id']" error when using target selector
+  - Service now works correctly with both target selector and direct service calls
+
 - **Video Metadata Extraction** (Enhanced in v1.5.0)
   - **NEW**: Integrated `pymediainfo` library for comprehensive video metadata extraction
   - **Extracts from pymediainfo**:
