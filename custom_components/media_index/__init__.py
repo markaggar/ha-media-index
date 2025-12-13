@@ -1080,6 +1080,23 @@ def _register_services(hass: HomeAssistant):
                 if checked % 10 == 0:
                     await asyncio.sleep(0)
             
+            # Remove orphaned exif_data rows (foreign key CASCADE should prevent this, but clean up if they exist)
+            orphaned_count = 0
+            if not dry_run:
+                async with cache_manager._db.execute(
+                    "SELECT COUNT(*) FROM exif_data e LEFT JOIN media_files m ON e.file_id = m.id WHERE m.id IS NULL"
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    orphaned_count = row[0] if row else 0
+                
+                if orphaned_count > 0:
+                    _LOGGER.warning("Found %d orphaned exif_data rows, removing...", orphaned_count)
+                    await cache_manager._db.execute(
+                        "DELETE FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
+                    )
+                    await cache_manager._db.commit()
+                    _LOGGER.info("Removed %d orphaned exif_data rows", orphaned_count)
+            
             # Run VACUUM to reclaim space and compact database
             db_size_after_deletes = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
             if not dry_run:
@@ -1100,6 +1117,7 @@ def _register_services(hass: HomeAssistant):
                 "checked": checked,
                 "stale_count": len(stale_files),
                 "stale_files": [f["path"] for f in stale_files],
+                "orphaned_exif_removed": orphaned_count,
                 "db_size_before_mb": round(db_size_before, 2),
                 "db_size_after_mb": round(db_size_after_vacuum, 2),
                 "space_reclaimed_mb": round(space_reclaimed, 2)

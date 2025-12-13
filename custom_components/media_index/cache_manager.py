@@ -35,6 +35,10 @@ class CacheManager:
             self._db = await aiosqlite.connect(self.db_path)
             self._db.row_factory = aiosqlite.Row
             
+            # CRITICAL: Enable foreign key constraints
+            # Without this, ON DELETE CASCADE doesn't work and orphaned exif_data accumulates!
+            await self._db.execute("PRAGMA foreign_keys = ON")
+            
             # Create schema
             await self._create_schema()
             
