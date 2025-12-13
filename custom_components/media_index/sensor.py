@@ -135,7 +135,7 @@ class MediaIndexTotalFilesSensor(SensorEntity):
             ATTR_CACHE_SIZE_MB: stats.get("cache_size_mb", 0.0),
             ATTR_GEOCODE_ENABLED: geocode_enabled,
             ATTR_GEOCODE_CACHE_ENTRIES: stats.get("geocode_cache_entries", 0),
-            ATTR_GEOCODE_HIT_RATE: 0.0,  # TODO: Calculate
+            ATTR_GEOCODE_HIT_RATE: stats.get("geocode_hit_rate", 0.0),
             ATTR_FILES_WITH_LOCATION: stats.get("files_with_location", 0),
             ATTR_GEOCODE_ATTRIBUTION: GEOCODE_ATTRIBUTION if geocode_enabled else None,
         }

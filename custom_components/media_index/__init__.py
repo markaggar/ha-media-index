@@ -430,6 +430,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if scan_schedule != SCAN_SCHEDULE_STARTUP_ONLY:
         _setup_scheduled_scan(hass, entry, scanner, base_folder, watched_folders, scan_schedule)
     
+    # Setup weekly VACUUM task to compact database
+    async def _weekly_vacuum_callback(now):
+        """Run weekly VACUUM to reclaim space."""
+        try:
+            # Get database size with error handling
+            try:
+                db_size_before = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            except FileNotFoundError:
+                _LOGGER.warning("Database file not found before VACUUM")
+                return
+            
+            _LOGGER.info("Running weekly database VACUUM (current size: %.2f MB)", db_size_before)
+            await cache_manager.vacuum_database()
+            
+            try:
+                db_size_after = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            except FileNotFoundError:
+                _LOGGER.warning("Database file not found after VACUUM")
+                return
+            
+            space_reclaimed = db_size_before - db_size_after
+            _LOGGER.info("Weekly VACUUM completed: %.2f MB -> %.2f MB (reclaimed %.2f MB)", 
+                        db_size_before, db_size_after, space_reclaimed)
+        except Exception as e:
+            _LOGGER.error("Weekly VACUUM failed: %s", e)
+    
+    remove_vacuum_listener = async_track_time_interval(
+        hass, _weekly_vacuum_callback, timedelta(weeks=1)
+    )
+    entry.async_on_unload(remove_vacuum_listener)
+    
     # Register services (only once, on first entry setup)
     if not hass.services.has_service(DOMAIN, SERVICE_GET_RANDOM_ITEMS):
         _register_services(hass)
@@ -1030,6 +1061,9 @@ def _register_services(hass: HomeAssistant):
         _LOGGER.info("Cleanup database (dry_run=%s)", dry_run)
         
         try:
+            # Get database size before cleanup
+            db_size_before = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            
             # Get all files from database
             async with cache_manager._db.execute(
                 "SELECT id, path FROM media_files ORDER BY path"
@@ -1057,18 +1091,52 @@ def _register_services(hass: HomeAssistant):
                 if checked % 10 == 0:
                     await asyncio.sleep(0)
             
+            # Check for orphaned exif_data rows (always check, even in dry_run)
+            # Count using optimized query
+            async with cache_manager._db.execute(
+                "SELECT COUNT(*) FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
+            ) as cursor:
+                row = await cursor.fetchone()
+                orphaned_count = row[0] if row else 0
+            
+            if orphaned_count > 0:
+                if dry_run:
+                    _LOGGER.warning("Found %d orphaned exif_data rows (dry run, not removed)", orphaned_count)
+                else:
+                    _LOGGER.warning("Found %d orphaned exif_data rows, removing...", orphaned_count)
+                    # Use public method for proper encapsulation
+                    await cache_manager.cleanup_orphaned_exif()
+            
+            # Run VACUUM to reclaim space and compact database
+            if not dry_run:
+                _LOGGER.info("Running VACUUM to compact database...")
+                await cache_manager.vacuum_database()
+                db_size_after_vacuum = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+                space_reclaimed = db_size_before - db_size_after_vacuum
+                _LOGGER.info("VACUUM completed: %.2f MB -> %.2f MB (reclaimed %.2f MB)", 
+                            db_size_before, db_size_after_vacuum, space_reclaimed)
+            else:
+                db_size_after_vacuum = db_size_before
+                space_reclaimed = 0
+            
             result = {
                 "status": "completed",
                 "dry_run": dry_run,
                 "checked": checked,
                 "stale_count": len(stale_files),
-                "stale_files": [f["path"] for f in stale_files]
+                "stale_files": [f["path"] for f in stale_files],
+                "orphaned_exif_removed": orphaned_count,
+                "db_size_before_mb": round(db_size_before, 2),
+                "db_size_after_mb": round(db_size_after_vacuum, 2),
+                "space_reclaimed_mb": round(space_reclaimed, 2)
             }
             
             if dry_run:
-                _LOGGER.info("Cleanup dry run: found %d stale files out of %d checked", len(stale_files), checked)
+                _LOGGER.info("Cleanup dry run: found %d stale files out of %d checked (DB size: %.2f MB)", 
+                            len(stale_files), checked, db_size_before)
             else:
-                _LOGGER.info("Cleanup completed: removed %d stale files out of %d checked", len(stale_files), checked)
+                _LOGGER.info("Cleanup completed: removed %d stale files, reclaimed %.2f MB", 
+                            len(stale_files), space_reclaimed)
             
             return result
             
@@ -1352,7 +1420,7 @@ def _register_services(hass: HomeAssistant):
         handle_cleanup_database,
         schema=vol.Schema({
             vol.Optional("dry_run", default=True): cv.boolean,
-        }),
+        }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
     
