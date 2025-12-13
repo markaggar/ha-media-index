@@ -434,11 +434,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _weekly_vacuum_callback(now):
         """Run weekly VACUUM to reclaim space."""
         try:
-            db_size_before = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            # Get database size with error handling
+            try:
+                db_size_before = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            except FileNotFoundError:
+                _LOGGER.warning("Database file not found before VACUUM")
+                return
+            
             _LOGGER.info("Running weekly database VACUUM (current size: %.2f MB)", db_size_before)
-            await cache_manager._db.execute("VACUUM")
-            await cache_manager._db.commit()
-            db_size_after = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            await cache_manager.vacuum_database()
+            
+            try:
+                db_size_after = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+            except FileNotFoundError:
+                _LOGGER.warning("Database file not found after VACUUM")
+                return
+            
             space_reclaimed = db_size_before - db_size_after
             _LOGGER.info("Weekly VACUUM completed: %.2f MB -> %.2f MB (reclaimed %.2f MB)", 
                         db_size_before, db_size_after, space_reclaimed)
@@ -1080,35 +1091,32 @@ def _register_services(hass: HomeAssistant):
                 if checked % 10 == 0:
                     await asyncio.sleep(0)
             
-            # Remove orphaned exif_data rows (foreign key CASCADE should prevent this, but clean up if they exist)
-            orphaned_count = 0
-            if not dry_run:
-                async with cache_manager._db.execute(
-                    "SELECT COUNT(*) FROM exif_data e LEFT JOIN media_files m ON e.file_id = m.id WHERE m.id IS NULL"
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    orphaned_count = row[0] if row else 0
-                
-                if orphaned_count > 0:
+            # Check for orphaned exif_data rows (always check, even in dry_run)
+            # Count using optimized query
+            async with cache_manager._db.execute(
+                "SELECT COUNT(*) FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
+            ) as cursor:
+                row = await cursor.fetchone()
+                orphaned_count = row[0] if row else 0
+            
+            if orphaned_count > 0:
+                if dry_run:
+                    _LOGGER.warning("Found %d orphaned exif_data rows (dry run, not removed)", orphaned_count)
+                else:
                     _LOGGER.warning("Found %d orphaned exif_data rows, removing...", orphaned_count)
-                    await cache_manager._db.execute(
-                        "DELETE FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
-                    )
-                    await cache_manager._db.commit()
-                    _LOGGER.info("Removed %d orphaned exif_data rows", orphaned_count)
+                    # Use public method for proper encapsulation
+                    await cache_manager.cleanup_orphaned_exif()
             
             # Run VACUUM to reclaim space and compact database
-            db_size_after_deletes = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
             if not dry_run:
                 _LOGGER.info("Running VACUUM to compact database...")
-                await cache_manager._db.execute("VACUUM")
-                await cache_manager._db.commit()
+                await cache_manager.vacuum_database()
                 db_size_after_vacuum = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
                 space_reclaimed = db_size_before - db_size_after_vacuum
                 _LOGGER.info("VACUUM completed: %.2f MB -> %.2f MB (reclaimed %.2f MB)", 
                             db_size_before, db_size_after_vacuum, space_reclaimed)
             else:
-                db_size_after_vacuum = db_size_after_deletes
+                db_size_after_vacuum = db_size_before
                 space_reclaimed = 0
             
             result = {

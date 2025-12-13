@@ -204,6 +204,7 @@ class CacheManager:
         """)
         
         # Geocode stats table for tracking cache hit rate
+        # Uses singleton pattern: CHECK (id = 1) ensures only one row exists for global statistics
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS geocode_stats (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -543,6 +544,12 @@ class CacheManager:
                     'location_state': row[2],
                     'location_country': row[3]
                 }
+            else:
+                # Increment cache misses when lookup fails
+                await self._db.execute("""
+                    UPDATE geocode_stats SET cache_misses = cache_misses + 1 WHERE id = 1
+                """)
+                await self._db.commit()
             return None
     
     async def add_geocode_cache(
@@ -572,11 +579,6 @@ class CacheManager:
             location_data.get('location_country', ''),
             int(datetime.now().timestamp())
         ))
-        
-        # Increment cache misses (this is called after API lookup)
-        await self._db.execute("""
-            UPDATE geocode_stats SET cache_misses = cache_misses + 1 WHERE id = 1
-        """)
         
         await self._db.commit()
     
@@ -1665,6 +1667,35 @@ class CacheManager:
         )
         await self._db.commit()
         _LOGGER.debug("Marked move %d as restored", move_id)
+    
+    async def cleanup_orphaned_exif(self) -> int:
+        """Remove orphaned EXIF data rows that don't have corresponding media_files entries.
+        
+        Returns:
+            Number of orphaned rows removed
+        """
+        # Count orphaned rows
+        async with self._db.execute(
+            "SELECT COUNT(*) FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
+        ) as cursor:
+            row = await cursor.fetchone()
+            orphaned_count = row[0] if row else 0
+        
+        if orphaned_count > 0:
+            # Delete orphaned rows
+            await self._db.execute(
+                "DELETE FROM exif_data WHERE file_id NOT IN (SELECT id FROM media_files)"
+            )
+            await self._db.commit()
+            _LOGGER.info("Removed %d orphaned exif_data rows", orphaned_count)
+        
+        return orphaned_count
+    
+    async def vacuum_database(self) -> None:
+        """Run VACUUM to reclaim space and compact the database."""
+        await self._db.execute("VACUUM")
+        await self._db.commit()
+        _LOGGER.debug("Database VACUUM completed")
     
     async def close(self) -> None:
         """Close database connection."""

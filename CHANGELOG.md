@@ -47,12 +47,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Foreign Key Constraints** 🚨 **CRITICAL DATA INTEGRITY FIX**
+  - SQLite foreign key constraints were disabled by default, causing `ON DELETE CASCADE` to never work
+  - Added `PRAGMA foreign_keys = ON` during database initialization
+  - **Impact**: Prevents orphaned EXIF data accumulation on all new and existing installations
+  - **User Action Required**: Existing installations should run `cleanup_database` service to remove accumulated orphans
+  - This was a silent data integrity issue affecting all installations since v1.0
+
+- **Orphaned EXIF Data Cleanup**
+  - Enhanced `cleanup_database` service to detect and remove orphaned exif_data rows
+  - Orphan detection now runs in both dry_run and live modes for visibility
+  - Added `orphaned_exif_removed` count in service response
+  - Uses optimized single-query deletion instead of separate count + delete
+  - **Result**: Test cleanup removed 1,432,402 orphaned rows, reclaimed 232.68 MB from one database
+  - Provides public `cleanup_orphaned_exif()` method for proper encapsulation
+
 - **Database Bloat Prevention**: Added automatic SQLite VACUUM operations
   - VACUUM now runs automatically after `cleanup_database` service completes (when `dry_run=false`)
   - Weekly automatic VACUUM scheduled to reclaim space from deleted/updated rows
   - Fixes database file growing indefinitely due to SQLite's copy-on-write behavior
   - Returns `db_size_before_mb`, `db_size_after_mb`, and `space_reclaimed_mb` in cleanup response
+  - Added error handling for file size checks (FileNotFoundError on fresh installs)
+  - Provides public `vacuum_database()` method for proper encapsulation
   - Resolves issue where 22MB database held only 172 files due to accumulated ghost data
+
+- **Geocode Cache Statistics Tracking**
+  - Fixed cache miss tracking to occur at lookup time, not after API call
+  - Cache misses now counted even when API calls fail (network errors, rate limits)
+  - Provides accurate cache effectiveness statistics regardless of API availability
+  - Added singleton pattern comment explaining `CHECK (id = 1)` constraint
 
 - **Cleanup Database Service Schema**: Fixed schema to allow `entity_id` parameter
   - Added `extra=vol.ALLOW_EXTRA` to service schema
