@@ -124,7 +124,7 @@ class GeocodeService:
                 
                 # Request location names based on configuration:
                 # - use_native_language=True: Use location's local language (no Accept-Language header)
-                # - use_native_language=False: Use HA instance's configured language (default)
+                # - use_native_language=False: Use Home Assistant instance's configured language (default)
                 if not self.use_native_language:
                     # Use Home Assistant's configured language (defaults to 'en' if not set)
                     ha_language = getattr(self.hass.config, 'language', 'en')

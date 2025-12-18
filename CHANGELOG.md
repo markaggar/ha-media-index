@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2025-12-18
+
+### Changed
+
+- **Auto-install Default Changed**: `auto_install_libmediainfo` now defaults to `False` instead of `True`
+  - **Breaking Change**: Prevents multiple Media Index instances from conflicting during auto-installation
+  - Users must explicitly opt-in via configuration UI to enable automatic installation
+  - Manual installation remains available via `media_index.install_libmediainfo` service
+
+- **Auto-restart Removed**: libmediainfo installation no longer triggers automatic Home Assistant restart
+  - **New Behavior**: Displays persistent notification requesting manual restart instead
+  - Consistent with standard Home Assistant integration behavior
+  - Gives users control over restart timing
+  - Prevents restart conflicts with other integrations/operations in progress
+
+### Fixed
+
+- **Code Quality Improvements** (GitHub Copilot PR Review):
+  - Refactored duplicate installation logic into shared `_install_libmediainfo_internal()` helper function
+  - Improved subprocess error handling using `check=True` pattern with `CalledProcessError`
+  - Fixed `apt-get update` return code validation before proceeding with package installation
+  - Removed unused `test_result` variable in pymediainfo availability check
+  - Extracted magic numbers to constants: `INSTALL_TIMEOUT_APK`, `INSTALL_TIMEOUT_APT`, `INSTALL_STARTUP_DELAY`
+  - Replaced all "HA" abbreviations with "Home Assistant" in user-facing strings and comments
+
+- **Performance Optimization**: Geocoding cache statistics now use batched updates
+  - Cache hit/miss counters accumulated in-memory and flushed every 100 lookups
+  - Additional flush on scan completion to ensure accurate final statistics
+  - Reduces database I/O overhead during bulk scanning operations
+  - New constant: `GEOCODE_STATS_BATCH_SIZE = 100`
+
+### Technical Details
+
+- Persistent notification ID: `media_index_libmediainfo_restart` (automatically dismisses on restart)
+- Installation helper now returns structured status dictionary for service responses
+- Geocoding stats batching implemented with in-memory counters: `_geocode_stats_cache_hits`, `_geocode_stats_cache_misses`, `_geocode_stats_counter`
+
 ## [1.5.1] - 2025-12-17
 
 ### Added

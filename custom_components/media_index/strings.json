@@ -6,7 +6,7 @@
         "description": "Configure media folder scanning and indexing. Base folder must be an actual filesystem path, NOT a media-source:// URI. Use the actual path that media_source maps to (e.g., /media, /config/www/local).\n\nNote: Auto-install of libmediainfo will cause an additional Home Assistant restart after each core upgrade to reinstall the system library.",
         "data": {
           "base_folder": "Base media folder (filesystem path: /media, /config/www, NOT media-source://)",
-          "media_source_uri": "Media source URI (e.g., media-source://media_source/local/ when using /config/www as the base folder - optional, only needed for custom media_dirs mappings (copy from HA Media Card path config). Leave empty for standard /media base_folder paths)",
+          "media_source_uri": "Media source URI (e.g., media-source://media_source/local/ when using /config/www as the base folder - optional, only needed for custom media_dirs mappings (copy from Home Assistant Media Card path config). Leave empty for standard /media base_folder paths)",
           "watched_folders": "Watched folders (comma-separated relative paths)",
           "scan_on_startup": "Scan on startup",
           "scan_schedule": "Scan schedule",
