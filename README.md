@@ -3,6 +3,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/markaggar/ha-media-index)](https://github.com/markaggar/ha-media-index/releases)
 [![GitHub](https://img.shields.io/github/license/markaggar/ha-media-index)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?logo=buy-me-a-coffee)](https://buymeacoffee.com/markaggar)
 
 A custom Home Assistant integration that indexes media files (images and videos) from local folders, extracts EXIF/metadata, provides geocoding, and offers services for random media selection, favorites management, and file operations. Specifically designed for the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card), but can easily be used by any other card, integration or automation/script through Home Assistant Actions (Services) or WebSocket API calls.
 
