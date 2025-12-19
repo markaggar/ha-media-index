@@ -10,10 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Automatic libmediainfo Installation**: New `auto_install_libmediainfo` configuration option (default: false)
-  - Automatically installs libmediainfo system library on integration startup
+  - Automatically installs libmediainfo system library when enabled via configuration options (no restart required to trigger)
   - Simplifies video metadata extraction setup for Home Assistant OS/Supervised users
-  - ⚠️ **Note**: After each Home Assistant core upgrade, an additional restart will be required to reinstall the system library. A persistent notification is created to remind the user to manually restart.
-  - Manual installation available via `media_index.install_libmediainfo` service
+  - Creates persistent notification prompting for manual Home Assistant restart after successful installation
+  - ⚠️ **Note**: After each Home Assistant core upgrade, an additional restart will be required to reinstall the system library. Simply re-enable the option in configuration to trigger installation and notification.
+  - Manual installation also available via `media_index.install_libmediainfo` service
+
+- **Sensor Attribute**: New `libmediainfo_available` boolean attribute on scan status sensor
+  - Shows True/False to indicate if libmediainfo system library is installed and working
+  - Useful for monitoring, troubleshooting, and automations
+  - Updates with every sensor state change
+  - Easy way to verify video metadata extraction capability without checking logs
 
 - **Geocoding Language Support**: Geocoding now respects Home Assistant's configured language
   - When `use_native_language` is disabled, location names are returned in your HA instance's language setting
