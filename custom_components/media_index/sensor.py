@@ -123,6 +123,9 @@ class MediaIndexTotalFilesSensor(SensorEntity):
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
         media_source_uri = config.get(CONF_MEDIA_SOURCE_URI, "")
         
+        # Get libmediainfo availability status
+        pymediainfo_available = self.hass.data[DOMAIN][self._entry.entry_id].get("pymediainfo_available", False)
+        
         self._attr_extra_state_attributes = {
             ATTR_SCAN_STATUS: scan_status,
             ATTR_LAST_SCAN_TIME: stats.get("last_scan_time"),
@@ -132,6 +135,7 @@ class MediaIndexTotalFilesSensor(SensorEntity):
             ATTR_WATCHED_FOLDERS: watched_folders,
             ATTR_MEDIA_PATH: base_folder,
             "media_source_uri": media_source_uri,
+            "libmediainfo_available": pymediainfo_available,
             ATTR_CACHE_SIZE_MB: stats.get("cache_size_mb", 0.0),
             ATTR_GEOCODE_ENABLED: geocode_enabled,
             ATTR_GEOCODE_CACHE_ENTRIES: stats.get("geocode_cache_entries", 0),
