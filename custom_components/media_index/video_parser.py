@@ -14,7 +14,7 @@ try:
     # Test if MediaInfo library is actually available
     try:
         MediaInfo.can_parse()
-        _LOGGER.info("[VIDEO] ✅ pymediainfo AND MediaInfo library are both available")
+        _LOGGER.debug("[VIDEO] ✅ pymediainfo AND MediaInfo library are both available")
     except Exception as e:
         _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo installed but MediaInfo library missing: {e}")
         PYMEDIAINFO_AVAILABLE = False
@@ -67,7 +67,7 @@ class VideoMetadataParser:
             # METHOD 1: pymediainfo - Most reliable for datetime extraction
             # ===================================================================
             if PYMEDIAINFO_AVAILABLE:
-                _LOGGER.info(f"[VIDEO] ✅ pymediainfo is AVAILABLE, attempting extraction for {Path(file_path).name}")
+                _LOGGER.debug(f"[VIDEO] ✅ pymediainfo is AVAILABLE, attempting extraction for {Path(file_path).name}")
                 try:
                     media_info = MediaInfo.parse(file_path)
                     

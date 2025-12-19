@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "Set up Media Index",
-        "description": "Configure media folder scanning and indexing. Base folder must be an actual filesystem path, NOT a media-source:// URI. Use the actual path that media_source maps to (e.g., /media, /config/www/local).",
+        "description": "Configure media folder scanning and indexing.\n\nBase folder must be an actual filesystem path, NOT a media-source:// URI. Use the actual path that media_source maps to (e.g., /media, /config/www/local).\n\nMedia source URI is optional and only needed for custom media path mappings (copy from Home Assistant Media Card path config). Leave empty for standard /media base_folder paths)\n\nNote: Auto-install of libmediainfo will require an additional Home Assistant restart after each core upgrade to reinstall the system library. A persistent notification will prompt for this restart if enabled.",
         "data": {
           "base_folder": "Base media folder (filesystem path: /media, /config/www, NOT media-source://)",
+          "media_source_uri": "Optional Media Source URI (e.g., media-source://media_source/local/ when using /config/www as base folder)",
           "watched_folders": "Watched folders (comma-separated relative paths)",
           "scan_on_startup": "Scan on startup",
           "scan_schedule": "Scan schedule",
@@ -15,6 +16,7 @@
           "geocode_native_language": "Use native language names",
           "max_startup_time": "Max startup scan time (seconds)",
           "concurrent_scans": "Concurrent scan workers",
+          "auto_install_libmediainfo": "Auto-install libmediainfo for video metadata extraction. If you have multple Media Index instances, only enable this for one of the instances. Requires an additional Home Assistant restart after each core upgrade to reinstall the system library.",
           "batch_size": "Batch size (files per batch)",
           "cache_max_age_days": "Cache max age (days)"
         }
@@ -33,6 +35,7 @@
         "title": "Media Index Options",
         "description": "Configure scanning and performance settings",
         "data": {
+          "media_source_uri": "Media source URI (optional, only needed for custom media_dirs mappings)",
           "watched_folders": "Watched folders (comma-separated)",
           "scan_schedule": "Scan schedule",
           "extract_exif": "Extract EXIF metadata",
@@ -41,6 +44,7 @@
           "geocode_native_language": "Use native language names (e.g., 日本 instead of Japan)",
           "max_startup_time": "Max startup scan time (seconds)",
           "concurrent_scans": "Concurrent scan workers",
+          "auto_install_libmediainfo": "Auto-install libmediainfo (for video metadata extraction)",
           "batch_size": "Batch size (files per batch)",
           "cache_max_age_days": "Cache max age (days)"
         }

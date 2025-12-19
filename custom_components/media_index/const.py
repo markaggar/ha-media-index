@@ -18,6 +18,7 @@ CONF_CONCURRENT_SCANS: Final = "concurrent_scans"
 CONF_BATCH_SIZE: Final = "batch_size"
 CONF_CACHE_MAX_AGE: Final = "cache_max_age_days"
 CONF_ENABLE_WATCHER: Final = "enable_watcher"
+CONF_AUTO_INSTALL_LIBMEDIAINFO: Final = "auto_install_libmediainfo"
 
 # Defaults
 DEFAULT_BASE_FOLDER: Final = "/media"
@@ -32,6 +33,13 @@ DEFAULT_CONCURRENT_SCANS: Final = 3
 DEFAULT_BATCH_SIZE: Final = 100
 DEFAULT_CACHE_MAX_AGE: Final = 90
 DEFAULT_ENABLE_WATCHER: Final = True
+DEFAULT_AUTO_INSTALL_LIBMEDIAINFO: Final = False
+
+# Installation timeouts and delays
+INSTALL_TIMEOUT_APK: Final = 60
+INSTALL_TIMEOUT_APT: Final = 120
+INSTALL_STARTUP_DELAY: Final = 5
+GEOCODE_STATS_BATCH_SIZE: Final = 100
 
 # Scan schedule options
 SCAN_SCHEDULE_STARTUP_ONLY: Final = "startup_only"
@@ -74,6 +82,7 @@ SERVICE_MARK_FOR_EDIT: Final = "mark_for_edit"
 SERVICE_RESTORE_EDITED_FILES: Final = "restore_edited_files"
 SERVICE_CLEANUP_DATABASE: Final = "cleanup_database"
 SERVICE_UPDATE_BURST_METADATA: Final = "update_burst_metadata"
+SERVICE_INSTALL_LIBMEDIAINFO: Final = "install_libmediainfo"
 
 # Attributes
 ATTR_SCAN_STATUS: Final = "scan_status"

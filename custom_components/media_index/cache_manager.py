@@ -19,6 +19,12 @@ class CacheManager:
         """
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
+        
+        # Geocoding stats batching
+        self._geocode_stats_cache_hits = 0
+        self._geocode_stats_cache_misses = 0
+        self._geocode_stats_counter = 0
+        
         _LOGGER.info("CacheManager initialized with database: %s", db_path)
     
     async def async_setup(self) -> bool:
@@ -525,6 +531,8 @@ class CacheManager:
         Returns:
             Dictionary with location data or None if not cached
         """
+        from .const import GEOCODE_STATS_BATCH_SIZE
+        
         async with self._db.execute("""
             SELECT location_name, location_city, location_state, location_country
             FROM geocode_cache
@@ -532,11 +540,13 @@ class CacheManager:
         """, (round(latitude, 3), round(longitude, 3), 3)) as cursor:
             row = await cursor.fetchone()
             if row:
-                # Increment cache hits
-                await self._db.execute("""
-                    UPDATE geocode_stats SET cache_hits = cache_hits + 1 WHERE id = 1
-                """)
-                await self._db.commit()
+                # Increment in-memory cache hit counter
+                self._geocode_stats_cache_hits += 1
+                self._geocode_stats_counter += 1
+                
+                # Flush to database every GEOCODE_STATS_BATCH_SIZE lookups
+                if self._geocode_stats_counter >= GEOCODE_STATS_BATCH_SIZE:
+                    await self._flush_geocode_stats()
                 
                 return {
                     'location_name': row[0],
@@ -545,11 +555,14 @@ class CacheManager:
                     'location_country': row[3]
                 }
             else:
-                # Increment cache misses when lookup fails
-                await self._db.execute("""
-                    UPDATE geocode_stats SET cache_misses = cache_misses + 1 WHERE id = 1
-                """)
-                await self._db.commit()
+                # Increment in-memory cache miss counter
+                self._geocode_stats_cache_misses += 1
+                self._geocode_stats_counter += 1
+                
+                # Flush to database every GEOCODE_STATS_BATCH_SIZE lookups
+                if self._geocode_stats_counter >= GEOCODE_STATS_BATCH_SIZE:
+                    await self._flush_geocode_stats()
+                    
             return None
     
     async def add_geocode_cache(
@@ -581,6 +594,32 @@ class CacheManager:
         ))
         
         await self._db.commit()
+    
+    async def _flush_geocode_stats(self) -> None:
+        """Flush in-memory geocoding stats counters to database.
+        
+        Called automatically every GEOCODE_STATS_BATCH_SIZE lookups
+        or manually when scan completes.
+        """
+        if self._geocode_stats_cache_hits > 0 or self._geocode_stats_cache_misses > 0:
+            await self._db.execute("""
+                UPDATE geocode_stats 
+                SET cache_hits = cache_hits + ?,
+                    cache_misses = cache_misses + ?
+                WHERE id = 1
+            """, (self._geocode_stats_cache_hits, self._geocode_stats_cache_misses))
+            await self._db.commit()
+            
+            _LOGGER.debug(
+                "Flushed geocoding stats: +%d hits, +%d misses",
+                self._geocode_stats_cache_hits,
+                self._geocode_stats_cache_misses
+            )
+            
+            # Reset counters
+            self._geocode_stats_cache_hits = 0
+            self._geocode_stats_cache_misses = 0
+            self._geocode_stats_counter = 0
     
     async def update_exif_location(
         self,
@@ -1385,11 +1424,11 @@ class CacheManager:
             ])
         
         # Execute query
-        _LOGGER.info("Burst query params: %s", params)
+        _LOGGER.debug("Burst query params: %s", params)
         async with self._db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
         
-        _LOGGER.info("Burst query returned %d rows", len(rows))
+        _LOGGER.debug("Burst query returned %d rows", len(rows))
         return [dict(row) for row in rows]
     
     async def get_anniversary_photos(

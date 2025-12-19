@@ -258,6 +258,9 @@ class MediaScanner:
             # Update scan record
             await self.cache.update_scan(scan_id, files_added, "completed")
             
+            # Flush any pending geocoding stats
+            await self.cache._flush_geocode_stats()
+            
             _LOGGER.info("Scan complete. Added %d files to cache", files_added)
             return files_added
         

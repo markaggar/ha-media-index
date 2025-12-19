@@ -24,6 +24,7 @@ from .const import (
     CONF_CONCURRENT_SCANS,
     CONF_BATCH_SIZE,
     CONF_CACHE_MAX_AGE,
+    CONF_AUTO_INSTALL_LIBMEDIAINFO,
     DEFAULT_BASE_FOLDER,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
@@ -35,6 +36,7 @@ from .const import (
     DEFAULT_CONCURRENT_SCANS,
     DEFAULT_BATCH_SIZE,
     DEFAULT_CACHE_MAX_AGE,
+    DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
     SCAN_SCHEDULES,
 )
 
@@ -115,6 +117,9 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_CONCURRENT_SCANS, default=DEFAULT_CONCURRENT_SCANS
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Optional(
+                        CONF_AUTO_INSTALL_LIBMEDIAINFO, default=DEFAULT_AUTO_INSTALL_LIBMEDIAINFO
+                    ): bool,
                     vol.Optional(
                         CONF_BATCH_SIZE, default=DEFAULT_BATCH_SIZE
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
@@ -206,6 +211,10 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_CACHE_MAX_AGE,
             self.config_entry.data.get(CONF_CACHE_MAX_AGE, DEFAULT_CACHE_MAX_AGE),
         )
+        current_auto_install = self.config_entry.options.get(
+            CONF_AUTO_INSTALL_LIBMEDIAINFO,
+            self.config_entry.data.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -244,6 +253,9 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_CACHE_MAX_AGE, default=current_cache_age
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                    vol.Optional(
+                        CONF_AUTO_INSTALL_LIBMEDIAINFO, default=current_auto_install
+                    ): bool,
                 }
             ),
         )

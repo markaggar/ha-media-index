@@ -24,9 +24,11 @@ from .const import (
     CONF_ENABLE_WATCHER,
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
+    CONF_AUTO_INSTALL_LIBMEDIAINFO,
     DEFAULT_ENABLE_WATCHER,
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
+    DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
     SCAN_SCHEDULE_STARTUP_ONLY,
@@ -43,6 +45,7 @@ from .const import (
     SERVICE_RESTORE_EDITED_FILES,
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
+    SERVICE_INSTALL_LIBMEDIAINFO,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -302,6 +305,14 @@ def _setup_scheduled_scan(
     """
     async def _scheduled_scan_callback(now):
         """Run scheduled scan if not already running."""
+        # Block if pymediainfo not available
+        if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
+            _LOGGER.warning(
+                "⏸️ Scheduled scan SKIPPED: pymediainfo not available. "
+                "Call 'media_index.install_libmediainfo' to fix."
+            )
+            return
+        
         # Check if scan already in progress
         if scanner.is_scanning:
             _LOGGER.info(
@@ -333,6 +344,118 @@ def _setup_scheduled_scan(
     entry.async_on_unload(remove_listener)
 
 
+async def _install_libmediainfo_internal(hass: HomeAssistant) -> dict:
+    """Shared helper to install libmediainfo system library.
+    
+    Returns:
+        Dictionary with status and message
+    """
+    import subprocess
+    from .const import INSTALL_TIMEOUT_APK, INSTALL_TIMEOUT_APT
+    
+    _LOGGER.info("📦 Installing libmediainfo system library...")
+    
+    try:
+        # Try apk (Alpine/Home Assistant OS)
+        subprocess.run(
+            ["apk", "add", "--no-cache", "libmediainfo"],
+            capture_output=True,
+            text=True,
+            timeout=INSTALL_TIMEOUT_APK,
+            check=True,
+        )
+        _LOGGER.info("✅ libmediainfo installed successfully via apk")
+        
+        # Create persistent notification instead of auto-restart
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Media Index: libmediainfo Installed",
+                "message": (
+                    "✅ libmediainfo has been installed successfully.\n\n"
+                    "**Please restart Home Assistant** to complete the setup and enable video metadata extraction.\n\n"
+                    "Go to Settings → System → Restart"
+                ),
+                "notification_id": "media_index_libmediainfo_restart",
+            },
+            blocking=False,
+        )
+        
+        return {
+            "status": "success",
+            "message": "libmediainfo installed successfully. Please restart Home Assistant to complete setup."
+        }
+        
+    except FileNotFoundError:
+        # apk not found, try apt (Debian/Ubuntu)
+        try:
+            subprocess.run(
+                ["apt-get", "update"],
+                capture_output=True,
+                text=True,
+                timeout=INSTALL_TIMEOUT_APT,
+                check=True,
+            )
+            subprocess.run(
+                ["apt-get", "install", "-y", "libmediainfo0v5"],
+                capture_output=True,
+                text=True,
+                timeout=INSTALL_TIMEOUT_APT,
+                check=True,
+            )
+            _LOGGER.info("✅ libmediainfo installed successfully via apt")
+            
+            # Create persistent notification
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Media Index: libmediainfo Installed",
+                    "message": (
+                        "✅ libmediainfo has been installed successfully.\n\n"
+                        "**Please restart Home Assistant** to complete the setup and enable video metadata extraction.\n\n"
+                        "Go to Settings → System → Restart"
+                    ),
+                    "notification_id": "media_index_libmediainfo_restart",
+                },
+                blocking=False,
+            )
+            
+            return {
+                "status": "success",
+                "message": "libmediainfo installed successfully. Please restart Home Assistant to complete setup."
+            }
+            
+        except subprocess.CalledProcessError as apt_error:
+            _LOGGER.error(
+                "Auto-install via apt-get failed (returncode=%s, stderr=%s)",
+                apt_error.returncode,
+                apt_error.stderr,
+            )
+            return {
+                "status": "failed",
+                "message": f"Auto-install failed. Please manually run: apk add --no-cache libmediainfo OR apt-get install libmediainfo0v5"
+            }
+            
+    except subprocess.CalledProcessError as apk_error:
+        _LOGGER.error(
+            "Auto-install via apk failed (returncode=%s, stderr=%s)",
+            apk_error.returncode,
+            apk_error.stderr,
+        )
+        return {
+            "status": "failed",
+            "message": f"Auto-install failed. Please manually run: apk add --no-cache libmediainfo OR apt-get install libmediainfo0v5"
+        }
+    except Exception as e:
+        _LOGGER.error("Unexpected error during libmediainfo installation: %s", e, exc_info=True)
+        return {
+            "status": "failed",
+            "message": f"Installation failed with unexpected error: {str(e)}"
+        }
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Media Index from a config entry."""
     _LOGGER.info("Setting up Media Index integration")
@@ -347,6 +470,71 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         f"media_index_{entry.entry_id}.db"
     )
     cache_manager = CacheManager(cache_db_path)
+    
+    # Check pymediainfo availability on startup
+    # Must actually test library loading, not just Python module import
+    pymediainfo_available = False
+    libmediainfo_error = None
+    try:
+        from pymediainfo import MediaInfo
+        # Try to actually instantiate to trigger library loading
+        # This will fail with OSError if libmediainfo.so.0 is missing
+        import tempfile
+        import os as os_module
+        # Create a minimal test file
+        test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+        os_module.close(test_fd)
+        try:
+            MediaInfo.parse(test_path)
+            pymediainfo_available = True
+            _LOGGER.info("✅ libmediainfo is available - video metadata extraction enabled")
+        finally:
+            os_module.unlink(test_path)
+    except (ImportError, OSError, RuntimeError) as e:
+        libmediainfo_error = str(e)
+        _LOGGER.error(
+            "❌ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
+            "This usually happens after Home Assistant Core upgrades.\n"
+            "Error: %s\n"
+            "Automatic scanning is BLOCKED to prevent metadata loss.\n"
+            "To auto-fix: Call 'media_index.install_libmediainfo' service\n"
+            "Or manually SSH into Home Assistant and run: apk add --no-cache libmediainfo",
+            libmediainfo_error
+        )
+    except Exception as e:
+        # Catch-all for unexpected errors
+        libmediainfo_error = str(e)
+        _LOGGER.warning(
+            "⚠️ Unexpected error testing libmediainfo: %s\n"
+            "Assuming library is not available - blocking scans.",
+            libmediainfo_error
+        )
+    
+    # Store availability status for services to check
+    hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = pymediainfo_available
+    
+    # Auto-install if missing and auto_install is enabled
+    if not pymediainfo_available:
+        config = {**entry.data, **entry.options}
+        auto_install = config.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO)
+        
+        if auto_install:
+            from .const import INSTALL_STARTUP_DELAY
+            _LOGGER.warning(
+                "🔧 Auto-install enabled - attempting to install libmediainfo automatically..."
+            )
+            # Schedule installation after startup completes
+            async def _auto_install_on_startup():
+                await asyncio.sleep(INSTALL_STARTUP_DELAY)  # Wait for Home Assistant to finish starting
+                result = await _install_libmediainfo_internal(hass)
+                if result["status"] == "failed":
+                    _LOGGER.error("Auto-install failed: %s", result["message"])
+            
+            hass.async_create_task(_auto_install_on_startup())
+        else:
+            _LOGGER.info(
+                "ℹ️ Auto-install is disabled. To enable, reconfigure the integration and check 'auto_install_libmediainfo'."
+            )
     
     if not await cache_manager.async_setup():
         _LOGGER.error("Failed to initialize cache manager")
@@ -400,20 +588,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms BEFORE starting scan so sensor exists
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
-    # Trigger initial scan AFTER HA has fully started (not during setup)
+    # Trigger initial scan AFTER Home Assistant has fully started (not during setup)
     # Use config already constructed above
     watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
     
     if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
         async def _trigger_startup_scan(_event=None):
-            """Trigger scan after HA has fully started."""
+            """Trigger scan after Home Assistant has fully started."""
+            # Block if pymediainfo not available
+            if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
+                _LOGGER.warning(
+                    "⏸️ Startup scan SKIPPED: pymediainfo not available. "
+                    "Call 'media_index.install_libmediainfo' to fix."
+                )
+                return
+            
             _LOGGER.info("Home Assistant started - beginning initial scan of %s (watched: %s)", base_folder, watched_folders)
             hass.async_create_task(
                 scanner.scan_folder(base_folder, watched_folders),
                 name=f"media_index_scan_{entry.entry_id}"
             )
         
-        # Listen for HA start event to trigger scan
+        # Listen for Home Assistant start event to trigger scan
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
         _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
@@ -486,7 +682,7 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     Raises:
         ValueError: If no integration instance found
     """
-    # Check for target in multiple locations (HA passes it differently depending on context)
+    # Check for target in multiple locations (Home Assistant passes it differently depending on context)
     entity_id = None
     
     # Method 1: Check call.data['target'] (Developer Tools, automations, REST API)
@@ -499,7 +695,7 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
             _LOGGER.debug("Found target entity in call.data['target']: %s", entity_id)
     
     # Method 2: Check call.data['entity_id'] directly (WebSocket with target selector)
-    # HA WebSocket transforms target.entity_id -> call.data['entity_id']
+    # Home Assistant WebSocket transforms target.entity_id -> call.data['entity_id']
     if not entity_id and 'entity_id' in call.data:
         entity_id = call.data['entity_id']
         if isinstance(entity_id, list):
@@ -1316,6 +1512,16 @@ def _register_services(hass: HomeAssistant):
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
+        
+        # Block scanning if pymediainfo is not available
+        if not hass.data[DOMAIN][entry_id].get("pymediainfo_available", False):
+            _LOGGER.error(
+                "❌ Scan BLOCKED: pymediainfo/libmediainfo is not available!\n"
+                "Scanning without video metadata support will wipe existing metadata.\n"
+                "Call 'media_index.install_libmediainfo' service to fix and restart Home Assistant."
+            )
+            return {"status": "blocked", "reason": "pymediainfo_not_available"}
+        
         scanner = hass.data[DOMAIN][entry_id]["scanner"]
         config = hass.data[DOMAIN][entry_id]["config"]
         
@@ -1333,7 +1539,18 @@ def _register_services(hass: HomeAssistant):
         
         return {"status": "scan_started", "folder": folder_path}
     
+    async def handle_install_libmediainfo(call):
+        """Install libmediainfo system library."""
+        return await _install_libmediainfo_internal(hass)
+    
     # Register all services
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_INSTALL_LIBMEDIAINFO,
+        handle_install_libmediainfo,
+        supports_response=SupportsResponse.ONLY,
+    )
+    
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_RANDOM_ITEMS,

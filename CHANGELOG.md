@@ -5,7 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - 2025-12-06
+## [1.5.1] - 2025-12-18
+
+### Added
+
+- **Automatic libmediainfo Installation**: New `auto_install_libmediainfo` configuration option (default: false)
+  - Automatically installs libmediainfo system library when enabled via configuration options (no restart required to trigger)
+  - Simplifies video metadata extraction setup for Home Assistant OS/Supervised users
+  - Creates persistent notification prompting for manual Home Assistant restart after successful installation
+  - ⚠️ **Note**: After each Home Assistant core upgrade, the system library will be automatically reinstalled on next restart (option stays enabled). A new persistent notification will prompt for the additional restart to complete setup.
+  - Manual installation also available via `media_index.install_libmediainfo` service
+
+- **Sensor Attribute**: New `libmediainfo_available` boolean attribute on scan status sensor
+  - Shows True/False to indicate if libmediainfo system library is installed and working
+  - Useful for monitoring, troubleshooting, and automations
+  - Updates with every sensor state change
+  - Easy way to verify video metadata extraction capability without checking logs
+
+- **Geocoding Language Support**: Geocoding now respects Home Assistant's configured language
+  - When `use_native_language` is disabled, location names are returned in your HA instance's language setting
+  - Falls back to English if language not configured
+  - Benefits international users who want location names in their preferred language (e.g., German HA → German location names)
+
+### Fixed
+
+- **Performance Optimization**: Geocoding cache statistics now use batched updates
+  - Cache hit/miss counters accumulated in-memory and flushed every 100 lookups
+  - Additional flush on scan completion to ensure accurate final statistics
+  - Reduces database I/O overhead during bulk scanning operations
+  - New constant: `GEOCODE_STATS_BATCH_SIZE = 100`
+
+### Technical Details
+
+- Persistent notification ID: `media_index_libmediainfo_restart` (automatically dismisses on restart)
+- Installation helper now returns structured status dictionary for service responses
+- Geocoding stats batching implemented with in-memory counters: `_geocode_stats_cache_hits`, `_geocode_stats_cache_misses`, `_geocode_stats_counter`
+
+## [1.5.0] - 2025-12-14
 
 ### Added
 
@@ -82,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Resolves "extra keys not allowed @ data['entity_id']" error when using target selector
   - Service now works correctly with both target selector and direct service calls
 
-- **Video Metadata Extraction** (Enhanced in v1.5.0)
+- **Video Metadata Extraction**
   - **NEW**: Integrated `pymediainfo` library for comprehensive video metadata extraction
   - **Extracts from pymediainfo**:
     - DateTime: `encoded_date`, `tagged_date`, `recorded_date`, `mastered_date` fields

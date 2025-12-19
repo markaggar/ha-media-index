@@ -36,8 +36,8 @@ class GeocodeService:
         
         Args:
             hass: Home Assistant instance
-            use_native_language: If True, request native language names from Nominatim.
-                               If False (default), request English names.
+            use_native_language: If True, request native language names from Nominatim (location's local language).
+                               If False (default), use Home Assistant's configured language setting.
         """
         self.hass = hass
         self.use_native_language = use_native_language
@@ -122,10 +122,13 @@ class GeocodeService:
                     'User-Agent': 'HomeAssistant-MediaIndex/1.0 (+https://github.com/markaggar/ha-media-index)'
                 }
                 
-                # Request English names by default (unless native language is enabled)
-                # This provides consistent, readable location names for non-native speakers
+                # Request location names based on configuration:
+                # - use_native_language=True: Use location's local language (no Accept-Language header)
+                # - use_native_language=False: Use Home Assistant instance's configured language (default)
                 if not self.use_native_language:
-                    headers['Accept-Language'] = 'en'
+                    # Use Home Assistant's configured language (defaults to 'en' if not set)
+                    ha_language = getattr(self.hass.config, 'language', 'en')
+                    headers['Accept-Language'] = ha_language
                 
                 async with session.get(
                     NOMINATIM_URL, 
