@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatically installs libmediainfo system library when enabled via configuration options (no restart required to trigger)
   - Simplifies video metadata extraction setup for Home Assistant OS/Supervised users
   - Creates persistent notification prompting for manual Home Assistant restart after successful installation
-  - ⚠️ **Note**: After each Home Assistant core upgrade, an additional restart will be required to reinstall the system library. Simply re-enable the option in configuration to trigger installation and notification.
+  - ⚠️ **Note**: After each Home Assistant core upgrade, the system library will be automatically reinstalled on next restart (option stays enabled). A new persistent notification will prompt for the additional restart to complete setup.
   - Manual installation also available via `media_index.install_libmediainfo` service
 
 - **Sensor Attribute**: New `libmediainfo_available` boolean attribute on scan status sensor
