@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Automatic Integration Reload After libmediainfo Install**: No restart required anymore!
+  - After installing libmediainfo (auto-install or manual service), the integration automatically reloads
+  - Video metadata extraction is enabled immediately without restarting Home Assistant
+  - Removes the persistent notification requirement - it just works silently
+  - Applies to both automatic installation (config option) and manual `install_libmediainfo` service calls
+
 ### Fixed
 
 - **Blocking I/O Warning**: Fixed blocking call to `Image.open()` in file watcher/manual scan context
@@ -36,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic libmediainfo Installation**: New `auto_install_libmediainfo` configuration option (default: false)
   - Automatically installs libmediainfo system library when enabled via configuration options (no restart required to trigger)
   - Simplifies video metadata extraction setup for Home Assistant OS/Supervised users
-  - Creates persistent notification prompting for manual Home Assistant restart after successful installation
-  - ⚠️ **Note**: After each Home Assistant core upgrade, the system library will be automatically reinstalled on next restart (option stays enabled). A new persistent notification will prompt for the additional restart to complete setup.
+  - ~~Creates persistent notification prompting for manual Home Assistant restart after successful installation~~ (Changed in next release: Now automatically reloads integration)
+  - ⚠️ **Note**: After each Home Assistant core upgrade, the system library will be automatically reinstalled on next restart (option stays enabled). ~~A new persistent notification will prompt for the additional restart to complete setup.~~ (Changed in next release: Reloads automatically)
   - Manual installation also available via `media_index.install_libmediainfo` service
 
 - **Sensor Attribute**: New `libmediainfo_available` boolean attribute on scan status sensor
