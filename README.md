@@ -59,7 +59,7 @@ A custom Home Assistant integration that indexes media files (images and videos)
 
 The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. You have two options:
 
-1. **Automatic Installation** (Recommended for Home Assistant OS/Supervised): Enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library when the option is enabled (no restart needed to trigger installation). After successful installation, the integration automatically reloads itself and video metadata extraction is immediately enabled - no restart required! ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled on the next restart (the option stays enabled) and the integration will auto-reload again.
+1. **Automatic Installation** (Recommended for Home Assistant OS/Supervised): Enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library during setup if it's missing - no restart or reload needed! Video metadata extraction is available immediately when the integration finishes loading. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled during the next restart (the option stays enabled).
 
 2. **Manual Installation**: Install `libmediainfo` yourself (instructions below). After installation, manually reload the integration in Settings → Devices & Services → Media Index → ⋮ → Reload.
 

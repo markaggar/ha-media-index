@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Automatic Integration Reload After libmediainfo Install**: No restart required anymore!
-  - After installing libmediainfo (auto-install or manual service), the integration automatically reloads
-  - Video metadata extraction is enabled immediately without restarting Home Assistant
-  - Removes the persistent notification requirement - it just works silently
-  - Applies to both automatic installation (config option) and manual `install_libmediainfo` service calls
+- **Streamlined libmediainfo Auto-Install**: Even better - no reload needed!
+  - Now installs libmediainfo **during** integration setup if missing and auto-install enabled
+  - Integration loads normally with video metadata extraction immediately available
+  - No integration reload, no delay, no complexity - it just works
+  - Manual `install_libmediainfo` service still auto-reloads for existing installations
+  - Previous version required integration reload after install - now completely seamless
 
 ### Fixed
 

@@ -497,26 +497,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store availability status for services to check
     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = pymediainfo_available
     
-    # Auto-install if missing and auto_install is enabled
+    # Auto-install if missing and auto_install is enabled - DO IT NOW before continuing setup
     if not pymediainfo_available:
         config = {**entry.data, **entry.options}
         auto_install = config.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO)
         
         if auto_install:
-            from .const import INSTALL_STARTUP_DELAY
             _LOGGER.warning(
-                "🔧 Auto-install enabled - attempting to install libmediainfo automatically..."
+                "🔧 Auto-install enabled - installing libmediainfo before continuing setup..."
             )
-            # Schedule installation after startup completes
-            async def _auto_install_on_startup():
-                await asyncio.sleep(INSTALL_STARTUP_DELAY)  # Wait for Home Assistant to finish starting
-                result = await _install_libmediainfo_internal(hass, entry.entry_id)
-                if result["status"] == "failed":
-                    _LOGGER.error("Auto-install failed: %s", result["message"])
-                else:
-                    _LOGGER.info("✅ Auto-install completed: %s", result["message"])
-            
-            hass.async_create_task(_auto_install_on_startup())
+            # Install synchronously during setup (no entry_id needed since we're not reloading)
+            result = await _install_libmediainfo_internal(hass, entry_id=None)
+            if result["status"] == "success":
+                _LOGGER.info("✅ Auto-install successful: %s", result["message"])
+                # Re-test library availability after installation
+                try:
+                    from pymediainfo import MediaInfo
+                    import tempfile
+                    import os as os_module
+                    test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+                    os_module.close(test_fd)
+                    try:
+                        MediaInfo.parse(test_path)
+                        pymediainfo_available = True
+                        hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
+                        _LOGGER.info("✅ libmediainfo verified working after installation")
+                    finally:
+                        os_module.unlink(test_path)
+                except Exception as e:
+                    _LOGGER.error("❌ libmediainfo test failed after installation: %s", e)
+            else:
+                _LOGGER.error("❌ Auto-install failed: %s", result["message"])
         else:
             _LOGGER.info(
                 "ℹ️ Auto-install is disabled. To enable, reconfigure the integration and check 'auto_install_libmediainfo'."
