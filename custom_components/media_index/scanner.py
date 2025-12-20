@@ -65,13 +65,23 @@ class MediaScanner:
             stat = os.stat(file_path)
             path_obj = Path(file_path)
             
+            # On Linux/Unix, st_ctime is inode change time, NOT creation time
+            # On Windows, st_ctime is creation time
+            # Use st_birthtime if available (macOS, some BSD), else fall back to st_ctime
+            created_time = None
+            if hasattr(stat, 'st_birthtime'):
+                created_time = datetime.fromtimestamp(stat.st_birthtime).isoformat()
+            else:
+                # Fall back to st_ctime (Windows: creation, Linux: change time)
+                created_time = datetime.fromtimestamp(stat.st_ctime).isoformat()
+            
             return {
                 "path": file_path,
                 "filename": path_obj.name,
                 "folder": str(path_obj.parent),
                 "file_type": self._get_file_type(file_path),
                 "file_size": stat.st_size,
-                "created_time": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                "created_time": created_time,
                 "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 "accessed_time": datetime.fromtimestamp(stat.st_atime).isoformat(),
             }
@@ -299,7 +309,12 @@ class MediaScanner:
             # Extract EXIF first for images to get width/height/orientation
             exif_data = None
             if metadata['file_type'] == 'image':
-                exif_data = ExifParser.extract_exif(file_path)
+                if self.hass:
+                    exif_data = await self.hass.async_add_executor_job(
+                        ExifParser.extract_exif, file_path
+                    )
+                else:
+                    exif_data = ExifParser.extract_exif(file_path)
                 
                 # Add image dimensions to metadata for media_files table
                 if exif_data:
@@ -307,7 +322,12 @@ class MediaScanner:
                     metadata['height'] = exif_data.get('height')
                     metadata['orientation'] = exif_data.get('orientation')
             elif metadata['file_type'] == 'video':
-                exif_data = VideoMetadataParser.extract_metadata(file_path)
+                if self.hass:
+                    exif_data = await self.hass.async_add_executor_job(
+                        VideoMetadataParser.extract_metadata, file_path
+                    )
+                else:
+                    exif_data = VideoMetadataParser.extract_metadata(file_path)
             
             # Add to database
             file_id = await self.cache.add_file(metadata)

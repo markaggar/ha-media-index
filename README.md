@@ -231,6 +231,11 @@ For photos with GPS coordinates, the integration gradually adds location names:
 - **Works progressively** during scans - doesn't slow down initial indexing
 - **Caches results** to avoid repeated API calls for the same coordinates
 - **Provides location hierarchy** from specific place names to country level
+- **Language support**: Uses Home Assistant's configured language by default
+  - Location names are cached permanently once geocoded
+  - Existing files keep their original language
+  - Only new files or manual `geocode_file` service calls get the current language setting
+  - To update all files to a new language: Use `geocode_file` service individually or clear database and re-scan
 
 ### Database Performance
 The integration uses an optimized SQLite database that:

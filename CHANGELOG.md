@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Blocking I/O Warning**: Fixed blocking call to `Image.open()` in file watcher/manual scan context
+  - EXIF extraction now runs in executor thread when scanning individual files
+  - Prevents "Detected blocking call to open" warnings in Home Assistant logs
+  - Both image (EXIF) and video (pymediainfo) metadata extraction now properly async
+
+- **Timestamp Handling on Linux**: Fixed `created_time` and `modified_time` swap on Linux/Unix systems
+  - Now uses `st_birthtime` when available (macOS, BSD)
+  - Falls back to `st_ctime` on Linux (which is inode change time, not creation time)
+  - `modified_time` always uses `st_mtime` (modification time)
+  - Note: On Linux, true file creation time is not available from filesystem
+  - Service responses now show correct modification timestamps
+
+### Documentation
+
+- **Geocoding Language Persistence**: Clarified that location names are cached permanently
+  - Existing geocoded files retain their original language
+  - Only newly scanned files or manual `geocode_file` service calls get new language setting
+  - To update all files: Use `geocode_file` service individually or clear database and re-scan
+  - This is by design for performance (avoids re-geocoding 1000s of files on every scan)
+
 ## [1.5.1] - 2025-12-18
 
 ### Added
