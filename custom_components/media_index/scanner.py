@@ -35,6 +35,7 @@ class MediaScanner:
         self.geocode_service = geocode_service
         self.enable_geocoding = enable_geocoding
         self._is_scanning = False
+        self._scan_error_count = 0  # Track errors to prevent log spam
         _LOGGER.info("MediaScanner initialized (geocoding: %s)", enable_geocoding)
     
     @property
@@ -65,13 +66,23 @@ class MediaScanner:
             stat = os.stat(file_path)
             path_obj = Path(file_path)
             
+            # On Linux/Unix, st_ctime is inode change time, NOT creation time
+            # On Windows, st_ctime is creation time
+            # Use st_birthtime if available (macOS, some BSD), else fall back to st_ctime
+            created_time = None
+            if hasattr(stat, 'st_birthtime'):
+                created_time = datetime.fromtimestamp(stat.st_birthtime).isoformat()
+            else:
+                # Fall back to st_ctime (Windows: creation, Linux: change time)
+                created_time = datetime.fromtimestamp(stat.st_ctime).isoformat()
+            
             return {
                 "path": file_path,
                 "filename": path_obj.name,
                 "folder": str(path_obj.parent),
                 "file_type": self._get_file_type(file_path),
                 "file_size": stat.st_size,
-                "created_time": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                "created_time": created_time,
                 "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 "accessed_time": datetime.fromtimestamp(stat.st_atime).isoformat(),
             }
@@ -140,6 +151,9 @@ class MediaScanner:
             
             # Record scan start
             scan_id = await self.cache.record_scan(base_folder, "full")
+            
+            # Reset error counter for this scan
+            self._scan_error_count = 0
             
             # Full scan always scans the entire base folder
             # Watched folders are for file system monitoring only, not for limiting full scans
@@ -253,7 +267,31 @@ class MediaScanner:
                             _LOGGER.info("Scan progress: indexed %d files so far...", files_added)
                     
                     except Exception as err:
-                        _LOGGER.error("Failed to add file to cache: %s - %s", metadata.get("path"), err)
+                        # Check if database connection was closed (during integration unload/reload)
+                        if "no active connection" in str(err):
+                            _LOGGER.warning(
+                                "Database connection closed during scan (integration unloading/reloading). "
+                                "Aborting scan at file %d. Scan will resume on next startup.",
+                                files_added
+                            )
+                            # Database is closed - abort scan immediately to prevent log spam
+                            if scan_id:
+                                # Try to update scan status, but it will likely fail
+                                try:
+                                    await self.cache.update_scan(scan_id, files_added, "aborted")
+                                except Exception:
+                                    pass  # Expected to fail if DB is closed
+                            return files_added
+                        
+                        # For other errors, log but continue (with rate limiting)
+                        self._scan_error_count += 1
+                        if self._scan_error_count <= 10:
+                            _LOGGER.error("Failed to add file to cache: %s - %s", metadata.get("path"), err)
+                        elif self._scan_error_count == 11:
+                            _LOGGER.error(
+                                "Too many scan errors (%d so far). Suppressing further error logs for this scan.",
+                                self._scan_error_count
+                            )
             
             # Update scan record
             await self.cache.update_scan(scan_id, files_added, "completed")
@@ -265,9 +303,22 @@ class MediaScanner:
             return files_added
         
         except Exception as err:
-            _LOGGER.error("Scan failed: %s", err)
+            # Check if database connection was closed
+            if "no active connection" in str(err):
+                _LOGGER.warning(
+                    "Scan aborted: Database connection closed (integration unloading/reloading). "
+                    "This is normal during HA restart or integration reload."
+                )
+            else:
+                _LOGGER.error("Scan failed: %s", err)
+            
+            # Try to update scan status, but may fail if database is closed
             if scan_id:
-                await self.cache.update_scan(scan_id, files_added, "failed")
+                try:
+                    await self.cache.update_scan(scan_id, files_added, "failed")
+                except Exception as update_err:
+                    _LOGGER.debug("Could not update scan status (expected if database closed): %s", update_err)
+            
             return files_added
         
         finally:
@@ -299,7 +350,12 @@ class MediaScanner:
             # Extract EXIF first for images to get width/height/orientation
             exif_data = None
             if metadata['file_type'] == 'image':
-                exif_data = ExifParser.extract_exif(file_path)
+                if self.hass:
+                    exif_data = await self.hass.async_add_executor_job(
+                        ExifParser.extract_exif, file_path
+                    )
+                else:
+                    exif_data = ExifParser.extract_exif(file_path)
                 
                 # Add image dimensions to metadata for media_files table
                 if exif_data:
@@ -307,7 +363,12 @@ class MediaScanner:
                     metadata['height'] = exif_data.get('height')
                     metadata['orientation'] = exif_data.get('orientation')
             elif metadata['file_type'] == 'video':
-                exif_data = VideoMetadataParser.extract_metadata(file_path)
+                if self.hass:
+                    exif_data = await self.hass.async_add_executor_job(
+                        VideoMetadataParser.extract_metadata, file_path
+                    )
+                else:
+                    exif_data = VideoMetadataParser.extract_metadata(file_path)
             
             # Add to database
             file_id = await self.cache.add_file(metadata)

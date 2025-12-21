@@ -36,8 +36,8 @@ DEFAULT_ENABLE_WATCHER: Final = True
 DEFAULT_AUTO_INSTALL_LIBMEDIAINFO: Final = False
 
 # Installation timeouts and delays
-INSTALL_TIMEOUT_APK: Final = 60
-INSTALL_TIMEOUT_APT: Final = 120
+INSTALL_TIMEOUT_APK: Final = 30  # Reduced from 60 to fail faster when internet is down
+INSTALL_TIMEOUT_APT: Final = 60  # Reduced from 120 to fail faster when internet is down
 INSTALL_STARTUP_DELAY: Final = 5
 GEOCODE_STATS_BATCH_SIZE: Final = 100
 

@@ -16,5 +16,5 @@
     "mutagen>=1.47.0",
     "pymediainfo>=6.0.0"
   ],
-  "version": "1.5.2"
+  "version": "1.5.3"
 }

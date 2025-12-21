@@ -344,8 +344,12 @@ def _setup_scheduled_scan(
     entry.async_on_unload(remove_listener)
 
 
-async def _install_libmediainfo_internal(hass: HomeAssistant) -> dict:
+async def _install_libmediainfo_internal(hass: HomeAssistant, entry_id: str | None = None) -> dict:
     """Shared helper to install libmediainfo system library.
+    
+    Args:
+        hass: Home Assistant instance
+        entry_id: Optional config entry ID for automatic reload
     
     Returns:
         Dictionary with status and message
@@ -354,6 +358,29 @@ async def _install_libmediainfo_internal(hass: HomeAssistant) -> dict:
     from .const import INSTALL_TIMEOUT_APK, INSTALL_TIMEOUT_APT
     
     _LOGGER.info("📦 Installing libmediainfo system library...")
+    
+    # Quick network check - fail fast if internet is down
+    try:
+        # Try to reach a generic endpoint with 5 second timeout
+        subprocess.run(
+            ["wget", "--spider", "--timeout=5", "https://www.google.com"],
+            capture_output=True,
+            timeout=6,
+            check=True,
+        )
+    except FileNotFoundError:
+        # wget command not found - skip network check and proceed with install attempt
+        _LOGGER.debug("wget command not available - skipping network connectivity check")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        _LOGGER.warning(
+            "⚠️ Internet connectivity check failed - skipping libmediainfo installation. "
+            "Integration will continue loading without video metadata support. "
+            "Install manually later with: apk add --no-cache libmediainfo"
+        )
+        return {
+            "status": "failed",
+            "message": "Network connectivity check failed - cannot download package. Try again when internet is available."
+        }
     
     try:
         # Try apk (Alpine/Home Assistant OS)
@@ -366,25 +393,15 @@ async def _install_libmediainfo_internal(hass: HomeAssistant) -> dict:
         )
         _LOGGER.info("✅ libmediainfo installed successfully via apk")
         
-        # Create persistent notification instead of auto-restart
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Media Index: libmediainfo Installed",
-                "message": (
-                    "✅ libmediainfo has been installed successfully.\n\n"
-                    "**Please restart Home Assistant** to complete the setup and enable video metadata extraction.\n\n"
-                    "Go to Settings → System → Restart"
-                ),
-                "notification_id": "media_index_libmediainfo_restart",
-            },
-            blocking=False,
-        )
+        # Automatically reload the integration to pick up the new library
+        if entry_id:
+            _LOGGER.info("🔄 Reloading Media Index integration to enable video metadata extraction...")
+            await hass.config_entries.async_reload(entry_id)
+            _LOGGER.info("✅ Integration reloaded successfully - video metadata extraction now enabled")
         
         return {
             "status": "success",
-            "message": "libmediainfo installed successfully. Please restart Home Assistant to complete setup."
+            "message": "libmediainfo installed successfully and integration reloaded. Video metadata extraction is now enabled."
         }
         
     except FileNotFoundError:
@@ -406,25 +423,15 @@ async def _install_libmediainfo_internal(hass: HomeAssistant) -> dict:
             )
             _LOGGER.info("✅ libmediainfo installed successfully via apt")
             
-            # Create persistent notification
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Media Index: libmediainfo Installed",
-                    "message": (
-                        "✅ libmediainfo has been installed successfully.\n\n"
-                        "**Please restart Home Assistant** to complete the setup and enable video metadata extraction.\n\n"
-                        "Go to Settings → System → Restart"
-                    ),
-                    "notification_id": "media_index_libmediainfo_restart",
-                },
-                blocking=False,
-            )
+            # Automatically reload the integration to pick up the new library
+            if entry_id:
+                _LOGGER.info("🔄 Reloading Media Index integration to enable video metadata extraction...")
+                await hass.config_entries.async_reload(entry_id)
+                _LOGGER.info("✅ Integration reloaded successfully - video metadata extraction now enabled")
             
             return {
                 "status": "success",
-                "message": "libmediainfo installed successfully. Please restart Home Assistant to complete setup."
+                "message": "libmediainfo installed successfully and integration reloaded. Video metadata extraction is now enabled."
             }
             
         except subprocess.CalledProcessError as apt_error:
@@ -513,24 +520,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store availability status for services to check
     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = pymediainfo_available
     
-    # Auto-install if missing and auto_install is enabled
+    # Auto-install if missing and auto_install is enabled - DO IT NOW before continuing setup
     if not pymediainfo_available:
         config = {**entry.data, **entry.options}
         auto_install = config.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO)
         
         if auto_install:
-            from .const import INSTALL_STARTUP_DELAY
             _LOGGER.warning(
-                "🔧 Auto-install enabled - attempting to install libmediainfo automatically..."
+                "🔧 Auto-install enabled - installing libmediainfo before continuing setup..."
             )
-            # Schedule installation after startup completes
-            async def _auto_install_on_startup():
-                await asyncio.sleep(INSTALL_STARTUP_DELAY)  # Wait for Home Assistant to finish starting
-                result = await _install_libmediainfo_internal(hass)
-                if result["status"] == "failed":
-                    _LOGGER.error("Auto-install failed: %s", result["message"])
-            
-            hass.async_create_task(_auto_install_on_startup())
+            _LOGGER.info(
+                "Note: If internet is down, installation will timeout after 30-60 seconds and integration will continue loading"
+            )
+            # Install synchronously during setup (no entry_id needed since we're not reloading)
+            result = await _install_libmediainfo_internal(hass, entry_id=None)
+            if result["status"] == "success":
+                _LOGGER.info("✅ Auto-install successful: %s", result["message"])
+                # Re-test library availability after installation
+                try:
+                    # Verify that pymediainfo can be imported after installation.
+                    # Successful import is a reliable indicator that libmediainfo is available.
+                    from pymediainfo import MediaInfo  # noqa: F401
+                    hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
+                    _LOGGER.info("✅ libmediainfo verified working after installation (import successful)")
+                except Exception as e:
+                    _LOGGER.error("❌ libmediainfo import test failed after installation: %s", e)
+            else:
+                _LOGGER.error("❌ Auto-install failed: %s", result["message"])
         else:
             _LOGGER.info(
                 "ℹ️ Auto-install is disabled. To enable, reconfigure the integration and check 'auto_install_libmediainfo'."
@@ -1541,7 +1557,8 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_install_libmediainfo(call):
         """Install libmediainfo system library."""
-        return await _install_libmediainfo_internal(hass)
+        entry_id = _get_entry_id_from_call(hass, call)
+        return await _install_libmediainfo_internal(hass, entry_id)
     
     # Register all services
     hass.services.async_register(

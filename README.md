@@ -59,9 +59,9 @@ A custom Home Assistant integration that indexes media files (images and videos)
 
 The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. You have two options:
 
-1. **Automatic Installation** (Recommended for Home Assistant OS/Supervised): Enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library when the option is enabled (no restart needed to trigger installation). After successful installation, a persistent notification will prompt you to restart Home Assistant to complete setup. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled on the next restart (the option stays enabled). A new persistent notification will prompt for the additional restart.
+1. **Automatic Installation** (Recommended for Home Assistant OS/Supervised): Enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library during setup if it's missing - no restart or reload needed! Video metadata extraction is available immediately when the integration finishes loading. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled during the next restart (the option stays enabled).
 
-2. **Manual Installation**: Install `libmediainfo` yourself (instructions below). This avoids the extra restart after upgrades but requires manual maintenance.
+2. **Manual Installation**: Install `libmediainfo` yourself (instructions below). After installation, manually reload the integration in Settings → Devices & Services → Media Index → ⋮ → Reload.
 
 **Home Assistant OS/Supervised (Docker):**
 ```bash
@@ -231,6 +231,11 @@ For photos with GPS coordinates, the integration gradually adds location names:
 - **Works progressively** during scans - doesn't slow down initial indexing
 - **Caches results** to avoid repeated API calls for the same coordinates
 - **Provides location hierarchy** from specific place names to country level
+- **Language support**: Uses Home Assistant's configured language by default
+  - Location names are cached permanently once geocoded
+  - Existing files keep their original language
+  - Only new files or manual `geocode_file` service calls get the current language setting
+  - To update all files to a new language: Use `geocode_file` service individually or clear database and re-scan
 
 ### Database Performance
 The integration uses an optimized SQLite database that:
