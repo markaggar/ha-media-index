@@ -275,7 +275,6 @@ class VideoMetadataParser:
             return dt
         except (ValueError, AttributeError) as e:
             _LOGGER.debug(f"[VIDEO] fromisoformat failed for '{date_str}': {e}")
-            pass
         
         # Try common MediaInfo formats
         date_formats = [

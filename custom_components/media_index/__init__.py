@@ -359,28 +359,8 @@ async def _install_libmediainfo_internal(hass: HomeAssistant, entry_id: str | No
     
     _LOGGER.info("📦 Installing libmediainfo system library...")
     
-    # Quick network check - fail fast if internet is down
-    try:
-        # Try to reach a generic endpoint with 5 second timeout
-        subprocess.run(
-            ["wget", "--spider", "--timeout=5", "https://www.google.com"],
-            capture_output=True,
-            timeout=6,
-            check=True,
-        )
-    except FileNotFoundError:
-        # wget command not found - skip network check and proceed with install attempt
-        _LOGGER.debug("wget command not available - skipping network connectivity check")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        _LOGGER.warning(
-            "⚠️ Internet connectivity check failed - skipping libmediainfo installation. "
-            "Integration will continue loading without video metadata support. "
-            "Install manually later with: apk add --no-cache libmediainfo"
-        )
-        return {
-            "status": "failed",
-            "message": "Network connectivity check failed - cannot download package. Try again when internet is available."
-        }
+    # Network check removed - apk/apt commands will fail fast if network is down
+    # No need to add 5-6 seconds of blocking network check during setup
     
     try:
         # Try apk (Alpine/Home Assistant OS)
@@ -538,13 +518,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("✅ Auto-install successful: %s", result["message"])
                 # Re-test library availability after installation
                 try:
-                    # Verify that pymediainfo can be imported after installation.
-                    # Successful import is a reliable indicator that libmediainfo is available.
+                    # Clear Python's import cache and reload the module to pick up the newly installed library
+                    import sys
+                    import importlib
+                    if 'pymediainfo' in sys.modules:
+                        importlib.reload(sys.modules['pymediainfo'])
                     from pymediainfo import MediaInfo  # noqa: F401
                     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
                     _LOGGER.info("✅ libmediainfo verified working after installation (import successful)")
                 except Exception as e:
-                    _LOGGER.error("❌ libmediainfo import test failed after installation: %s", e)
+                    _LOGGER.error(
+                        "❌ libmediainfo verification failed after installation: %s\n"
+                        "This is expected - Python's process needs to restart to load the new library.\n"
+                        "Video metadata extraction will be available after Home Assistant restart.",
+                        e
+                    )
             else:
                 _LOGGER.error("❌ Auto-install failed: %s", result["message"])
         else:

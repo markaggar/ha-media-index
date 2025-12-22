@@ -69,11 +69,18 @@ class MediaScanner:
             # On Linux/Unix, st_ctime is inode change time, NOT creation time
             # On Windows, st_ctime is creation time
             # Use st_birthtime if available (macOS, some BSD), else fall back to st_ctime
+            # 
+            # IMPORTANT: On Linux, true file creation time is NOT available from the filesystem.
+            # The created_time field will contain inode change time (st_ctime) which updates when:
+            # - File permissions are changed
+            # - File ownership is changed  
+            # - Hard links are added/removed
+            # For most users, this is acceptable as it's close to creation time in practice.
             created_time = None
             if hasattr(stat, 'st_birthtime'):
                 created_time = datetime.fromtimestamp(stat.st_birthtime).isoformat()
             else:
-                # Fall back to st_ctime (Windows: creation, Linux: change time)
+                # Fall back to st_ctime (Windows: creation, Linux: inode change time)
                 created_time = datetime.fromtimestamp(stat.st_ctime).isoformat()
             
             return {

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **iPhone Video Metadata Extraction**: Fixed date extraction from iPhone .mov files
-  - Added support for Apple QuickTime `recorded_date` field (contains correct capture date)
+  - Added support for Apple QuickTime `comapplequicktimecreationdate` field (highest priority for iPhone videos)
   - Parser now handles multiple datetime values separated by " / " (takes first occurrence)
   - Fixed ISO 8601 timezone parsing for formats like "2021-07-10T12:37:11+0200"
   - GPS extraction already working via `comapplequicktimelocationiso6709` field

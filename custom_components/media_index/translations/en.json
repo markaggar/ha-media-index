@@ -16,7 +16,7 @@
           "geocode_native_language": "Use native language names",
           "max_startup_time": "Max startup scan time (seconds)",
           "concurrent_scans": "Concurrent scan workers",
-          "auto_install_libmediainfo": "Auto-install libmediainfo for video metadata extraction (integration auto-reloads after install - no restart needed). If you have multiple Media Index instances, only enable this for one of the instances.",
+          "auto_install_libmediainfo": "Auto-install libmediainfo for video metadata extraction. During initial setup, Home Assistant restart required after install. When using install_libmediainfo service, integration auto-reloads (no restart needed). If you have multiple Media Index instances, only enable this for one.",
           "batch_size": "Batch size (files per batch)",
           "cache_max_age_days": "Cache max age (days)"
         }
