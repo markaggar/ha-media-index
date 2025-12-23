@@ -67,9 +67,16 @@ class VideoMetadataParser:
             # METHOD 1: pymediainfo - Most reliable for datetime extraction
             # ===================================================================
             if PYMEDIAINFO_AVAILABLE:
-                _LOGGER.debug(f"[VIDEO] ✅ pymediainfo is AVAILABLE, attempting extraction for {Path(file_path).name}")
                 try:
-                    media_info = MediaInfo.parse(file_path)
+                    # Ensure path is properly encoded for libmediainfo
+                    # Use Path to handle unicode properly, then convert to string
+                    path_obj = Path(file_path).resolve()
+                    
+                    # UTF-8/Unicode Protection: pymediainfo handles non-ASCII paths correctly
+                    # when passed as proper Python strings via Path.resolve()
+                    # No need to log warnings - this is normal operation
+                    
+                    media_info = MediaInfo.parse(str(path_obj))
                     
                     for track in media_info.tracks:
                         # Extract datetime from General track
@@ -80,33 +87,25 @@ class VideoMetadataParser:
                             for field in datetime_fields:
                                 value = getattr(track, field, None)
                                 if value:
-                                    _LOGGER.debug(f"[VIDEO] Found {field}: {value}")
                                     parsed_dt = VideoMetadataParser._parse_mediainfo_datetime(value)
                                     if parsed_dt:
                                         result['date_taken'] = int(parsed_dt.timestamp())
-                                        _LOGGER.debug(f"[VIDEO] Extracted datetime from {field}: {parsed_dt}")
                                         break
                             
                             # Extract GPS coordinates (check Apple QuickTime, xyz, and recorded_location fields)
                             gps_iso6709 = None
                             if hasattr(track, 'comapplequicktimelocationiso6709') and track.comapplequicktimelocationiso6709:
                                 gps_iso6709 = track.comapplequicktimelocationiso6709
-                                _LOGGER.debug(f"[VIDEO] Found GPS in comapplequicktimelocationiso6709 field")
                             elif hasattr(track, 'recorded_location') and track.recorded_location:
                                 gps_iso6709 = track.recorded_location
-                                _LOGGER.debug(f"[VIDEO] Found GPS in recorded_location field")
                             elif hasattr(track, 'xyz') and track.xyz:
                                 gps_iso6709 = track.xyz
-                                _LOGGER.debug(f"[VIDEO] Found GPS in xyz field")
                             
                             if gps_iso6709:
                                 coords = VideoMetadataParser._parse_iso6709(gps_iso6709)
                                 if coords:
                                     result['latitude'] = coords[0]
                                     result['longitude'] = coords[1]
-                                    _LOGGER.debug(f"[VIDEO] GPS coordinates extracted successfully")
-                                else:
-                                    _LOGGER.warning(f"[VIDEO] Failed to parse ISO6709 GPS format")
                             
                             # Extract rating (if available)
                             if hasattr(track, 'rating') and track.rating:
@@ -128,11 +127,11 @@ class VideoMetadataParser:
                                 # Duration is in milliseconds, convert to seconds
                                 result['duration'] = round(track.duration / 1000.0, 2)
                             
-                            _LOGGER.debug(f"[VIDEO] Dimensions: {result.get('width')}x{result.get('height')}, "
-                                        f"Duration: {result.get('duration')}s")
-                            
                 except Exception as e:
                     _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {e}, falling back to mutagen")
+                    # Ensure any global state is clean after exception
+                    import gc
+                    gc.collect()
             else:
                 _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             
