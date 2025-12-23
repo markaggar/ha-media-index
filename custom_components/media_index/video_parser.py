@@ -70,10 +70,10 @@ class VideoMetadataParser:
                 try:
                     # Ensure path is properly encoded for libmediainfo
                     # Use Path to handle unicode properly, then convert to string
-                    path_obj = Path(file_path).resolve()
+                    path_obj = Path(file_path)
                     
                     # UTF-8/Unicode Protection: pymediainfo handles non-ASCII paths correctly
-                    # when passed as proper Python strings via Path.resolve()
+                    # when passed as proper Python strings
                     # No need to log warnings - this is normal operation
                     
                     media_info = MediaInfo.parse(str(path_obj))
@@ -129,9 +129,6 @@ class VideoMetadataParser:
                             
                 except Exception as e:
                     _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {e}, falling back to mutagen")
-                    # Ensure any global state is clean after exception
-                    import gc
-                    gc.collect()
             else:
                 _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             
