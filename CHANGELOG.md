@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2025-12-22
+
+### Fixed
+
+- **Video Parser Logging Optimization**: Reduced excessive logging to prevent log spam
+  - Removed warning for non-ASCII characters in file paths (normal operation with UTF-8/Unicode)
+  - Removed redundant debug logs for GPS field detection and coordinate extraction
+  - Removed verbose debug logs for datetime field detection and parsing
+  - Removed dimension/duration logging on every video parse
+  - Keeps UTF-8/Unicode protection via `Path.resolve()` without noisy warnings
+  - Resolves "Module is logging too frequently" warnings in Home Assistant logs
+  - Prevents hundreds of debug messages during bulk video scanning
+
 ## [1.5.4] - 2025-12-21
 
 ### Fixed
