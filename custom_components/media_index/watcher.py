@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional, Dict, Set
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
@@ -62,11 +62,15 @@ class MediaFileEventHandler(FileSystemEventHandler):
         if not self._is_media_file(event.src_path):
             return
         
-        # Add to batch queue instead of processing immediately
-        self._pending_new[event.src_path] = datetime.now()
+        # Add to batch queue (thread-safe) and remove from other queues for deduplication
+        def add_to_new_queue():
+            self._pending_new[event.src_path] = datetime.now()
+            # Remove from other queues to avoid duplicate processing
+            self._pending_modified.pop(event.src_path, None)
+            self._pending_deleted.discard(event.src_path)
+            self._start_processor_if_needed()
         
-        # Start processor if needed
-        self.hass.loop.call_soon_threadsafe(self._start_processor_if_needed)
+        self.hass.loop.call_soon_threadsafe(add_to_new_queue)
     
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification events (batched)."""
@@ -76,9 +80,15 @@ class MediaFileEventHandler(FileSystemEventHandler):
         if not self._is_media_file(event.src_path):
             return
         
-        # Add to batch queue
-        self._pending_modified[event.src_path] = datetime.now()
-        self.hass.loop.call_soon_threadsafe(self._start_processor_if_needed)
+        # Add to batch queue (thread-safe) - only if not already in new queue
+        def add_to_modified_queue():
+            # Don't add to modified if already pending as new file
+            if event.src_path not in self._pending_new:
+                self._pending_modified[event.src_path] = datetime.now()
+                self._pending_deleted.discard(event.src_path)
+            self._start_processor_if_needed()
+        
+        self.hass.loop.call_soon_threadsafe(add_to_modified_queue)
     
     def on_deleted(self, event: FileSystemEvent):
         """Handle file deletion events (batched)."""
@@ -88,9 +98,15 @@ class MediaFileEventHandler(FileSystemEventHandler):
         if not self._is_media_file(event.src_path):
             return
         
-        # Add to batch queue
-        self._pending_deleted.add(event.src_path)
-        self.hass.loop.call_soon_threadsafe(self._start_processor_if_needed)
+        # Add to batch queue (thread-safe) and remove from other queues for deduplication
+        def add_to_deleted_queue():
+            self._pending_deleted.add(event.src_path)
+            # Remove from other queues to avoid processing dead file
+            self._pending_new.pop(event.src_path, None)
+            self._pending_modified.pop(event.src_path, None)
+            self._start_processor_if_needed()
+        
+        self.hass.loop.call_soon_threadsafe(add_to_deleted_queue)
     
     def on_moved(self, event: FileSystemEvent):
         """Handle file move/rename events (batched)."""
@@ -104,81 +120,86 @@ class MediaFileEventHandler(FileSystemEventHandler):
         if not src_is_media and not dest_is_media:
             return
         
-        # Treat move as delete + create
-        if src_is_media:
-            self._pending_deleted.add(event.src_path)
-        if dest_is_media:
-            self._pending_new[event.dest_path] = datetime.now()
+        # Treat move as delete + create (thread-safe)
+        def handle_move():
+            if src_is_media:
+                self._pending_deleted.add(event.src_path)
+                self._pending_new.pop(event.src_path, None)
+                self._pending_modified.pop(event.src_path, None)
+            if dest_is_media:
+                self._pending_new[event.dest_path] = datetime.now()
+                self._pending_modified.pop(event.dest_path, None)
+                self._pending_deleted.discard(event.dest_path)
+            self._start_processor_if_needed()
         
-        self.hass.loop.call_soon_threadsafe(self._start_processor_if_needed)
+        self.hass.loop.call_soon_threadsafe(handle_move)
     
     async def _process_event_batches(self):
         """Process batched events with throttling to prevent resource exhaustion."""
-        while True:
-            try:
-                # Wait for batch delay to collect events
-                await asyncio.sleep(BATCH_DELAY)
-                
-                # Check if we have any pending events
-                has_events = (
-                    len(self._pending_new) > 0 or 
-                    len(self._pending_modified) > 0 or 
-                    len(self._pending_deleted) > 0
-                )
-                
-                if not has_events:
-                    # No events for a while, exit processor
-                    break
-                
-                # Mark as processing
-                self._is_processing = True
-                
-                # Process deletions first (fast, no EXIF extraction)
-                if self._pending_deleted:
-                    deleted_batch = list(self._pending_deleted)[:MAX_BATCH_SIZE]
-                    self._pending_deleted -= set(deleted_batch)
+        try:
+            while True:
+                try:
+                    # Wait for batch delay to collect events
+                    await asyncio.sleep(BATCH_DELAY)
                     
-                    _LOGGER.info("Processing %d deleted files", len(deleted_batch))
-                    for file_path in deleted_batch:
-                        await self._handle_deleted_file(file_path)
+                    # Check if we have any pending events
+                    has_events = (
+                        len(self._pending_new) > 0 or 
+                        len(self._pending_modified) > 0 or 
+                        len(self._pending_deleted) > 0
+                    )
                     
+                    if not has_events:
+                        # No events for a while, exit processor
+                        break
+                    
+                    # Mark as processing
+                    self._is_processing = True
+                    
+                    # Process deletions first (fast, no EXIF extraction)
+                    if self._pending_deleted:
+                        deleted_batch = list(self._pending_deleted)[:MAX_BATCH_SIZE]
+                        self._pending_deleted -= set(deleted_batch)
+                        
+                        _LOGGER.info("Processing %d deleted files", len(deleted_batch))
+                        for file_path in deleted_batch:
+                            await self._handle_deleted_file(file_path)
+                    
+                    # Process new files (expensive: EXIF, geocoding, etc.)
+                    if self._pending_new:
+                        # Get oldest files first
+                        sorted_new = sorted(self._pending_new.items(), key=lambda x: x[1])
+                        new_batch = sorted_new[:MAX_BATCH_SIZE]
+                        
+                        for file_path, _ in new_batch:
+                            del self._pending_new[file_path]
+                        
+                        _LOGGER.info("Processing %d new files (batched)", len(new_batch))
+                        for file_path, _ in new_batch:
+                            await self._handle_new_file(file_path)
+                    
+                    # Process modified files
+                    if self._pending_modified:
+                        sorted_mod = sorted(self._pending_modified.items(), key=lambda x: x[1])
+                        mod_batch = sorted_mod[:MAX_BATCH_SIZE]
+                        
+                        for file_path, _ in mod_batch:
+                            del self._pending_modified[file_path]
+                        
+                        _LOGGER.info("Processing %d modified files (batched)", len(mod_batch))
+                        for file_path, _ in mod_batch:
+                            await self._handle_modified_file(file_path)
+                    
+                    # Always yield to event loop after each iteration for consistent rate limiting
                     await asyncio.sleep(RATE_LIMIT_DELAY)
-                
-                # Process new files (expensive: EXIF, geocoding, etc.)
-                if self._pending_new:
-                    # Get oldest files first
-                    sorted_new = sorted(self._pending_new.items(), key=lambda x: x[1])
-                    new_batch = sorted_new[:MAX_BATCH_SIZE]
                     
-                    for file_path, _ in new_batch:
-                        del self._pending_new[file_path]
-                    
-                    _LOGGER.info("Processing %d new files (batched)", len(new_batch))
-                    for file_path, _ in new_batch:
-                        await self._handle_new_file(file_path)
-                    
+                except Exception as err:
+                    _LOGGER.error("Error in batch processor: %s", err)
                     await asyncio.sleep(RATE_LIMIT_DELAY)
-                
-                # Process modified files
-                if self._pending_modified:
-                    sorted_mod = sorted(self._pending_modified.items(), key=lambda x: x[1])
-                    mod_batch = sorted_mod[:MAX_BATCH_SIZE]
-                    
-                    for file_path, _ in mod_batch:
-                        del self._pending_modified[file_path]
-                    
-                    _LOGGER.info("Processing %d modified files (batched)", len(mod_batch))
-                    for file_path, _ in mod_batch:
-                        await self._handle_modified_file(file_path)
-                    
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-                
-            except Exception as err:
-                _LOGGER.error("Error in batch processor: %s", err)
-                await asyncio.sleep(RATE_LIMIT_DELAY)
-        
-        self._is_processing = False
-        _LOGGER.debug("Batch processor stopped (no pending events)")
+        finally:
+            # Ensure flag is reset even on exception
+            self._is_processing = False
+            _LOGGER.debug("Batch processor stopped (no pending events)")
     
     async def _handle_new_file(self, file_path: str):
         """Handle new file addition."""

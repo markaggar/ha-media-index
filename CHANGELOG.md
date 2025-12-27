@@ -38,11 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - For large collections (100K+ files), use watched_folders for specific subfolders or rely on scheduled scans
   - Improves startup performance and reduces resource usage for users without watched folders configured
 
+### Fixed
+
+- **File Watcher Thread Safety**: Fixed race conditions in event queue access (GitHub review feedback)
+  - All queue modifications now use `call_soon_threadsafe` from watchdog thread
+  - Prevents data corruption when watchdog and asyncio threads access queues concurrently
+  - Event deduplication: removes path from other queues when adding to new queue
+  - Ensures same file path doesn't get processed multiple times from different queues
+
+- **File Watcher Robustness**: Improved batch processor error handling
+  - Added `finally` block to ensure `_is_processing` flag is always reset
+  - Consistent rate limiting: always yields to event loop after each iteration
+  - Prevents flag stuck at True if exception occurs outside inner try-except
+
 ### Technical
 
 - Added event queues: `_pending_new`, `_pending_modified`, `_pending_deleted`
 - Implemented `_process_event_batches()` background task with configurable throttling
 - Enhanced `stop_watching()` to cancel processor task and clear pending events
+- Thread-safe queue access via `call_soon_threadsafe` with lambda functions
+- Cross-queue deduplication prevents redundant processing of same file
 - See `dev-docs/WATCHER_THROTTLING.md` for implementation details and performance benchmarks
 
 ## [1.5.5] - 2025-12-22

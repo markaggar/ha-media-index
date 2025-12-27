@@ -625,7 +625,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Without watched_folders, the watcher would monitor the entire base folder which
     # is resource-intensive for large collections. Use scheduled scans instead.
     if config.get(CONF_ENABLE_WATCHER, DEFAULT_ENABLE_WATCHER):
-        if watched_folders and len(watched_folders) > 0:
+        if watched_folders:
             _LOGGER.info("Starting file system watcher for folders: %s", watched_folders)
             await watcher.start_watching(base_folder, watched_folders)
         else:
