@@ -465,3 +465,24 @@ update_burst_metadata:
       example: ["media-source://media_source/media/photo/burst/IMG_001.jpg"]
       selector:
         object:
+
+check_file_exists:
+  name: Check File Exists
+  description: Lightweight filesystem check to verify if a file exists (no metadata loading)
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    file_path:
+      name: File Path
+      description: Full filesystem path to check
+      example: "/media/photo/Photos/2023/IMG_001.jpg"
+      selector:
+        text:
+    media_source_uri:
+      name: Media Source URI
+      description: Media-source URI to check (alternative to file_path)
+      example: "media-source://media_source/media/photo/Photos/2023/IMG_001.jpg"
+      selector:
+        text:

@@ -83,6 +83,7 @@ SERVICE_RESTORE_EDITED_FILES: Final = "restore_edited_files"
 SERVICE_CLEANUP_DATABASE: Final = "cleanup_database"
 SERVICE_UPDATE_BURST_METADATA: Final = "update_burst_metadata"
 SERVICE_INSTALL_LIBMEDIAINFO: Final = "install_libmediainfo"
+SERVICE_CHECK_FILE_EXISTS: Final = "check_file_exists"
 
 # Attributes
 ATTR_SCAN_STATUS: Final = "scan_status"
