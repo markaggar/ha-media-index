@@ -819,7 +819,7 @@ if (uriResult.exists) {
 - Rejects `..` components and paths outside media collection
 
 **Use Case:**
-Media Card v5.6.6+ uses this to eliminate 404 broken image icons:
+Media Card v5.6.5+ uses this to eliminate 404 broken image icons:
 1. Database returns file path from query
 2. Check if file exists before rendering
 3. If `exists: false`, skip file and advance to next

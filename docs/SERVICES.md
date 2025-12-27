@@ -74,7 +74,7 @@ data:
 - Uses `os.path.abspath()` to resolve symbolic links and `..` traversals
 
 **Use case:**
-- Media Card v5.6.6+ uses this for instant 404 detection (~1ms vs 100ms+ image preload)
+- Media Card v5.6.5+ uses this for instant 404 detection (~1ms vs 100ms+ image preload)
 - Eliminates broken image icons by checking filesystem before rendering
 - No network request, no image decode - just `os.path.exists()` check
 

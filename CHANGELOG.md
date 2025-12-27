@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File Existence Check Service**: New `check_file_exists` service for lightweight filesystem validation
   - Accepts `file_path` or `media_source_uri` parameter
   - Returns `{"exists": bool, "path": string}` without loading metadata
-  - Designed for Media Card v5.6.6+ to validate files before display
+  - Designed for Media Card v5.6.5+ to validate files before display
   - Eliminates 404 broken image icons by checking filesystem first
   - ~1ms response time vs ~100ms+ for image preload
   - No network request, no image decode - just `os.path.exists()` check
