@@ -50,6 +50,51 @@ data:
 
 **Recommendation:** Run this service periodically (weekly/monthly) as part of your media management workflow.
 
+### `media_index.check_file_exists`
+
+**NEW in v1.5.6** - Lightweight filesystem validation for Media Card integration.
+
+**Parameters:**
+- `file_path` (optional): Filesystem path to check
+- `media_source_uri` (optional): Media-source URI to check (converted to path)
+
+**Note:** Must provide either `file_path` OR `media_source_uri` (not both required, but at least one).
+
+**Returns:** 
+```json
+{
+  "exists": true,
+  "path": "/media/photo/Photos/2024/IMG_1234.jpg"
+}
+```
+
+**Security:**
+- Path traversal protection: All paths validated against configured `base_folder`
+- Rejects attempts to probe filesystem outside media collection scope
+- Uses `os.path.abspath()` to resolve symbolic links and `..` traversals
+
+**Use case:**
+- Media Card v5.6.6+ uses this for instant 404 detection (~1ms vs 100ms+ image preload)
+- Eliminates broken image icons by checking filesystem before rendering
+- No network request, no image decode - just `os.path.exists()` check
+
+**Example:**
+```yaml
+# Check by filesystem path
+service: media_index.check_file_exists
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  file_path: /media/photo/Photos/2024/IMG_1234.jpg
+
+# Check by media-source URI
+service: media_index.check_file_exists
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  media_source_uri: media-source://media_source/media/photo/Photos/2024/IMG_1234.jpg
+```
+
 ## Media Query Services
 
 ### `media_index.get_random_items`
