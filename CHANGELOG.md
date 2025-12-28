@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed redundant debug logs for GPS field detection and coordinate extraction
   - Removed verbose debug logs for datetime field detection and parsing
   - Removed dimension/duration logging on every video parse
-  - Keeps UTF-8/Unicode protection via `Path.resolve()` without noisy warnings
+  - Keeps UTF-8/Unicode-safe path handling while removing noisy warnings
   - Resolves "Module is logging too frequently" warnings in Home Assistant logs
   - Prevents hundreds of debug messages during bulk video scanning
 

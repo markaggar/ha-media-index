@@ -1579,8 +1579,8 @@ def _register_services(hass: HomeAssistant):
         
         # Security: Validate file_path is within base_folder (prevent directory traversal)
         base_folder = config.get(CONF_BASE_FOLDER)
-        base_folder_abs = os.path.abspath(base_folder)
-        file_path_abs = os.path.abspath(file_path)
+        base_folder_abs = os.path.realpath(base_folder)
+        file_path_abs = os.path.realpath(file_path)
         
         # Check if path is within base_folder or is the base_folder itself
         if file_path_abs != base_folder_abs and not file_path_abs.startswith(base_folder_abs + os.sep):

@@ -815,7 +815,7 @@ if (uriResult.exists) {
 **Security:**
 - Path traversal protection enforced
 - All paths validated against configured `base_folder`
-- Symbolic links resolved via `os.path.abspath()`
+- Symbolic links resolved via `os.path.realpath()` to prevent symlink attacks
 - Rejects `..` components and paths outside media collection
 
 **Use Case:**
@@ -833,7 +833,6 @@ Media Card v5.6.5+ uses this to eliminate 404 broken image icons:
   error: "..."                                     // optional error message
 }
 ```
-````
 
 **Response:**
 

@@ -71,7 +71,8 @@ data:
 **Security:**
 - Path traversal protection: All paths validated against configured `base_folder`
 - Rejects attempts to probe filesystem outside media collection scope
-- Uses `os.path.abspath()` to resolve symbolic links and `..` traversals
+- Uses `os.path.realpath()` to resolve symbolic links and prevent symlink attacks
+- Normalizes paths to reject `..` traversals and resolve `.` components
 
 **Use case:**
 - Media Card v5.6.5+ uses this for instant 404 detection (~1ms vs 100ms+ image preload)
