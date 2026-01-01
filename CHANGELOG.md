@@ -11,13 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Unicode Encoding Protection (Python 3.13+ Compatibility)**: Comprehensive fix for `UnicodeEncodeError` crashes
   - **Root Cause**: Python 3.13's file writer uses ASCII codec instead of UTF-8 when saving HA state/config
-  - **Primary Source Fixed**: Geocoded location names (city, state, country) now ASCII-sanitized
-    - Examples: 'München' → 'Munchen', 'São Paulo' → 'Sao Paulo', 'Zürich' → 'Zurich'
-  - **Automatic Migration**: Existing database entries with Unicode locations sanitized on startup
+  - **Primary Source Fixed**: Geocoded location names (city, state, country) now ASCII-sanitized where possible
+    - European characters: 'München' → 'Munchen', 'São Paulo' → 'Sao Paulo', 'Zürich' → 'Zurich'
+    - Non-European scripts (Japanese, Chinese, Arabic, etc.): Original text preserved
+    - Rationale: Decomposing Japanese 'えびすや' to ASCII would result in empty string (data loss)
+    - Trade-off: Non-European locations may still trigger encoding error, but data is preserved
+  - **Automatic Migration**: Existing database entries with European Unicode locations sanitized on startup
   - **Config Entry Titles**: Integration titles now ASCII-safe (applies to new installations)
+  - **Video Metadata Extraction Error Logging**: ASCII-sanitize exception messages from pymediainfo
+    - pymediainfo track objects contain Unicode file paths (complete_name, file_name, folder_name)
+    - Exception tracebacks with Unicode can crash HA's ASCII-encoded error logging
+    - All pymediainfo exceptions now sanitized before logging to prevent crashes
   - **Central Utility**: Added `sanitize_unicode_to_ascii()` in const.py for consistent handling
-  - **Impact**: Fixes intermittent crashes that occurred when HA tried to save entity states after scanning
-  - **Note**: File paths/names with Unicode characters (e.g., "Berlin_Straße.jpg") remain unchanged as they represent actual filesystem paths and should not cause issues in entity state storage
+  - **Impact**: Fixes intermittent crashes for most users (European locations are most common source)
+  - **Note**: File paths/names with Unicode characters (e.g., "Berlin_Straße.jpg") remain unchanged as they represent actual filesystem paths
 
 ## [1.5.6] - 2025-12-25
 

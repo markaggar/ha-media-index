@@ -128,7 +128,10 @@ class VideoMetadataParser:
                                 result['duration'] = round(track.duration / 1000.0, 2)
                             
                 except Exception as e:
-                    _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {e}, falling back to mutagen")
+                    # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
+                    # pymediainfo track objects contain Unicode file paths that can crash HA's logging
+                    error_msg = str(e).encode('ascii', 'replace').decode('ascii')
+                    _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {error_msg}, falling back to mutagen")
             else:
                 _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             
@@ -234,7 +237,10 @@ class VideoMetadataParser:
             return result if result else None
             
         except Exception as e:
-            _LOGGER.error(f"[VIDEO] Failed to extract video metadata from {file_path}: {e}", exc_info=True)
+            # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
+            # Avoid exc_info=True as traceback may contain pymediainfo track objects with Unicode paths
+            error_msg = str(e).encode('ascii', 'replace').decode('ascii')
+            _LOGGER.error(f"[VIDEO] Failed to extract video metadata from {file_path}: {error_msg}")
             return None
     
     @staticmethod

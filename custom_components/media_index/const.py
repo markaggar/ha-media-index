@@ -9,20 +9,32 @@ def sanitize_unicode_to_ascii(text: Optional[str]) -> Optional[str]:
     """Convert Unicode text to ASCII-safe equivalent for Python 3.13+ compatibility.
     
     This prevents UnicodeEncodeError when HA tries to save entity states or config files.
-    Examples: 'München' → 'Munchen', 'São Paulo' → 'Sao Paulo', 'Zürich' → 'Zurich'
+    
+    Strategy:
+    - European characters: Decompose and remove accents (München → Munchen)
+    - Non-decomposable (Japanese, Chinese, etc.): Keep original (better than empty string)
+      These will still cause errors in Python 3.13+ but preserving data is more important
     
     Args:
         text: Input string that may contain Unicode characters
         
     Returns:
-        ASCII-safe string, or None if input is None
+        ASCII-safe string if possible, original string if decomposition would lose all data
     """
     if not text or not isinstance(text, str):
         return text
+    
     # Normalize Unicode to decomposed form (separate base + accent marks)
     normalized = unicodedata.normalize('NFKD', text)
-    # Encode to ASCII, dropping non-ASCII characters, then decode back to string
-    return normalized.encode('ascii', 'ignore').decode('ascii')
+    # Encode to ASCII, dropping non-ASCII characters
+    ascii_result = normalized.encode('ascii', 'ignore').decode('ascii')
+    
+    # If sanitization resulted in empty string or mostly lost data, keep original
+    # This handles Japanese, Chinese, Arabic, etc. where decomposition doesn't work
+    if not ascii_result or len(ascii_result) < len(text) * 0.3:
+        return text  # Keep original - better than losing the data
+    
+    return ascii_result
 
 
 # Configuration constants
