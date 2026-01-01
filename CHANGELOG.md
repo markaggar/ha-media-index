@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Unicode Encoding Protection (Python 3.13+ Compatibility)**: Comprehensive fix for `UnicodeEncodeError` crashes
+  - **Root Cause**: Python 3.13's file writer uses ASCII codec instead of UTF-8 when saving HA state/config
+  - **Primary Source Fixed**: Geocoded location names (city, state, country) now ASCII-sanitized
+    - Examples: 'München' → 'Munchen', 'São Paulo' → 'Sao Paulo', 'Zürich' → 'Zurich'
+  - **Automatic Migration**: Existing database entries with Unicode locations sanitized on startup
+  - **Config Entry Titles**: Integration titles now ASCII-safe (applies to new installations)
+  - **Central Utility**: Added `sanitize_unicode_to_ascii()` in const.py for consistent handling
+  - **Impact**: Fixes intermittent crashes that occurred when HA tried to save entity states after scanning
+  - **Note**: File paths/names with Unicode characters (e.g., "Berlin_Straße.jpg") remain unchanged as they represent actual filesystem paths and should not cause issues in entity state storage
+
 ## [1.5.6] - 2025-12-25
 
 ## Added

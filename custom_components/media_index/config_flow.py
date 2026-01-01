@@ -43,6 +43,25 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _sanitize_title(text: str) -> str:
+    """Sanitize title to ASCII-safe characters to prevent encoding errors.
+    
+    Python 3.13+ can have issues with non-ASCII characters in config entries
+    when HA's config panel tries to save data using ASCII codec.
+    """
+    try:
+        # Try to encode as ASCII
+        text.encode('ascii')
+        return text
+    except UnicodeEncodeError:
+        # Replace non-ASCII with ASCII equivalents or remove
+        import unicodedata
+        # Normalize to decomposed form, then keep only ASCII
+        normalized = unicodedata.normalize('NFKD', text)
+        ascii_text = normalized.encode('ascii', 'ignore').decode('ascii')
+        return ascii_text if ascii_text else "Media Index"
+
+
 class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Media Index."""
 
@@ -74,8 +93,11 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(f"media_index_{base_folder}")
                 self._abort_if_unique_id_configured()
 
+                # Sanitize title to prevent Unicode encoding errors in Python 3.13+
+                safe_title = _sanitize_title(f"Media Index ({base_folder})")
+
                 return self.async_create_entry(
-                    title=f"Media Index ({base_folder})",
+                    title=safe_title,
                     data=user_input,
                 )
 
