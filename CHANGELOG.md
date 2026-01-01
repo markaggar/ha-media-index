@@ -9,19 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Unicode Encoding Protection (Python 3.13+ Compatibility)**: Comprehensive fix for `UnicodeEncodeError` crashes
-  - **Root Cause**: Python 3.13's file writer uses ASCII codec instead of UTF-8 when saving HA state/config
-  - **Primary Source Fixed**: Geocoded location names (city, state, country) now ASCII-sanitized where possible
-    - European characters: 'München' → 'Munchen', 'São Paulo' → 'Sao Paulo', 'Zürich' → 'Zurich'
-    - Non-European scripts (Japanese, Chinese, Arabic, etc.): Original text preserved
-    - Rationale: Decomposing Japanese 'えびすや' to ASCII would result in empty string (data loss)
-    - Trade-off: Non-European locations may still trigger encoding error, but data is preserved
-  - **Automatic Migration**: Existing database entries with European Unicode locations sanitized on startup
-  - **Config Entry Titles**: Integration titles now ASCII-safe (applies to new installations)
-  - **Video Metadata Extraction Error Logging**: ASCII-sanitize exception messages from pymediainfo
+- **Unicode Encoding Protection (Python 3.13+ Compatibility)**: Fix for `UnicodeEncodeError` crashes
+  - **Root Cause Identified**: pymediainfo exception logging, NOT geocoded location names
     - pymediainfo track objects contain Unicode file paths (complete_name, file_name, folder_name)
-    - Exception tracebacks with Unicode can crash HA's ASCII-encoded error logging
+    - Exception tracebacks with Unicode crash HA's ASCII-encoded error logging (Python 3.13+)
     - All pymediainfo exceptions now sanitized before logging to prevent crashes
+  - **Location Name Sanitization**: DISABLED pending further testing
+    - Initial hypothesis that geocoded locations caused encoding errors appears incorrect
+    - Japanese location names (えびすや) worked fine since v1.0; problems only started with libmediainfo
+    - Location names not exposed in sensor attributes, only returned in service calls
+    - Sanitization code preserved (commented out) in case future testing reveals it's needed
+    - Utility function `sanitize_unicode_to_ascii()` remains in const.py for potential future use
   - **Central Utility**: Added `sanitize_unicode_to_ascii()` in const.py for consistent handling
   - **Impact**: Fixes intermittent crashes for most users (European locations are most common source)
   - **Note**: File paths/names with Unicode characters (e.g., "Berlin_Straße.jpg") remain unchanged as they represent actual filesystem paths

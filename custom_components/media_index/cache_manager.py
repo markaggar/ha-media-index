@@ -49,7 +49,8 @@ class CacheManager:
             await self._create_schema()
             
             # Run one-time migration to sanitize Unicode location names
-            await self._sanitize_location_names()
+            # DISABLED - sanitization may not be needed, see CHANGELOG
+            # await self._sanitize_location_names()
             
             _LOGGER.info("Cache database initialized successfully")
             return True
@@ -271,50 +272,55 @@ class CacheManager:
     async def _sanitize_location_names(self) -> None:
         """One-time migration to sanitize Unicode location names to ASCII.
         
+        DISABLED - May not be needed. Real issue was pymediainfo exception logging.
+        Keeping code for reference in case future testing reveals it's necessary.
+        
         Converts existing geocoded location names to ASCII-safe equivalents
         to prevent UnicodeEncodeError in Python 3.13+.
         """
-        try:
-            from .const import sanitize_unicode_to_ascii
-            
-            # Get all rows with location data
-            cursor = await self._db.execute("""
-                SELECT file_id, location_city, location_state, location_country
-                FROM exif_data
-                WHERE location_city IS NOT NULL 
-                   OR location_state IS NOT NULL 
-                   OR location_country IS NOT NULL
-            """)
-            rows = await cursor.fetchall()
-            
-            if not rows:
-                return
-            
-            # Update each row
-            updated_count = 0
-            for row in rows:
-                file_id = row[0]
-                city = sanitize_unicode_to_ascii(row[1])
-                state = sanitize_unicode_to_ascii(row[2])
-                country = sanitize_unicode_to_ascii(row[3])
-                
-                # Only update if something changed
-                if city != row[1] or state != row[2] or country != row[3]:
-                    await self._db.execute("""
-                        UPDATE exif_data
-                        SET location_city = ?,
-                            location_state = ?,
-                            location_country = ?
-                        WHERE file_id = ?
-                    """, (city, state, country, file_id))
-                    updated_count += 1
-            
-            if updated_count > 0:
-                await self._db.commit()
-                _LOGGER.info(f"Sanitized {updated_count} location name(s) to ASCII (Unicode → ASCII conversion)")
-            
-        except Exception as e:
-            _LOGGER.warning(f"Failed to sanitize location names: {e}")
+        return  # Migration disabled
+        
+        # try:
+        #     from .const import sanitize_unicode_to_ascii
+        #     
+        #     # Get all rows with location data
+        #     cursor = await self._db.execute("""
+        #         SELECT file_id, location_city, location_state, location_country
+        #         FROM exif_data
+        #         WHERE location_city IS NOT NULL 
+        #            OR location_state IS NOT NULL 
+        #            OR location_country IS NOT NULL
+        #     """)
+        #     rows = await cursor.fetchall()
+        #     
+        #     if not rows:
+        #         return
+        #     
+        #     # Update each row
+        #     updated_count = 0
+        #     for row in rows:
+        #         file_id = row[0]
+        #         city = sanitize_unicode_to_ascii(row[1])
+        #         state = sanitize_unicode_to_ascii(row[2])
+        #         country = sanitize_unicode_to_ascii(row[3])
+        #         
+        #         # Only update if something changed
+        #         if city != row[1] or state != row[2] or country != row[3]:
+        #             await self._db.execute("""
+        #                 UPDATE exif_data
+        #                 SET location_city = ?,
+        #                     location_state = ?,
+        #                     location_country = ?
+        #                 WHERE file_id = ?
+        #             """, (city, state, country, file_id))
+        #             updated_count += 1
+        #     
+        #     if updated_count > 0:
+        #         await self._db.commit()
+        #         _LOGGER.info(f"Sanitized {updated_count} location name(s) to ASCII (Unicode → ASCII conversion)")
+        #     
+        # except Exception as e:
+        #     _LOGGER.warning(f"Failed to sanitize location names: {e}")
     
     async def get_total_files(self) -> int:
 

@@ -16,7 +16,7 @@ from typing import Optional
 
 import aiohttp
 
-from .const import sanitize_unicode_to_ascii
+# from .const import sanitize_unicode_to_ascii  # Disabled - may not be needed, see CHANGELOG
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -207,13 +207,21 @@ class GeocodeService:
         # Extract country
         location_country = address.get('country', '')
         
-        # Sanitize all location strings to ASCII to prevent UnicodeEncodeError in Python 3.13+
+        # ASCII-sanitization DISABLED pending further testing
+        # Real issue was pymediainfo exception logging, not geocoded location names
+        # Keeping code commented for future reference if needed
         result = {
-            'location_name': sanitize_unicode_to_ascii(location_name.strip() if location_name else ''),
-            'location_city': sanitize_unicode_to_ascii(location_city.strip() if location_city else ''),
-            'location_state': sanitize_unicode_to_ascii(location_state.strip() if location_state else ''),
-            'location_country': sanitize_unicode_to_ascii(location_country.strip() if location_country else '')
+            'location_name': location_name.strip() if location_name else '',
+            'location_city': location_city.strip() if location_city else '',
+            'location_state': location_state.strip() if location_state else '',
+            'location_country': location_country.strip() if location_country else ''
         }
+        # result = {
+        #     'location_name': sanitize_unicode_to_ascii(location_name.strip() if location_name else ''),
+        #     'location_city': sanitize_unicode_to_ascii(location_city.strip() if location_city else ''),
+        #     'location_state': sanitize_unicode_to_ascii(location_state.strip() if location_state else ''),
+        #     'location_country': sanitize_unicode_to_ascii(location_country.strip() if location_country else '')
+        # }
         
         _LOGGER.debug(f"Geocoded to: {result}")
         return result
