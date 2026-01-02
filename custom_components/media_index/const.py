@@ -12,14 +12,14 @@ def sanitize_unicode_to_ascii(text: Optional[str]) -> Optional[str]:
     
     Strategy:
     - European characters: Decompose and remove accents (München → Munchen)
-    - Non-decomposable (Japanese, Chinese, etc.): Keep original (better than empty string)
-      These will still cause errors in Python 3.13+ but preserving data is more important
+    - Non-decomposable (Japanese, Chinese, etc.): Return empty string (safe fallback)
+      Caller should provide fallback text if needed
     
     Args:
         text: Input string that may contain Unicode characters
         
     Returns:
-        ASCII-safe string if possible, original string if decomposition would lose all data
+        ASCII-safe string, or empty string if decomposition would lose all data
     """
     if not text or not isinstance(text, str):
         return text
@@ -29,15 +29,13 @@ def sanitize_unicode_to_ascii(text: Optional[str]) -> Optional[str]:
     # Encode to ASCII, dropping non-ASCII characters
     ascii_result = normalized.encode('ascii', 'ignore').decode('ascii')
     
-    # If sanitization resulted in empty string or mostly lost data, keep original
-    # This handles Japanese, Chinese, Arabic, etc. where decomposition doesn't work
+    # If sanitization resulted in empty string or mostly lost data, return empty string
+    # This ensures we never return text that could cause Python 3.13 encoding crashes
+    # Callers should provide appropriate fallback text when empty string is returned
     if not ascii_result:
-        # For whitespace-only input, return empty string for consistency
-        if text.strip() == "":
-            return ""
-        return text  # Keep original - better than losing the data
+        return ""
     if len(ascii_result) < len(text) * 0.3:
-        return text  # Keep original - better than losing the data
+        return ""  # Lost too much data, return empty for safety
     
     return ascii_result
 

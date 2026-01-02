@@ -51,8 +51,8 @@ def _sanitize_title(text: str) -> str:
     """
     from .const import sanitize_unicode_to_ascii
     result = sanitize_unicode_to_ascii(text)
-    # If sanitization removed too much content, use default fallback
-    return result if result and result.strip() else "Media Index"
+    # Use default fallback if sanitization returned empty (non-decomposable Unicode)
+    return result if result else "Media Index"
 
 
 class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

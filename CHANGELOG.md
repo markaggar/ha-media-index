@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved whitespace consistency: Empty string returned for whitespace-only input
   - COALESCE/NULLIF SQL logic confirmed correct: Preserves user-set favorites during file scans (values only set via dedicated `update_favorite()` method)
 
+- **CRITICAL: Fixed Unicode Sanitization to Prevent Crashes**
+  - Changed `sanitize_unicode_to_ascii()` to return empty string instead of original text when decomposition fails
+  - **Root Cause**: Returning original non-decomposable Unicode (Japanese, Chinese, etc.) can still cause Python 3.13 encoding crashes
+  - **Impact**: Config entry titles with non-decomposable Unicode would crash when HA tries to save config
+  - **Fix**: Return empty string for safety, let caller provide fallback (e.g., "Media Index")
+  - Simplified `_sanitize_title()` to check for empty result instead of empty-or-whitespace
+
 ### Removed
 
 - **Removed Dead Code: `get_anniversary_photos()` Method**
