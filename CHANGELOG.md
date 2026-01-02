@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When `force_rescan: false` (default), scanner uses optimization to skip unchanged files
   - Removed obsolete TODO comment
 
+- **Code Quality Improvements (Round 2)**
+  - Fixed scan statistics calculation: "Processed X files (Y updated, Z skipped)" now shows correct totals
+  - Standardized Unicode sanitization: video_parser now uses centralized `sanitize_unicode_to_ascii()` function
+  - Improved whitespace consistency: Empty string returned for whitespace-only input
+  - COALESCE/NULLIF SQL logic confirmed correct: Preserves user-set favorites during file scans (values only set via dedicated `update_favorite()` method)
+
 ### Removed
 
 - **Removed Dead Code: `get_anniversary_photos()` Method**

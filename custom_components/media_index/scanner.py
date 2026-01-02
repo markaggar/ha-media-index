@@ -360,8 +360,8 @@ class MediaScanner:
             
             scan_duration = (datetime.now() - scan_start_time).total_seconds()
             _LOGGER.info(
-                "Scan complete in %.1fs. Processed %d files (%d new/updated, %d skipped with existing metadata)",
-                scan_duration, files_added, files_added - files_skipped, files_skipped
+                "Scan complete in %.1fs. Processed %d files (%d updated, %d skipped with existing metadata)",
+                scan_duration, files_added + files_skipped, files_added, files_skipped
             )
             return files_added
         

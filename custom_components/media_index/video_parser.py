@@ -246,7 +246,8 @@ class VideoMetadataParser:
         except Exception as e:
             # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
             # Avoid exc_info=True as traceback may contain pymediainfo track objects with Unicode paths
-            error_msg = str(e).encode('ascii', 'replace').decode('ascii')
+            from .const import sanitize_unicode_to_ascii
+            error_msg = sanitize_unicode_to_ascii(str(e))
             _LOGGER.error(f"[VIDEO] Failed to extract video metadata from {file_path}: {error_msg}")
             return None
     

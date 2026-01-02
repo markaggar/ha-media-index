@@ -32,9 +32,9 @@ def sanitize_unicode_to_ascii(text: Optional[str]) -> Optional[str]:
     # If sanitization resulted in empty string or mostly lost data, keep original
     # This handles Japanese, Chinese, Arabic, etc. where decomposition doesn't work
     if not ascii_result:
-        # For whitespace-only input, prefer the sanitized (usually empty) result
+        # For whitespace-only input, return empty string for consistency
         if text.strip() == "":
-            return ascii_result
+            return ""
         return text  # Keep original - better than losing the data
     if len(ascii_result) < len(text) * 0.3:
         return text  # Keep original - better than losing the data
