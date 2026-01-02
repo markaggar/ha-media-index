@@ -48,6 +48,10 @@ class CacheManager:
             # Create schema
             await self._create_schema()
             
+            # Run one-time migration to sanitize Unicode location names
+            # DISABLED - sanitization may not be needed, see CHANGELOG
+            # await self._sanitize_location_names()
+            
             _LOGGER.info("Cache database initialized successfully")
             return True
             
@@ -265,7 +269,61 @@ class CacheManager:
         await self._db.commit()
         _LOGGER.debug("Database migrations completed")
     
+    async def _sanitize_location_names(self) -> None:
+        """One-time migration to sanitize Unicode location names to ASCII.
+        
+        DISABLED - May not be needed. Real issue was pymediainfo exception logging.
+        Keeping code for reference in case future testing reveals it's necessary.
+        
+        Converts existing geocoded location names to ASCII-safe equivalents
+        to prevent UnicodeEncodeError in Python 3.13+.
+        """
+        return  # Migration disabled
+        
+        # try:
+        #     from .const import sanitize_unicode_to_ascii
+        #     
+        #     # Get all rows with location data
+        #     cursor = await self._db.execute("""
+        #         SELECT file_id, location_city, location_state, location_country
+        #         FROM exif_data
+        #         WHERE location_city IS NOT NULL 
+        #            OR location_state IS NOT NULL 
+        #            OR location_country IS NOT NULL
+        #     """)
+        #     rows = await cursor.fetchall()
+        #     
+        #     if not rows:
+        #         return
+        #     
+        #     # Update each row
+        #     updated_count = 0
+        #     for row in rows:
+        #         file_id = row[0]
+        #         city = sanitize_unicode_to_ascii(row[1])
+        #         state = sanitize_unicode_to_ascii(row[2])
+        #         country = sanitize_unicode_to_ascii(row[3])
+        #         
+        #         # Only update if something changed
+        #         if city != row[1] or state != row[2] or country != row[3]:
+        #             await self._db.execute("""
+        #                 UPDATE exif_data
+        #                 SET location_city = ?,
+        #                     location_state = ?,
+        #                     location_country = ?
+        #                 WHERE file_id = ?
+        #             """, (city, state, country, file_id))
+        #             updated_count += 1
+        #     
+        #     if updated_count > 0:
+        #         await self._db.commit()
+        #         _LOGGER.info(f"Sanitized {updated_count} location name(s) to ASCII (Unicode → ASCII conversion)")
+        #     
+        # except Exception as e:
+        #     _LOGGER.warning(f"Failed to sanitize location names: {e}")
+    
     async def get_total_files(self) -> int:
+
         """Get total number of indexed files.
         
         Returns:
@@ -398,15 +456,29 @@ class CacheManager:
             # File unchanged - preserve existing last_scanned
             last_scanned_value = existing_row[1]
         
+        # Use INSERT ... ON CONFLICT DO UPDATE to preserve file_id and foreign key relationships
+        # This prevents orphaning exif_data when re-scanning existing files
         await self._db.execute("""
-            INSERT OR REPLACE INTO media_files 
+            INSERT INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
              created_time, duration, last_scanned, width, height, orientation,
              is_favorited, rating, rated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                    COALESCE((SELECT is_favorited FROM media_files WHERE path = ?), ?),
-                    COALESCE((SELECT rating FROM media_files WHERE path = ?), ?),
-                    (SELECT rated_at FROM media_files WHERE path = ?))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                filename = excluded.filename,
+                folder = excluded.folder,
+                file_type = excluded.file_type,
+                file_size = excluded.file_size,
+                modified_time = excluded.modified_time,
+                created_time = excluded.created_time,
+                duration = excluded.duration,
+                last_scanned = excluded.last_scanned,
+                width = excluded.width,
+                height = excluded.height,
+                orientation = excluded.orientation,
+                is_favorited = COALESCE(NULLIF(excluded.is_favorited, 0), media_files.is_favorited),
+                rating = COALESCE(NULLIF(excluded.rating, 0), media_files.rating),
+                rated_at = COALESCE(excluded.rated_at, media_files.rated_at)
         """, (
             file_data['path'],
             file_data['filename'],
@@ -416,14 +488,13 @@ class CacheManager:
             file_data['modified_time'],
             file_data.get('created_time'),
             file_data.get('duration'),
-            last_scanned_value,  # Use computed value instead of always current_time
+            last_scanned_value,
             file_data.get('width'),
             file_data.get('height'),
             file_data.get('orientation'),
-            # Preserve existing is_favorited/rating/rated_at if row exists, else use defaults
-            file_data['path'], file_data.get('is_favorited', 0),
-            file_data['path'], file_data.get('rating', 0),
-            file_data['path'],
+            file_data.get('is_favorited', 0),
+            file_data.get('rating', 0),
+            file_data.get('rated_at'),
         ))
         
         await self._db.commit()
@@ -1430,50 +1501,6 @@ class CacheManager:
         
         _LOGGER.debug("Burst query returned %d rows", len(rows))
         return [dict(row) for row in rows]
-    
-    async def get_anniversary_photos(
-        self,
-        reference_path: str,
-        window_days: int = 3,
-        years_back: int = 15,
-        sort_order: str = "time_asc"
-    ) -> list[dict]:
-        """Get photos from the same day across years (anniversary mode).
-        
-        Args:
-            reference_path: Path to the reference photo
-            window_days: Days before/after to include (±window, default: 3)
-            years_back: How many years back to search (default: 15)
-            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
-            
-        Returns:
-            List of anniversary photos with metadata
-        """
-        # Get reference photo metadata
-        reference_file = await self.get_file_by_path(reference_path)
-        if not reference_file:
-            _LOGGER.error("Reference file not found: %s", reference_path)
-            return []
-        
-        # Extract EXIF data
-        exif_data = reference_file.get('exif', {})
-        if not exif_data:
-            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
-            return []
-        
-        reference_date_taken = exif_data.get('date_taken')
-        if not reference_date_taken:
-            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
-            return []
-        
-        # TODO: Implement anniversary query
-        # - Extract month/day from reference_date_taken
-        # - Query for photos with same month/day ±window_days across last N years
-        # - Exclude reference photo
-        # - Apply sort_order
-        
-        _LOGGER.warning("Anniversary mode not yet implemented")
-        return []
     
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.

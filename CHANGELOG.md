@@ -5,6 +5,121 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8]
+
+### Fixed
+
+- **Force Rescan Parameter Now Works**
+  - Fixed `force_rescan` service parameter being ignored during scans
+  - When `force_rescan: true`, scanner now bypasses optimization and re-extracts all metadata
+  - When `force_rescan: false` (default), scanner uses optimization to skip unchanged files
+  - Removed obsolete TODO comment
+
+- **Code Quality Improvements (Round 2)**
+  - Fixed scan statistics calculation: "Processed X files (Y updated, Z skipped)" now shows correct totals
+  - Standardized Unicode sanitization: video_parser now uses centralized `sanitize_unicode_to_ascii()` function
+  - Improved whitespace consistency: Empty string returned for whitespace-only input
+  - COALESCE/NULLIF SQL logic confirmed correct: Preserves user-set favorites during file scans (values only set via dedicated `update_favorite()` method)
+
+- **CRITICAL: Fixed Unicode Sanitization to Prevent Crashes**
+  - Changed `sanitize_unicode_to_ascii()` to return empty string instead of original text when decomposition fails
+  - **Root Cause**: Returning original non-decomposable Unicode (Japanese, Chinese, etc.) can still cause Python 3.13 encoding crashes
+  - **Impact**: Config entry titles with non-decomposable Unicode would crash when HA tries to save config
+  - **Fix**: Return empty string for safety, let caller provide fallback (e.g., "Media Index")
+  - Simplified `_sanitize_title()` to check for empty result instead of empty-or-whitespace
+
+### Removed
+
+- **Removed Dead Code: `get_anniversary_photos()` Method**
+  - Removed unused `get_anniversary_photos()` method with incomplete TODO
+  - Anniversary filtering is already fully implemented via `anniversary_month`, `anniversary_day`, and `anniversary_window_days` parameters in `get_random_files()`
+  - This was remnant code from an earlier design iteration about force_rescan support
+
+- **CRITICAL FIX: File ID Preservation Across Scans**
+  - Changed `INSERT OR REPLACE` to `INSERT ... ON CONFLICT DO UPDATE` in `add_file()` to preserve file_id
+  - **Root Cause**: `INSERT OR REPLACE` deletes old row and creates new one with new file_id, orphaning EXIF data
+  - **Impact**: Foreign key constraint on exif_data.file_id meant EXIF data pointed to old IDs after each scan
+  - **Result**: All files appeared as "new" with missing metadata on every scan, triggering unnecessary re-extraction
+  - **Fix**: UPDATE preserves file_id, maintaining foreign key relationships and enabling optimization to work
+  - This fixes the "0 skipped with existing metadata" issue where scans re-extracted everything hourly
+
+- **CRITICAL FIX: Wrong Column Name in Optimization Check**
+  - Fixed `existing_file.get('file_id')` → `existing_file.get('id')` in scanner.py (4 locations)
+  - **Root Cause**: Database column is named `id`, not `file_id` 
+  - **Impact**: Optimization always returned None for file_id, causing all files to be marked as "missing metadata"
+  - **Result**: Even with file_id preservation, optimization never skipped any files
+  - **Fix**: Use correct column name, optimization now works: "2994 skipped with existing metadata"
+
+- **Scan Optimization Implementation**
+  - Skip unchanged files that already have metadata (checks file_id, exif existence, modification time)
+  - Prevents repeated metadata extraction for unchanged files
+  - Particularly important for video files where libmediainfo can fail on Unicode paths
+
+- **Unicode Encoding Protection (Python 3.13+ Compatibility)**: Fix for `UnicodeEncodeError` crashes
+  - **Root Cause Identified**: pymediainfo exception logging, NOT geocoded location names
+    - pymediainfo track objects contain Unicode file paths (complete_name, file_name, folder_name)
+    - Exception tracebacks with Unicode crash HA's ASCII-encoded error logging (Python 3.13+)
+    - All pymediainfo exceptions now sanitized before logging to prevent crashes
+
+- Added preservation of existing metadata when video extraction fails (prevents data loss)
+- Fixed repeated video metadata extraction failures for same files
+
+### Added
+- Enhanced logging with instance identification to track which of multiple instances triggers scans
+- Diagnostic logging showing scan duration, processed count, and skip count
+- Reconfiguration option for scan_on_startup in Config UI (no longer requires editing YAML)
+- Debug-level detailed logging for optimization decisions (file checks, EXIF saves, etc.)
+
+### Changed
+- Multiple media_index instances each run independent hourly scans (by design, not a bug)
+- Removed verbose routing log messages that were triggering rate limiting warnings
+- Moved detailed diagnostic logs (🔍 🔄 📝 ✨ 💾 ✅) from INFO to DEBUG level to reduce log noise
+
+### Code Quality Improvements (Addressing Copilot Suggestions)
+- Fixed double-counting in scan statistics: removed `files_added` increment when files are skipped
+- Fixed duplicate `files_added` increment when video extraction fails and existing metadata is preserved
+- Deduplicated Unicode sanitization: `_sanitize_title()` now uses centralized `sanitize_unicode_to_ascii()`
+- Improved whitespace handling in `sanitize_unicode_to_ascii()` to avoid returning whitespace-only strings
+- Standardized Unicode sanitization in video_parser.py to use centralized function instead of inline encoding
+- Fixed COALESCE logic in cache_manager.py: use `NULLIF` to properly preserve existing is_favorited/rating values
+
+### Technical Notes
+- **CRITICAL**: Foreign key constraint requires stable file_ids - never use `INSERT OR REPLACE` on parent tables
+- Multiple instances will each trigger hourly scans independently (expected behavior)
+- Optimization relies on: get_file_by_path() → get_exif_by_file_id() → check modification time
+    - Sanitization code preserved (commented out) in case future testing reveals it's needed
+    - Utility function `sanitize_unicode_to_ascii()` remains in const.py for potential future use
+
+- **Video Metadata Protection**: Prevent good data from being overwritten when extraction fails
+  - **Root Cause**: Scheduled scans were re-extracting metadata for ALL files EVERY scan (hourly/daily/weekly)
+  - **Mystery**: 80 scans occurred in 18 hours with hourly schedule (expected ~18) - cause under investigation
+  - **Issue**: libmediainfo C library enters error state after repeated Unicode path failures
+  - **Problem**: When extraction fails, mutagen fallback was overwriting existing good metadata
+  - **Problem**: Repeated extraction attempts (80+) for same files caused libmediainfo to crash/corrupt
+  - **Fix**: Check if file already has metadata before attempting extraction (both scan_folder and scan_file)
+  - **Fix**: Preserve existing metadata if re-extraction fails (don't overwrite with fallback/empty data)
+  - **Fix**: Only re-extract if file modification time actually changed
+  - **Impact**: Prevents metadata loss AND stops unnecessary repeated extractions
+  - **Known Issue**: `scan_folder` and `scan_file` have duplicate extraction logic (needs refactoring)
+
+- **Reduced Log Verbosity**: Removed excessive service routing messages
+  - Removed "Routing to integration instance from entity..." log (was logging multiple times per second)
+  - Routing failures still logged as WARNING when they occur
+
+- **Enhanced Diagnostic Logging**: Added detailed scan and error tracking
+  - Scan triggers clearly marked: "🔄 TRIGGER: Scheduled/Startup/Manual scan"
+  - **Instance identification**: Log messages now show which instance is scanning (by title/folder)
+  - Scan completion shows duration, files processed, and skip count
+  - Skip count helps identify if optimization is working (files already have metadata)
+  - pymediainfo failures now log full sanitized file path to identify problematic files
+  - Scheduled scan blocks now logged as WARNING to detect stuck scans
+  - **IMPORTANT**: Multiple instances will each trigger hourly scans independently!
+    - Example: 4 instances x hourly = 96 scans/day (not a bug, working as designed)
+  - Helps diagnose scan patterns and libmediainfo crash causes
+  - **Central Utility**: Added `sanitize_unicode_to_ascii()` in const.py for consistent handling
+  - **Impact**: Fixes intermittent crashes for most users (European locations are most common source)
+  - **Note**: File paths/names with Unicode characters (e.g., "Berlin_Straße.jpg") remain unchanged as they represent actual filesystem paths
+
 ## [1.5.6] - 2025-12-25
 
 ## Added

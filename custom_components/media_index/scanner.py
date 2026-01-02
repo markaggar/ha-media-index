@@ -135,6 +135,7 @@ class MediaScanner:
         base_folder: str,
         watched_folders: Optional[list] = None,
         max_depth: Optional[int] = None,
+        force: bool = False,
     ) -> int:
         """Scan a folder for media files and update cache.
         
@@ -142,6 +143,7 @@ class MediaScanner:
             base_folder: Base media folder path
             watched_folders: Optional list of subfolders to watch (empty = watch all)
             max_depth: Maximum depth to scan (None = unlimited)
+            force: If True, bypass optimization and re-extract all metadata
         
         Returns:
             Number of files added to cache
@@ -152,6 +154,8 @@ class MediaScanner:
         
         self._is_scanning = True
         files_added = 0
+        files_skipped = 0  # Track how many files we skip (already have metadata)
+        scan_start_time = datetime.now()
         
         try:
             _LOGGER.info("Starting full scan of %s", base_folder)
@@ -188,9 +192,46 @@ class MediaScanner:
                 # Add files to cache
                 for metadata in media_files:
                     try:
+                        # Check if file already exists with metadata to avoid unnecessary re-extraction
+                        existing_file = await self.cache.get_file_by_path(metadata['path'])
+                        should_extract_metadata = True
+                        
+                        _LOGGER.debug("🔍 Checking file: %s (existing_file: %s, force=%s)", metadata['path'], bool(existing_file), force)
+                        
+                        if existing_file and not force:
+                            file_id = existing_file.get('id')  # Column name is 'id', not 'file_id'
+                            existing_exif = await self.cache.get_exif_by_file_id(file_id)
+                            
+                            _LOGGER.debug("🔍   file_id=%s, has_exif=%s, date_taken=%s", 
+                                        file_id, bool(existing_exif), 
+                                        existing_exif.get('date_taken') if existing_exif else None)
+                            
+                            # Skip extraction if file hasn't been modified and already has metadata
+                            if existing_exif and existing_exif.get('date_taken'):
+                                existing_modified = existing_file.get('modified_time', 0)
+                                current_modified = metadata.get('modified_time', 0)
+                                
+                                if existing_modified == current_modified:
+                                    should_extract_metadata = False
+                                    files_skipped += 1  # Track skipped files that required no update
+                                    continue  # Skip to next file
+                                else:
+                                    _LOGGER.debug(
+                                        "🔄 File modification time changed, will re-extract: %s (was: %s, now: %s)",
+                                        metadata['path'], existing_modified, current_modified
+                                    )
+                            else:
+                                _LOGGER.debug(
+                                    "📝 File exists but missing metadata, will extract: %s (has_exif: %s, has_date: %s)",
+                                    metadata['path'], existing_exif is not None, 
+                                    existing_exif.get('date_taken') if existing_exif else None
+                                )
+                        else:
+                            _LOGGER.debug("✨ New file, will extract: %s", metadata['path'])
+                        
                         # Extract EXIF first for images to get width/height/orientation
                         exif_data = None
-                        if metadata['file_type'] == 'image':
+                        if should_extract_metadata and metadata['file_type'] == 'image':
                             if self.hass:
                                 exif_data = await self.hass.async_add_executor_job(
                                     ExifParser.extract_exif, metadata['path']
@@ -203,7 +244,7 @@ class MediaScanner:
                                 metadata['width'] = exif_data.get('width')
                                 metadata['height'] = exif_data.get('height')
                                 metadata['orientation'] = exif_data.get('orientation')
-                        elif metadata['file_type'] == 'video':
+                        elif should_extract_metadata and metadata['file_type'] == 'video':
                             # Extract video metadata BEFORE adding file to get dimensions/duration
                             if self.hass:
                                 exif_data = await self.hass.async_add_executor_job(
@@ -217,20 +258,31 @@ class MediaScanner:
                                 metadata['width'] = exif_data.get('width')
                                 metadata['height'] = exif_data.get('height')
                                 metadata['duration'] = exif_data.get('duration')
+                            
+                            # CRITICAL: If extraction failed but file exists, preserve existing metadata
+                            if not exif_data and existing_file:
+                                existing_exif = await self.cache.get_exif_by_file_id(existing_file.get('id'))
+                                if existing_exif and existing_exif.get('date_taken'):
+                                    _LOGGER.warning("Video metadata extraction failed, preserving existing: %s", metadata['path'])
+                                    continue  # Don't overwrite with empty data
                         
                         file_id = await self.cache.add_file(metadata)
                         files_added += 1
                         
+                        _LOGGER.debug("💾 File added with ID %s: %s", file_id, metadata['path'])
+                        
                         # Store EXIF data in exif_data table
                         if exif_data and file_id > 0:
                             await self.cache.add_exif_data(file_id, exif_data)
-                            # Debug logging removed to prevent excessive logs
+                            _LOGGER.debug("✅ EXIF data saved for file ID %s (has date_taken: %s)", file_id, bool(exif_data.get('date_taken')))
                             
                             # Set is_favorited based on XMP:Rating (5 stars = favorite, < 5 = not favorite)
                             rating = exif_data.get('rating') or 0
                             is_favorite = rating >= 5
                             await self.cache.update_favorite(metadata['path'], is_favorite)
                             # Favorite marking logged in summary only
+                        else:
+                            _LOGGER.debug("⚠️ No EXIF data to save for file ID %s: %s", file_id, metadata['path'])
                         
                         # Geocode GPS coordinates if available, enabled, and not already geocoded
                         # Only run if we have exif_data (from images or videos)
@@ -306,7 +358,11 @@ class MediaScanner:
             # Flush any pending geocoding stats
             await self.cache._flush_geocode_stats()
             
-            _LOGGER.info("Scan complete. Added %d files to cache", files_added)
+            scan_duration = (datetime.now() - scan_start_time).total_seconds()
+            _LOGGER.info(
+                "Scan complete in %.1fs. Processed %d files (%d updated, %d skipped with existing metadata)",
+                scan_duration, files_added + files_skipped, files_added, files_skipped
+            )
             return files_added
         
         except Exception as err:
@@ -354,6 +410,24 @@ class MediaScanner:
             if not metadata:
                 return False
             
+            # Check if file already exists in database with metadata
+            existing_file = await self.cache.get_file_by_path(file_path)
+            if existing_file:
+                file_id = existing_file.get('id')
+                # Check if file already has EXIF/video metadata
+                existing_exif = await self.cache.get_exif_by_file_id(file_id)
+                if existing_exif and existing_exif.get('date_taken'):
+                    # File already has metadata - only update if file was actually modified
+                    # Compare modification times to avoid unnecessary re-extraction
+                    existing_modified = existing_file.get('modified_time', 0)
+                    current_modified = metadata.get('modified_time', 0)
+                    
+                    if existing_modified == current_modified:
+                        _LOGGER.debug("File already indexed with metadata, skipping re-extraction: %s", file_path)
+                        return True  # Already indexed
+                    else:
+                        _LOGGER.info("File modification time changed, re-extracting metadata: %s", file_path)
+            
             # Extract EXIF first for images to get width/height/orientation
             exif_data = None
             if metadata['file_type'] == 'image':
@@ -376,6 +450,13 @@ class MediaScanner:
                     )
                 else:
                     exif_data = VideoMetadataParser.extract_metadata(file_path)
+                
+                # CRITICAL: If extraction failed but file already has metadata, preserve existing data
+                if not exif_data and existing_file:
+                    existing_exif = await self.cache.get_exif_by_file_id(existing_file.get('id'))
+                    if existing_exif and existing_exif.get('date_taken'):
+                        _LOGGER.warning("Video metadata extraction failed but preserving existing data: %s", file_path)
+                        return True  # Keep existing metadata, don't overwrite with empty/fallback data
             
             # Add to database
             file_id = await self.cache.add_file(metadata)

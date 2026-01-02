@@ -43,6 +43,18 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _sanitize_title(text: str) -> str:
+    """Sanitize title to ASCII-safe characters to prevent encoding errors.
+    
+    Python 3.13+ can have issues with non-ASCII characters in config entries
+    when HA's config panel tries to save data using ASCII codec.
+    """
+    from .const import sanitize_unicode_to_ascii
+    result = sanitize_unicode_to_ascii(text)
+    # Use default fallback if sanitization returned empty (non-decomposable Unicode)
+    return result if result else "Media Index"
+
+
 class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Media Index."""
 
@@ -74,8 +86,11 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(f"media_index_{base_folder}")
                 self._abort_if_unique_id_configured()
 
+                # Sanitize title to prevent Unicode encoding errors in Python 3.13+
+                safe_title = _sanitize_title(f"Media Index ({base_folder})")
+
                 return self.async_create_entry(
-                    title=f"Media Index ({base_folder})",
+                    title=safe_title,
                     data=user_input,
                 )
 
@@ -215,6 +230,10 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_AUTO_INSTALL_LIBMEDIAINFO,
             self.config_entry.data.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO),
         )
+        current_scan_on_startup = self.config_entry.options.get(
+            CONF_SCAN_ON_STARTUP,
+            self.config_entry.data.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -255,6 +274,9 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                     vol.Optional(
                         CONF_AUTO_INSTALL_LIBMEDIAINFO, default=current_auto_install
+                    ): bool,
+                    vol.Optional(
+                        CONF_SCAN_ON_STARTUP, default=current_scan_on_startup
                     ): bool,
                 }
             ),

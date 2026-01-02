@@ -1,7 +1,44 @@
 """Constants for Media Index integration."""
-from typing import Final
+import unicodedata
+from typing import Final, Optional
 
 DOMAIN: Final = "media_index"
+
+
+def sanitize_unicode_to_ascii(text: Optional[str]) -> Optional[str]:
+    """Convert Unicode text to ASCII-safe equivalent for Python 3.13+ compatibility.
+    
+    This prevents UnicodeEncodeError when HA tries to save entity states or config files.
+    
+    Strategy:
+    - European characters: Decompose and remove accents (München → Munchen)
+    - Non-decomposable (Japanese, Chinese, etc.): Return empty string (safe fallback)
+      Caller should provide fallback text if needed
+    
+    Args:
+        text: Input string that may contain Unicode characters
+        
+    Returns:
+        ASCII-safe string, or empty string if decomposition would lose all data
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Normalize Unicode to decomposed form (separate base + accent marks)
+    normalized = unicodedata.normalize('NFKD', text)
+    # Encode to ASCII, dropping non-ASCII characters
+    ascii_result = normalized.encode('ascii', 'ignore').decode('ascii')
+    
+    # If sanitization resulted in empty string or mostly lost data, return empty string
+    # This ensures we never return text that could cause Python 3.13 encoding crashes
+    # Callers should provide appropriate fallback text when empty string is returned
+    if not ascii_result:
+        return ""
+    if len(ascii_result) < len(text) * 0.3:
+        return ""  # Lost too much data, return empty for safety
+    
+    return ascii_result
+
 
 # Configuration constants
 CONF_BASE_FOLDER: Final = "base_folder"
