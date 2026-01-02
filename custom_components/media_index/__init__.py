@@ -309,20 +309,25 @@ def _setup_scheduled_scan(
         # Block if pymediainfo not available
         if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
             _LOGGER.warning(
-                "⏸️ Scheduled scan SKIPPED: pymediainfo not available. "
-                "Call 'media_index.install_libmediainfo' to fix."
+                "⏸️ Scheduled scan SKIPPED [%s]: pymediainfo not available. "
+                "Call 'media_index.install_libmediainfo' to fix.",
+                entry.title or entry.entry_id
             )
             return
         
         # Check if scan already in progress
         if scanner.is_scanning:
-            _LOGGER.info(
-                "Scheduled scan skipped - scan already in progress. "
-                "This prevents blocking watch folders and concurrent scans."
+            _LOGGER.warning(
+                "⚠️ Scheduled scan BLOCKED [%s] - scan already running (possible long-running scan or stuck state). "
+                "If scans are taking too long, check for metadata extraction issues.",
+                entry.title or entry.entry_id
             )
             return
         
-        _LOGGER.info("Starting scheduled scan (%s) of %s", scan_schedule, base_folder)
+        _LOGGER.info(
+            "🔄 TRIGGER: Scheduled scan (%s) starting [instance: %s, folder: %s]", 
+            scan_schedule, entry.title or entry.entry_id, base_folder
+        )
         await scanner.scan_folder(base_folder, watched_folders)
     
     # Determine scan interval
@@ -608,7 +613,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
                 return
             
-            _LOGGER.info("Home Assistant started - beginning initial scan of %s (watched: %s)", base_folder, watched_folders)
+            _LOGGER.info(
+                "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]", 
+                entry.title or entry.entry_id, base_folder, watched_folders
+            )
             hass.async_create_task(
                 scanner.scan_folder(base_folder, watched_folders),
                 name=f"media_index_scan_{entry.entry_id}"
@@ -738,7 +746,6 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
             entity_entry = entity_registry.async_get(f"{entity_id}_total_files")
         
         if entity_entry and entity_entry.config_entry_id:
-            _LOGGER.info("Routing to integration instance from entity %s: %s", entity_id, entity_entry.config_entry_id)
             return entity_entry.config_entry_id
         else:
             _LOGGER.warning("Entity %s not found in registry or missing config_entry_id", entity_id)
@@ -1544,7 +1551,7 @@ def _register_services(hass: HomeAssistant):
         force_rescan = call.data.get("force_rescan", False)
         watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
         
-        _LOGGER.info("Manual scan requested: %s (force=%s)", folder_path, force_rescan)
+        _LOGGER.info("🔄 TRIGGER: Manual scan service call for %s (force=%s)", folder_path, force_rescan)
         
         # Start scan as background task
         # TODO: Add force_rescan support to scanner

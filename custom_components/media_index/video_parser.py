@@ -131,7 +131,13 @@ class VideoMetadataParser:
                     # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
                     # pymediainfo track objects contain Unicode file paths that can crash HA's logging
                     error_msg = str(e).encode('ascii', 'replace').decode('ascii')
-                    _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo extraction failed for {Path(file_path).name}: {error_msg}, falling back to mutagen")
+                    # Log full path (sanitized) to help identify problematic files
+                    sanitized_path = str(file_path).encode('ascii', 'replace').decode('ascii')
+                    _LOGGER.warning(
+                        f"[VIDEO] ⚠️ pymediainfo/libmediainfo extraction failed: {error_msg}\n"
+                        f"  File: {sanitized_path}\n"
+                        f"  This may indicate Unicode path issues or libmediainfo crash. Falling back to mutagen."
+                    )
             else:
                 _LOGGER.warning(f"[VIDEO] ❌ pymediainfo NOT AVAILABLE for {Path(file_path).name} - install with 'pip install pymediainfo'. Falling back to mutagen.")
             

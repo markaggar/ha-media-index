@@ -237,6 +237,10 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_AUTO_INSTALL_LIBMEDIAINFO,
             self.config_entry.data.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO),
         )
+        current_scan_on_startup = self.config_entry.options.get(
+            CONF_SCAN_ON_STARTUP,
+            self.config_entry.data.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -277,6 +281,9 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                     vol.Optional(
                         CONF_AUTO_INSTALL_LIBMEDIAINFO, default=current_auto_install
+                    ): bool,
+                    vol.Optional(
+                        CONF_SCAN_ON_STARTUP, default=current_scan_on_startup
                     ): bool,
                 }
             ),

@@ -456,15 +456,29 @@ class CacheManager:
             # File unchanged - preserve existing last_scanned
             last_scanned_value = existing_row[1]
         
+        # Use INSERT ... ON CONFLICT DO UPDATE to preserve file_id and foreign key relationships
+        # This prevents orphaning exif_data when re-scanning existing files
         await self._db.execute("""
-            INSERT OR REPLACE INTO media_files 
+            INSERT INTO media_files 
             (path, filename, folder, file_type, file_size, modified_time, 
              created_time, duration, last_scanned, width, height, orientation,
              is_favorited, rating, rated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                    COALESCE((SELECT is_favorited FROM media_files WHERE path = ?), ?),
-                    COALESCE((SELECT rating FROM media_files WHERE path = ?), ?),
-                    (SELECT rated_at FROM media_files WHERE path = ?))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                filename = excluded.filename,
+                folder = excluded.folder,
+                file_type = excluded.file_type,
+                file_size = excluded.file_size,
+                modified_time = excluded.modified_time,
+                created_time = excluded.created_time,
+                duration = excluded.duration,
+                last_scanned = excluded.last_scanned,
+                width = excluded.width,
+                height = excluded.height,
+                orientation = excluded.orientation,
+                is_favorited = COALESCE(excluded.is_favorited, media_files.is_favorited),
+                rating = COALESCE(excluded.rating, media_files.rating),
+                rated_at = COALESCE(excluded.rated_at, media_files.rated_at)
         """, (
             file_data['path'],
             file_data['filename'],
@@ -474,14 +488,13 @@ class CacheManager:
             file_data['modified_time'],
             file_data.get('created_time'),
             file_data.get('duration'),
-            last_scanned_value,  # Use computed value instead of always current_time
+            last_scanned_value,
             file_data.get('width'),
             file_data.get('height'),
             file_data.get('orientation'),
-            # Preserve existing is_favorited/rating/rated_at if row exists, else use defaults
-            file_data['path'], file_data.get('is_favorited', 0),
-            file_data['path'], file_data.get('rating', 0),
-            file_data['path'],
+            file_data.get('is_favorited', 0),
+            file_data.get('rating', 0),
+            file_data.get('rated_at'),
         ))
         
         await self._db.commit()
