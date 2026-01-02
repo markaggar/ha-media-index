@@ -49,17 +49,10 @@ def _sanitize_title(text: str) -> str:
     Python 3.13+ can have issues with non-ASCII characters in config entries
     when HA's config panel tries to save data using ASCII codec.
     """
-    try:
-        # Try to encode as ASCII
-        text.encode('ascii')
-        return text
-    except UnicodeEncodeError:
-        # Replace non-ASCII with ASCII equivalents or remove
-        import unicodedata
-        # Normalize to decomposed form, then keep only ASCII
-        normalized = unicodedata.normalize('NFKD', text)
-        ascii_text = normalized.encode('ascii', 'ignore').decode('ascii')
-        return ascii_text if ascii_text else "Media Index"
+    from .const import sanitize_unicode_to_ascii
+    result = sanitize_unicode_to_ascii(text)
+    # If sanitization removed too much content, use default fallback
+    return result if result and result.strip() else "Media Index"
 
 
 class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

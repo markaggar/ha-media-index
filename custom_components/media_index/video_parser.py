@@ -130,9 +130,10 @@ class VideoMetadataParser:
                 except Exception as e:
                     # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
                     # pymediainfo track objects contain Unicode file paths that can crash HA's logging
-                    error_msg = str(e).encode('ascii', 'replace').decode('ascii')
+                    from .const import sanitize_unicode_to_ascii
+                    error_msg = sanitize_unicode_to_ascii(str(e))
                     # Log full path (sanitized) to help identify problematic files
-                    sanitized_path = str(file_path).encode('ascii', 'replace').decode('ascii')
+                    sanitized_path = sanitize_unicode_to_ascii(str(file_path))
                     _LOGGER.warning(
                         f"[VIDEO] ⚠️ pymediainfo/libmediainfo extraction failed: {error_msg}\n"
                         f"  File: {sanitized_path}\n"

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.8]
 
 ### Fixed
 
@@ -34,10 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - pymediainfo track objects contain Unicode file paths (complete_name, file_name, folder_name)
     - Exception tracebacks with Unicode crash HA's ASCII-encoded error logging (Python 3.13+)
     - All pymediainfo exceptions now sanitized before logging to prevent crashes
-  - **Location Name Sanitization**: DISABLED pending further testing
-    - Initial hypothesis that geocoded locations caused encoding errors appears incorrect
-    - Japanese location names (えびすや) worked fine since v1.0; problems only started with libmediainfo
-    - Location names not exposed in sensor attributes, only returned in service calls
 
 - Added preservation of existing metadata when video extraction fails (prevents data loss)
 - Fixed repeated video metadata extraction failures for same files
@@ -52,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multiple media_index instances each run independent hourly scans (by design, not a bug)
 - Removed verbose routing log messages that were triggering rate limiting warnings
 - Moved detailed diagnostic logs (🔍 🔄 📝 ✨ 💾 ✅) from INFO to DEBUG level to reduce log noise
+
+### Code Quality Improvements (Addressing Copilot Suggestions)
+- Fixed double-counting in scan statistics: removed `files_added` increment when files are skipped
+- Fixed duplicate `files_added` increment when video extraction fails and existing metadata is preserved
+- Deduplicated Unicode sanitization: `_sanitize_title()` now uses centralized `sanitize_unicode_to_ascii()`
+- Improved whitespace handling in `sanitize_unicode_to_ascii()` to avoid returning whitespace-only strings
+- Standardized Unicode sanitization in video_parser.py to use centralized function instead of inline encoding
+- Fixed COALESCE logic in cache_manager.py: use `NULLIF` to properly preserve existing is_favorited/rating values
 
 ### Technical Notes
 - **CRITICAL**: Foreign key constraint requires stable file_ids - never use `INSERT OR REPLACE` on parent tables
@@ -70,7 +74,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Fix**: Preserve existing metadata if re-extraction fails (don't overwrite with fallback/empty data)
   - **Fix**: Only re-extract if file modification time actually changed
   - **Impact**: Prevents metadata loss AND stops unnecessary repeated extractions
-  - **TODO**: Investigate why 80 scans occurred vs expected 18 (scan trigger issue?)
   - **Known Issue**: `scan_folder` and `scan_file` have duplicate extraction logic (needs refactoring)
 
 - **Reduced Log Verbosity**: Removed excessive service routing messages

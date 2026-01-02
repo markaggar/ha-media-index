@@ -211,8 +211,7 @@ class MediaScanner:
                                 
                                 if existing_modified == current_modified:
                                     should_extract_metadata = False
-                                    files_added += 1  # Count as processed
-                                    files_skipped += 1  # Track skipped files
+                                    files_skipped += 1  # Track skipped files that required no update
                                     continue  # Skip to next file
                                 else:
                                     _LOGGER.debug(
@@ -263,7 +262,6 @@ class MediaScanner:
                                 existing_exif = await self.cache.get_exif_by_file_id(existing_file.get('id'))
                                 if existing_exif and existing_exif.get('date_taken'):
                                     _LOGGER.warning("Video metadata extraction failed, preserving existing: %s", metadata['path'])
-                                    files_added += 1
                                     continue  # Don't overwrite with empty data
                         
                         file_id = await self.cache.add_file(metadata)

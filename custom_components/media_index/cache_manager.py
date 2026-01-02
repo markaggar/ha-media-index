@@ -476,8 +476,8 @@ class CacheManager:
                 width = excluded.width,
                 height = excluded.height,
                 orientation = excluded.orientation,
-                is_favorited = COALESCE(excluded.is_favorited, media_files.is_favorited),
-                rating = COALESCE(excluded.rating, media_files.rating),
+                is_favorited = COALESCE(NULLIF(excluded.is_favorited, 0), media_files.is_favorited),
+                rating = COALESCE(NULLIF(excluded.rating, 0), media_files.rating),
                 rated_at = COALESCE(excluded.rated_at, media_files.rated_at)
         """, (
             file_data['path'],
