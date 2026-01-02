@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed `force_rescan` service parameter being ignored during scans
   - When `force_rescan: true`, scanner now bypasses optimization and re-extracts all metadata
   - When `force_rescan: false` (default), scanner uses optimization to skip unchanged files
-  - Removed obsolete TODO comment about force_rescan support
+  - Removed obsolete TODO comment
+
+### Removed
+
+- **Removed Dead Code: `get_anniversary_photos()` Method**
+  - Removed unused `get_anniversary_photos()` method with incomplete TODO
+  - Anniversary filtering is already fully implemented via `anniversary_month`, `anniversary_day`, and `anniversary_window_days` parameters in `get_random_files()`
+  - This was remnant code from an earlier design iteration about force_rescan support
 
 - **CRITICAL FIX: File ID Preservation Across Scans**
   - Changed `INSERT OR REPLACE` to `INSERT ... ON CONFLICT DO UPDATE` in `add_file()` to preserve file_id

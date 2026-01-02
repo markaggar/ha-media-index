@@ -1502,50 +1502,6 @@ class CacheManager:
         _LOGGER.debug("Burst query returned %d rows", len(rows))
         return [dict(row) for row in rows]
     
-    async def get_anniversary_photos(
-        self,
-        reference_path: str,
-        window_days: int = 3,
-        years_back: int = 15,
-        sort_order: str = "time_asc"
-    ) -> list[dict]:
-        """Get photos from the same day across years (anniversary mode).
-        
-        Args:
-            reference_path: Path to the reference photo
-            window_days: Days before/after to include (±window, default: 3)
-            years_back: How many years back to search (default: 15)
-            sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
-            
-        Returns:
-            List of anniversary photos with metadata
-        """
-        # Get reference photo metadata
-        reference_file = await self.get_file_by_path(reference_path)
-        if not reference_file:
-            _LOGGER.error("Reference file not found: %s", reference_path)
-            return []
-        
-        # Extract EXIF data
-        exif_data = reference_file.get('exif', {})
-        if not exif_data:
-            _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
-            return []
-        
-        reference_date_taken = exif_data.get('date_taken')
-        if not reference_date_taken:
-            _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
-            return []
-        
-        # TODO: Implement anniversary query
-        # - Extract month/day from reference_date_taken
-        # - Query for photos with same month/day ±window_days across last N years
-        # - Exclude reference photo
-        # - Apply sort_order
-        
-        _LOGGER.warning("Anniversary mode not yet implemented")
-        return []
-    
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.
         
