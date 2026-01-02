@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Force Rescan Parameter Now Works**
+  - Fixed `force_rescan` service parameter being ignored during scans
+  - When `force_rescan: true`, scanner now bypasses optimization and re-extracts all metadata
+  - When `force_rescan: false` (default), scanner uses optimization to skip unchanged files
+  - Removed obsolete TODO comment about force_rescan support
+
 - **CRITICAL FIX: File ID Preservation Across Scans**
   - Changed `INSERT OR REPLACE` to `INSERT ... ON CONFLICT DO UPDATE` in `add_file()` to preserve file_id
   - **Root Cause**: `INSERT OR REPLACE` deletes old row and creates new one with new file_id, orphaning EXIF data

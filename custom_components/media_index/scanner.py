@@ -135,6 +135,7 @@ class MediaScanner:
         base_folder: str,
         watched_folders: Optional[list] = None,
         max_depth: Optional[int] = None,
+        force: bool = False,
     ) -> int:
         """Scan a folder for media files and update cache.
         
@@ -142,6 +143,7 @@ class MediaScanner:
             base_folder: Base media folder path
             watched_folders: Optional list of subfolders to watch (empty = watch all)
             max_depth: Maximum depth to scan (None = unlimited)
+            force: If True, bypass optimization and re-extract all metadata
         
         Returns:
             Number of files added to cache
@@ -194,9 +196,9 @@ class MediaScanner:
                         existing_file = await self.cache.get_file_by_path(metadata['path'])
                         should_extract_metadata = True
                         
-                        _LOGGER.debug("🔍 Checking file: %s (existing_file: %s)", metadata['path'], bool(existing_file))
+                        _LOGGER.debug("🔍 Checking file: %s (existing_file: %s, force=%s)", metadata['path'], bool(existing_file), force)
                         
-                        if existing_file:
+                        if existing_file and not force:
                             file_id = existing_file.get('id')  # Column name is 'id', not 'file_id'
                             existing_exif = await self.cache.get_exif_by_file_id(file_id)
                             

@@ -1554,9 +1554,8 @@ def _register_services(hass: HomeAssistant):
         _LOGGER.info("🔄 TRIGGER: Manual scan service call for %s (force=%s)", folder_path, force_rescan)
         
         # Start scan as background task
-        # TODO: Add force_rescan support to scanner
         hass.async_create_task(
-            scanner.scan_folder(folder_path, watched_folders)
+            scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
         )
         
         return {"status": "scan_started", "folder": folder_path}
