@@ -323,7 +323,6 @@ class CacheManager:
         #     _LOGGER.warning(f"Failed to sanitize location names: {e}")
     
     async def get_total_files(self) -> int:
-
         """Get total number of indexed files.
         
         Returns:
@@ -911,11 +910,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -925,7 +924,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1062,11 +1061,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1076,7 +1075,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1217,10 +1216,10 @@ class CacheManager:
                     if anniversary_window_days > 0:
                         day_min = max(1, day_int - anniversary_window_days)
                         day_max = min(31, day_int + anniversary_window_days)
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) BETWEEN ? AND ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                         params.extend([day_min, day_max])
                     else:
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(day_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1229,7 +1228,7 @@ class CacheManager:
             if anniversary_month and anniversary_month != "*":
                 try:
                     month_int = int(anniversary_month)
-                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch') AS INTEGER) = ?")
+                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
                     params.append(month_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
