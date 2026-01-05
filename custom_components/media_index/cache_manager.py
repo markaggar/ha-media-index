@@ -882,7 +882,7 @@ class CacheManager:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_from_str, "%Y-%m-%d")
-                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') >= ?"
+                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                     params.append(date_from_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
@@ -893,7 +893,7 @@ class CacheManager:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_to_str, "%Y-%m-%d")
-                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') <= ?"
+                    new_files_query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1033,7 +1033,7 @@ class CacheManager:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_from_str, "%Y-%m-%d")
-                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') >= ?"
+                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                     params.append(date_from_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
@@ -1044,7 +1044,7 @@ class CacheManager:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     datetime.strptime(date_to_str, "%Y-%m-%d")
-                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') <= ?"
+                    query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                     params.append(date_to_str)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1190,7 +1190,7 @@ class CacheManager:
             try:
                 date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                 datetime.strptime(date_from_str, "%Y-%m-%d")
-                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') >= ?"
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') >= ?"
                 params.append(date_from_str)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
@@ -1200,7 +1200,7 @@ class CacheManager:
             try:
                 date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                 datetime.strptime(date_to_str, "%Y-%m-%d")
-                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') <= ?"
+                query += " AND DATE(COALESCE(e.date_taken, m.created_time), 'unixepoch') <= ?"
                 params.append(date_to_str)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
