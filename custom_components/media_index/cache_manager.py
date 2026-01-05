@@ -794,6 +794,8 @@ class CacheManager:
         file_type: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        timestamp_from: int | None = None,
+        timestamp_to: int | None = None,
         anniversary_month: str | None = None,
         anniversary_day: str | None = None,
         anniversary_window_days: int = 0,
@@ -813,6 +815,8 @@ class CacheManager:
             file_type: Filter by file type ('image' or 'video')
             date_from: Filter by date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
             date_to: Filter by date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            timestamp_from: Filter by timestamp >= this value (Unix timestamp in seconds). Takes precedence over date_from.
+            timestamp_to: Filter by timestamp <= this value (Unix timestamp in seconds). Takes precedence over date_to.
             anniversary_month: Filter by month (1-12) or "*" for any month across years
             anniversary_day: Filter by day (1-31) or "*" for any day across years
             anniversary_window_days: Expand anniversary match by ±N days (default 0)
@@ -874,9 +878,11 @@ class CacheManager:
             if favorites_only:
                 new_files_query += " AND e.is_favorited = 1"
             
-            # Date filtering: null means "no limit" in that direction
-            # Use EXIF date_taken if available, fallback to created_time
-            if date_from is not None:
+            # Timestamp filtering (takes precedence over date filtering)
+            if timestamp_from is not None:
+                new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                params.append(timestamp_from)
+            elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
                 try:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
@@ -889,7 +895,10 @@ class CacheManager:
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
-            if date_to is not None:
+            if timestamp_to is not None:
+                new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                params.append(timestamp_to)
+            elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
                 try:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
