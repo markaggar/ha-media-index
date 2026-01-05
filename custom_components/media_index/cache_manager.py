@@ -1040,9 +1040,11 @@ class CacheManager:
             if favorites_only:
                 query += " AND e.is_favorited = 1"
             
-            # Date filtering: null means "no limit" in that direction
-            # Use EXIF date_taken if available, fallback to created_time
-            if date_from is not None:
+            # Timestamp filtering (takes precedence over date filtering)
+            if timestamp_from is not None:
+                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                params.append(timestamp_from)
+            elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
                 try:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
@@ -1055,7 +1057,10 @@ class CacheManager:
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
-            if date_to is not None:
+            if timestamp_to is not None:
+                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                params.append(timestamp_to)
+            elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
                 try:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
