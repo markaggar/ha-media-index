@@ -980,6 +980,8 @@ class CacheManager:
                     file_type=file_type,
                     date_from=date_from,
                     date_to=date_to,
+                    timestamp_from=timestamp_from,
+                    timestamp_to=timestamp_to,
                     anniversary_month=anniversary_month,
                     anniversary_day=anniversary_day,
                     anniversary_window_days=anniversary_window_days,
@@ -1129,6 +1131,8 @@ class CacheManager:
         file_type: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        timestamp_from: int | None = None,
+        timestamp_to: int | None = None,
         anniversary_month: str | None = None,
         anniversary_day: str | None = None,
         anniversary_window_days: int = 0,
@@ -1144,6 +1148,8 @@ class CacheManager:
             file_type: Optional file type filter
             date_from: Optional date from filter
             date_to: Optional date to filter
+            timestamp_from: Optional timestamp from filter (takes precedence)
+            timestamp_to: Optional timestamp to filter (takes precedence)
             anniversary_month: Filter by month (1-12) or "*" for any
             anniversary_day: Filter by day (1-31) or "*" for any
             anniversary_window_days: Expand anniversary match by ±N days
