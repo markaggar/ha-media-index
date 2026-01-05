@@ -87,11 +87,10 @@ class ExifParser:
         """
         try:
             # EXIF datetime format: "2023:10:26 14:30:45"
-            # EXIF DateTimeOriginal has NO timezone info, so we treat it as UTC
-            # This ensures consistent behavior across photos taken in different timezones
+            # EXIF DateTimeOriginal represents camera's LOCAL time (no timezone info)
+            # We interpret it as naive datetime in server's timezone, then convert to UTC timestamp
             dt = datetime.strptime(exif_datetime, "%Y:%m:%d %H:%M:%S")
-            dt_utc = dt.replace(tzinfo=timezone.utc)
-            return int(dt_utc.timestamp())
+            return int(dt.timestamp())
         except (ValueError, TypeError) as err:
             _LOGGER.debug("Failed to parse EXIF datetime '%s': %s", exif_datetime, err)
             return None

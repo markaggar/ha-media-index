@@ -89,9 +89,7 @@ class VideoMetadataParser:
                                 if value:
                                     parsed_dt = VideoMetadataParser._parse_mediainfo_datetime(value)
                                     if parsed_dt:
-                                        # If datetime is naive (no timezone), treat as UTC for consistency
-                                        if parsed_dt.tzinfo is None:
-                                            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                                        # Naive datetime uses local timezone (same as EXIF parser)
                                         result['date_taken'] = int(parsed_dt.timestamp())
                                         break
                             
@@ -223,8 +221,7 @@ class VideoMetadataParser:
                                 date_str = match.group(1).replace('-', '')
                                 dt = datetime.strptime(date_str, '%Y%m%d')
                             
-                            # Treat filename datetime as UTC for consistency
-                            dt = dt.replace(tzinfo=timezone.utc)
+                            # Naive datetime uses local timezone (same as EXIF parser)
                             result['date_taken'] = int(dt.timestamp())
                             _LOGGER.debug(f"[VIDEO] Extracted date from filename: {dt}")
                             break
@@ -301,9 +298,7 @@ class VideoMetadataParser:
         
         for fmt in date_formats:
             try:
-                dt = datetime.strptime(date_str, fmt)
-                # Treat as UTC if no timezone info
-                return dt.replace(tzinfo=timezone.utc)
+                return datetime.strptime(date_str, fmt)
             except ValueError:
                 continue
         
