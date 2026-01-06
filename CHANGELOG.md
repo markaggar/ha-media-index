@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-01-05
+
+### Added
+
+- **Timestamp Filtering for Same Date / Through the Years Features**
+  - Added `timestamp_from` and `timestamp_to` parameters to `get_random_items` service
+  - Unix timestamp filtering takes precedence over `date_from`/`date_to` for exact day matching
+  - Enables timezone-independent filtering for "Same Date" feature in Media Card v5.6.7+
+  - Fixes bug where date-based filtering would return photos spanning 2-3 days due to timezone conversion
+
+### Fixed
+
+- **Timestamp Comparison Logic**: Fixed standard random mode and priority new files mode to use direct timestamp comparison
+  - Modified `get_random_files()` to check `timestamp_from`/`timestamp_to` before `date_from`/`date_to`
+  - Removed timezone conversion errors by comparing Unix timestamps directly
+  - Updated `_get_random_excluding()` helper to accept and use timestamp parameters
+  - Ensures "Same Date" queries return only photos from the requested calendar day
+
+### Technical
+
+- Both standard random mode (priority_new_files=False) and priority new files mode (priority_new_files=True) now support timestamp filtering
+- Timestamp parameters are optional and backward compatible with existing date string parameters
+- Database column used: `COALESCE(e.date_taken, m.created_time)` for timestamp comparison
+
 ## [1.5.8]
 
 ### Fixed

@@ -220,6 +220,9 @@ const wsResponse = await this.hass.callWS({
     favorites_only: false,         // Optional: only favorited files (default: false)
     date_from: '2024-01-01',       // Optional: ISO date string
     date_to: '2024-12-31',         // Optional: ISO date string
+    // v1.5.9: Unix timestamp filtering (takes precedence over date_from/date_to)
+    // timestamp_from: 1577260800,  // Optional: Unix timestamp (seconds since epoch)
+    // timestamp_to: 1577347199,    // Optional: Unix timestamp (seconds since epoch)
     priority_new_files: true,      // v1.3: Prioritize recent files
     new_files_threshold_seconds: 2592000,  // v1.3: 30 days threshold
     // v1.5: Anniversary mode for "Through the Years" feature
