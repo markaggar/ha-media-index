@@ -89,6 +89,7 @@ class VideoMetadataParser:
                                 if value:
                                     parsed_dt = VideoMetadataParser._parse_mediainfo_datetime(value)
                                     if parsed_dt:
+                                        # Naive datetime uses local timezone (same as EXIF parser)
                                         result['date_taken'] = int(parsed_dt.timestamp())
                                         break
                             
@@ -220,6 +221,7 @@ class VideoMetadataParser:
                                 date_str = match.group(1).replace('-', '')
                                 dt = datetime.strptime(date_str, '%Y%m%d')
                             
+                            # Naive datetime uses local timezone (same as EXIF parser)
                             result['date_taken'] = int(dt.timestamp())
                             _LOGGER.debug(f"[VIDEO] Extracted date from filename: {dt}")
                             break

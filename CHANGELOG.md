@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-01-07
+
+### Fixed
+
+- **Same Date / Through the Years Date Accuracy**: Fixed timezone bug causing photos from wrong dates
+  - Added `timestamp_from` and `timestamp_to` parameters to `get_random_items` service
+  - Unix timestamps enable exact calendar day matching without timezone conversion
+  - Requires Media Card v5.6.7 or later to use this fix
+  - Backward compatible: existing `date_from`/`date_to` parameters still work
+
 ## [1.5.8]
 
 ### Fixed

@@ -110,6 +110,8 @@ Get random media files from the index (used by Media Card).
 - `favorites_only` (optional, default: false): Only return files marked as favorites
 - `date_from` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no lower limit"
 - `date_to` (optional): ISO date string (YYYY-MM-DD) - uses EXIF date_taken if available, falls back to created_time. Null means "no upper limit"
+- `timestamp_from` (optional, v1.5.9+): Unix timestamp (seconds since epoch) - takes precedence over date_from for exact time filtering
+- `timestamp_to` (optional, v1.5.9+): Unix timestamp (seconds since epoch) - takes precedence over date_to for exact time filtering
 - `anniversary_month` (optional): Month for anniversary matching (`"01"`-`"12"` or `"*"` for any month)
 - `anniversary_day` (optional): Day for anniversary matching (`"01"`-`"31"` or `"*"` for any day)
 - `anniversary_window_days` (optional, default: 0): Expand ±N days around target date for anniversary matching
@@ -157,6 +159,14 @@ data:
   count: 20
   date_from: "2023-01-01"
   date_to: "2023-12-31"
+
+# Timestamp range: files from specific day (v1.5.9+)
+# Example: 2019-12-25 00:00:00 to 23:59:59 PST
+service: media_index.get_random_items
+data:
+  count: 20
+  timestamp_from: 1577260800
+  timestamp_to: 1577347199
 
 # "This month or earlier" (date_from null = no lower limit)
 service: media_index.get_random_items
