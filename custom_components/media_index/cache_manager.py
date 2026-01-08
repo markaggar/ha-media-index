@@ -2,7 +2,7 @@
 import aiosqlite
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 
@@ -888,8 +888,8 @@ class CacheManager:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
-                    # Convert to Unix timestamp (start of UTC day)
-                    timestamp = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                    # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
+                    timestamp = int(dt.timestamp())
                     new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
@@ -904,8 +904,8 @@ class CacheManager:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
-                    # Convert to Unix timestamp (end of UTC day = start of next day minus 1)
-                    timestamp = int((dt.replace(tzinfo=timezone.utc) + timedelta(days=1)).timestamp()) - 1
+                    # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
+                    timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
                     new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
@@ -1050,8 +1050,8 @@ class CacheManager:
                     date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
-                    # Convert to Unix timestamp (start of UTC day)
-                    timestamp = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                    # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
+                    timestamp = int(dt.timestamp())
                     query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
@@ -1066,8 +1066,8 @@ class CacheManager:
                     date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                     # Proper validation with datetime.strptime - prevents invalid dates like 2024-13-45
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
-                    # Convert to Unix timestamp (end of UTC day = start of next day minus 1)
-                    timestamp = int((dt.replace(tzinfo=timezone.utc) + timedelta(days=1)).timestamp()) - 1
+                    # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
+                    timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
                     query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
@@ -1211,27 +1211,32 @@ class CacheManager:
         if favorites_only:
             query += " AND e.is_favorited = 1"
         
-        # Date filtering: null means "no limit" in that direction
-        # Use EXIF date_taken if available, fallback to created_time
-        if date_from is not None:
+        # Timestamp filtering (takes precedence over date filtering)
+        if timestamp_from is not None:
+            query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+            params.append(timestamp_from)
+        elif date_from is not None:
             # Validate date_from is a valid date string
             try:
                 date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
                 dt = datetime.strptime(date_from_str, "%Y-%m-%d")
-                # Convert to Unix timestamp (start of UTC day)
-                timestamp = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
+                timestamp = int(dt.timestamp())
                 query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
         
-        if date_to is not None:
+        if timestamp_to is not None:
+            query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+            params.append(timestamp_to)
+        elif date_to is not None:
             # Validate date_to is a valid date string
             try:
                 date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
                 dt = datetime.strptime(date_to_str, "%Y-%m-%d")
-                # Convert to Unix timestamp (end of UTC day = start of next day minus 1)
-                timestamp = int((dt.replace(tzinfo=timezone.utc) + timedelta(days=1)).timestamp()) - 1
+                # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
+                timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
                 query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:

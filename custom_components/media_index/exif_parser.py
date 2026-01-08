@@ -1,6 +1,6 @@
 """EXIF data extraction for media files."""
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -88,7 +88,8 @@ class ExifParser:
         try:
             # EXIF datetime format: "2023:10:26 14:30:45"
             # EXIF DateTimeOriginal represents camera's LOCAL time (no timezone info)
-            # We interpret it as naive datetime in server's timezone, then convert to UTC timestamp
+            # We parse it as a naive datetime; .timestamp() interprets it in the server's local
+            # timezone and returns a Unix timestamp (seconds since epoch, timezone-agnostic).
             dt = datetime.strptime(exif_datetime, "%Y:%m:%d %H:%M:%S")
             return int(dt.timestamp())
         except (ValueError, TypeError) as err:
