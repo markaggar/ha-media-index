@@ -87,6 +87,10 @@ SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
     vol.Optional("file_type"): vol.In(["image", "video"]),
     vol.Optional("order_by", default="date_taken"): vol.In(["date_taken", "filename", "path", "modified_time"]),
     vol.Optional("order_direction", default="desc"): vol.In(["asc", "desc"]),
+    # v1.5.10: Compound cursor pagination - (after_value, after_id) for stable pagination
+    # Accept any type - we'll convert to appropriate type in the service handler
+    vol.Optional("after_value"): vol.Any(vol.Coerce(int), vol.Coerce(float), cv.string),
+    vol.Optional("after_id"): vol.Coerce(int),  # Secondary cursor for tie-breaking
 }, extra=vol.ALLOW_EXTRA)
 
 # Note: SERVICE_GET_FILE_METADATA_SCHEMA defined later after _validate_path_or_uri function
@@ -835,7 +839,24 @@ def _register_services(hass: HomeAssistant):
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
         config = hass.data[DOMAIN][entry_id]["config"]
         
-        # Debug logging removed to prevent excessive logs during slideshow
+        # Get cursor parameters and ensure proper types
+        after_value = call.data.get("after_value")
+        after_id = call.data.get("after_id")
+        order_by = call.data.get("order_by", "date_taken")
+        
+        # Convert after_value to proper type based on order_by field
+        # For date/time fields, convert to numeric; for string fields, keep as string
+        if after_value is not None and order_by in ("date_taken", "modified_time"):
+            try:
+                after_value = int(after_value)
+            except (ValueError, TypeError):
+                try:
+                    after_value = float(after_value)
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Could not convert after_value to numeric: %s", after_value)
+        
+        _LOGGER.warning("get_ordered_files: after_value=%s (type=%s), after_id=%s", 
+                       after_value, type(after_value).__name__, after_id)
         
         # Convert folder URI to path if needed
         folder = call.data.get("folder")
@@ -855,8 +876,10 @@ def _register_services(hass: HomeAssistant):
             folder=folder,
             recursive=call.data.get("recursive", True),
             file_type=call.data.get("file_type"),
-            order_by=call.data.get("order_by", "date_taken"),
+            order_by=order_by,
             order_direction=call.data.get("order_direction", "desc"),
+            after_value=after_value,  # v1.5.10: Cursor-based pagination (properly typed)
+            after_id=after_id,  # Secondary cursor for tie-breaking
         )
         
         # Add media_source_uri to each item if configured

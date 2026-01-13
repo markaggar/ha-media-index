@@ -1295,7 +1295,9 @@ class CacheManager:
         recursive: bool = True,
         file_type: str | None = None,
         order_by: str = "date_taken",
-        order_direction: str = "desc"
+        order_direction: str = "desc",
+        after_value: str | int | float | None = None,
+        after_id: int | None = None,
     ) -> list[dict]:
         """Get ordered media files with configurable sort field and direction.
         
@@ -1308,6 +1310,8 @@ class CacheManager:
             file_type: Filter by file type ('image' or 'video')
             order_by: Sort field - 'date_taken', 'filename', 'path', 'modified_time'
             order_direction: Sort direction - 'asc' or 'desc'
+            after_value: Cursor for pagination - return items AFTER this value
+            after_id: Secondary cursor (rowid) for tie-breaking when values are equal
             
         Returns:
             List of ordered file records with metadata
@@ -1359,8 +1363,34 @@ class CacheManager:
             "desc": "DESC",
         }
         sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
-        direction = allowed_directions.get(order_direction.lower(), "ASC")
-        query += f" ORDER BY {sort_field} {direction} LIMIT ?"
+        direction = allowed_directions.get(order_direction.lower(), "DESC")
+        
+        # TEMP DEBUG
+        _LOGGER.warning("get_ordered_files: after_value=%s (type=%s), after_id=%s (type=%s)", 
+                       after_value, type(after_value).__name__, after_id, type(after_id).__name__)
+        
+        # v1.5.10: Compound cursor pagination using (sort_field, id)
+        # This handles cases where multiple files have the same date_taken
+        if after_value is not None:
+            if after_id is not None:
+                # Compound cursor: items where (sort_field < after_value) OR (sort_field = after_value AND id < after_id)
+                # This ensures we skip items we've already seen even with duplicate sort values
+                if direction == "DESC":
+                    query += f" AND (({sort_field} < ?) OR ({sort_field} = ? AND m.id < ?))"
+                    params.extend([after_value, after_value, after_id])
+                else:
+                    query += f" AND (({sort_field} > ?) OR ({sort_field} = ? AND m.id > ?))"
+                    params.extend([after_value, after_value, after_id])
+            else:
+                # Fallback to simple cursor if no after_id provided
+                if direction == "DESC":
+                    query += f" AND {sort_field} < ?"
+                else:
+                    query += f" AND {sort_field} > ?"
+                params.append(after_value)
+        
+        # Order by sort_field, then by id for stable ordering
+        query += f" ORDER BY {sort_field} {direction}, m.id {direction} LIMIT ?"
         params.append(int(count))
         
         # Debug logging removed to prevent excessive logs during slideshow
