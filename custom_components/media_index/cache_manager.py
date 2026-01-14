@@ -1311,7 +1311,7 @@ class CacheManager:
             order_by: Sort field - 'date_taken', 'filename', 'path', 'modified_time'
             order_direction: Sort direction - 'asc' or 'desc'
             after_value: Cursor for pagination - return items AFTER this value
-            after_id: Secondary cursor (rowid) for tie-breaking when values are equal
+            after_id: Secondary cursor (file ID) for tie-breaking when values are equal
             
         Returns:
             List of ordered file records with metadata
@@ -1364,10 +1364,6 @@ class CacheManager:
         }
         sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
         direction = allowed_directions.get(order_direction.lower(), "DESC")
-        
-        # TEMP DEBUG
-        _LOGGER.warning("get_ordered_files: after_value=%s (type=%s), after_id=%s (type=%s)", 
-                       after_value, type(after_value).__name__, after_id, type(after_id).__name__)
         
         # v1.5.10: Compound cursor pagination using (sort_field, id)
         # This handles cases where multiple files have the same date_taken

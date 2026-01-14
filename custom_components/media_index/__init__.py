@@ -88,8 +88,8 @@ SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
     vol.Optional("order_by", default="date_taken"): vol.In(["date_taken", "filename", "path", "modified_time"]),
     vol.Optional("order_direction", default="desc"): vol.In(["asc", "desc"]),
     # v1.5.10: Compound cursor pagination - (after_value, after_id) for stable pagination
-    # Accept any type - we'll convert to appropriate type in the service handler
-    vol.Optional("after_value"): vol.Any(vol.Coerce(int), vol.Coerce(float), cv.string),
+    # Accept any type without coercion - type conversion handled in service handler based on order_by
+    vol.Optional("after_value"): vol.Any(int, float, str),
     vol.Optional("after_id"): vol.Coerce(int),  # Secondary cursor for tie-breaking
 }, extra=vol.ALLOW_EXTRA)
 
@@ -855,7 +855,7 @@ def _register_services(hass: HomeAssistant):
                 except (ValueError, TypeError):
                     _LOGGER.warning("Could not convert after_value to numeric: %s", after_value)
         
-        _LOGGER.warning("get_ordered_files: after_value=%s (type=%s), after_id=%s", 
+        _LOGGER.debug("get_ordered_files: after_value=%s (type=%s), after_id=%s", 
                        after_value, type(after_value).__name__, after_id)
         
         # Convert folder URI to path if needed
