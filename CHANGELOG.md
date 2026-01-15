@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **File Watcher Log Spam**: Reduced per-file logging to DEBUG level to prevent "logging too frequently" warnings
+  - Changed individual file add/update/remove logs from INFO to DEBUG level
+  - Batch summary logs remain at INFO level (e.g., "Processing 50 new files")
+  - Prevents hundreds of log messages when moving large numbers of files into watched folders
+
 - **Pagination with Duplicate Sort Values**: Files with identical `date_taken` would sometimes be returned multiple times
   - Root cause: Simple cursor `after_value` couldn't distinguish between files with same date
   - Fix: Added `m.id` to ORDER BY clause for deterministic ordering: `ORDER BY sort_field DESC, m.id DESC`
