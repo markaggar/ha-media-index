@@ -70,13 +70,19 @@ Version numbers are only updated when creating official releases. Changes accumu
 - `file_size` (INTEGER)
 - `width`, `height` (INTEGER)
 - `duration` (REAL) - video duration in seconds
-- `date_taken` (TEXT) - ISO 8601 timestamp
-- `modified_time` (INTEGER) - Unix timestamp
-- `is_favorited` (INTEGER) - 0/1 boolean
+- `file_type` (TEXT) - image/video file type
+- `created_time` (INTEGER) - Unix timestamp when file was created
+- `modified_time` (INTEGER) - Unix timestamp when file was last modified
+- `orientation` (INTEGER) - EXIF orientation value or normalized rotation
+- `last_scanned` (INTEGER) - Unix timestamp when this file was last scanned
+- `rating` (INTEGER) - 0-5 stars
+- `rated_at` (INTEGER) - Unix timestamp when rating was last updated
 
 **exif_data table:**
 - `id` (INTEGER PRIMARY KEY)
 - `file_id` (INTEGER FOREIGN KEY → media_files.id ON DELETE CASCADE)
+- `date_taken` (TEXT) - ISO 8601 timestamp when the media was captured
+- `is_favorited` (INTEGER) - 0/1 boolean (default 0)
 - `make`, `model`, `lens_model` (TEXT)
 - `iso`, `aperture`, `focal_length`, `shutter_speed` (TEXT/REAL)
 - `latitude`, `longitude` (REAL)
