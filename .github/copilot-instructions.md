@@ -83,13 +83,12 @@ Version numbers are only updated when creating official releases. Changes accumu
 - `file_id` (INTEGER FOREIGN KEY → media_files.id ON DELETE CASCADE)
 - `date_taken` (TEXT) - ISO 8601 timestamp when the media was captured
 - `is_favorited` (INTEGER) - 0/1 boolean (default 0)
-- `make`, `model`, `lens_model` (TEXT)
+- `camera_make`, `camera_model` (TEXT)
 - `iso`, `aperture`, `focal_length`, `shutter_speed` (TEXT/REAL)
-- `latitude`, `longitude` (REAL)
-- `city`, `state`, `country` (TEXT) - geocoded location
+- `latitude`, `longitude`, `altitude` (REAL)
+- `location_name`, `location_city`, `location_state`, `location_country` (TEXT) - geocoded location
+- `focal_length_35mm`, `exposure_compensation`, `metering_mode`, `white_balance`, `flash` (TEXT)
 - `rating` (INTEGER) - 0-5 stars
-- `burst_favorites` (TEXT) - JSON array
-- `burst_count` (INTEGER)
 
 ## Development Guidelines
 
