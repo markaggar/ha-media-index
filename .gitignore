@@ -45,6 +45,7 @@ htmlcov/
 # Local development
 *.local
 .env
+LOCAL_SETUP.md
 scripts/
 test_*.py
 dev-docs/
