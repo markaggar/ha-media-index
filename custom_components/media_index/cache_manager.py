@@ -880,7 +880,7 @@ class CacheManager:
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                new_files_query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -890,13 +890,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                new_files_query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -906,7 +906,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1042,7 +1042,7 @@ class CacheManager:
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -1052,13 +1052,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -1068,7 +1068,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1213,7 +1213,7 @@ class CacheManager:
         
         # Timestamp filtering (takes precedence over date filtering)
         if timestamp_from is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+            query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
             params.append(timestamp_from)
         elif date_from is not None:
             # Validate date_from is a valid date string
@@ -1222,13 +1222,13 @@ class CacheManager:
                 dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                 timestamp = int(dt.timestamp())
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) >= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
         
         if timestamp_to is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+            query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
             params.append(timestamp_to)
         elif date_to is not None:
             # Validate date_to is a valid date string
@@ -1237,7 +1237,7 @@ class CacheManager:
                 dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                 timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, unixepoch(m.created_time)) <= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1353,7 +1353,7 @@ class CacheManager:
         
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
-            "date_taken": "COALESCE(e.date_taken, m.modified_time)",
+            "date_taken": "COALESCE(e.date_taken, unixepoch(m.modified_time))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
             "modified_time": "m.modified_time",
@@ -1362,7 +1362,7 @@ class CacheManager:
             "asc": "ASC",
             "desc": "DESC",
         }
-        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
+        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, unixepoch(m.modified_time))")
         direction = allowed_directions.get(order_direction.lower(), "DESC")
         
         # v1.5.10: Compound cursor pagination using (sort_field, id)
