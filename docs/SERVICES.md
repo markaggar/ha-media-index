@@ -323,33 +323,42 @@ data:
 
 **New in v1.6.0** - Scan the entire library and write burst group membership to every file. Run this once (or after bulk imports) to enable database-level burst filtering in `get_random_items`.
 
-**Parameters:** None
+**Parameters:**
+- `folder` (optional): Limit the scan to files under this folder prefix. Omit to scan the entire library.
+- `time_window_seconds` (optional, default: 10): Maximum gap in seconds between consecutive photos in the same burst group.
+- `location_tolerance_meters` (optional, default: 50): GPS radius in metres for grouping photos at the same location. Use 0 to disable GPS sub-clustering.
+- `min_group_size` (optional, default: 2): Minimum number of photos required to be considered a burst group.
+- `overwrite_existing` (optional, default: true): If true, recalculate burst data for all matching files. If false, skip files that already have `burst_count` set.
 
 **Returns:**
-- `status`: `"ok"` or `"error"`
+- `status`: `"success"` or `"error"`
 - `groups_found`: Number of distinct burst groups identified
 - `files_updated`: Number of files written with burst metadata
 - `files_skipped`: Files already up-to-date (no change needed)
 - `errors`: Number of files that could not be written
 
 **How it works:**
-- Sorts all indexed files by `date_taken` / `created_time` (O(n log n))
-- Walks the sorted list grouping photos within a 15-second sliding window
-- Sub-clusters by GPS proximity (20m) when coordinates are available
-- Writes `burst_group_id` (UUID), `burst_count`, and `burst_favorites` to `exif_data` in 500-row batches
-- Idempotent: safe to run multiple times; already-correct rows are skipped
+- Sorts all indexed files by `date_taken` (O(n log n))
+- Walks the sorted list grouping consecutive photos within the configured time window
+- Sub-clusters by GPS proximity when coordinates are available for all group members
+- Writes `burst_count` and `burst_favorites` to `exif_data` in 500-row batches
+- Idempotent: safe to run multiple times; already-correct rows are skipped when `overwrite_existing: false`
 
 **Example:**
 ```yaml
 service: media_index.index_burst_groups
 target:
   entity_id: sensor.media_index_photos_total_files
+data:
+  time_window_seconds: 10
+  location_tolerance_meters: 50
+  min_group_size: 2
 ```
 
 **Response example:**
 ```json
 {
-  "status": "ok",
+  "status": "success",
   "groups_found": 842,
   "files_updated": 3107,
   "files_skipped": 41823,

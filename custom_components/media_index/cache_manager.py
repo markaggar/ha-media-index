@@ -887,14 +887,14 @@ class CacheManager:
                 # Items in a burst group with no favorites (burst_favorites IS NULL) are also
                 # returned normally (nothing better to show).
                 new_files_query += (
-                    " AND NOT (e.burst_count > 0"
+                    " AND NOT (COALESCE(e.burst_count, 0) > 0"
                     " AND COALESCE(e.is_favorited, 0) = 0"
                     " AND e.burst_favorites IS NOT NULL)"
                 )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -904,13 +904,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -920,7 +920,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -937,11 +937,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -951,7 +951,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1063,14 +1063,14 @@ class CacheManager:
                 # Items in a burst group with no favorites (burst_favorites IS NULL) are also
                 # returned normally (nothing better to show).
                 query += (
-                    " AND NOT (e.burst_count > 0"
+                    " AND NOT (COALESCE(e.burst_count, 0) > 0"
                     " AND COALESCE(e.is_favorited, 0) = 0"
                     " AND e.burst_favorites IS NOT NULL)"
                 )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -1080,13 +1080,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -1096,7 +1096,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1113,11 +1113,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1127,7 +1127,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1242,14 +1242,14 @@ class CacheManager:
 
         if auto_select_burst_favorite:
             query += (
-                " AND NOT (e.burst_count > 0"
+                " AND NOT (COALESCE(e.burst_count, 0) > 0"
                 " AND COALESCE(e.is_favorited, 0) = 0"
                 " AND e.burst_favorites IS NOT NULL)"
             )
         
         # Timestamp filtering (takes precedence over date filtering)
         if timestamp_from is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
             params.append(timestamp_from)
         elif date_from is not None:
             # Validate date_from is a valid date string
@@ -1258,13 +1258,13 @@ class CacheManager:
                 dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                 timestamp = int(dt.timestamp())
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
         
         if timestamp_to is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
             params.append(timestamp_to)
         elif date_to is not None:
             # Validate date_to is a valid date string
@@ -1273,7 +1273,7 @@ class CacheManager:
                 dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                 timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1289,10 +1289,10 @@ class CacheManager:
                     if anniversary_window_days > 0:
                         day_min = max(1, day_int - anniversary_window_days)
                         day_max = min(31, day_int + anniversary_window_days)
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                         params.extend([day_min, day_max])
                     else:
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(day_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1301,7 +1301,7 @@ class CacheManager:
             if anniversary_month and anniversary_month != "*":
                 try:
                     month_int = int(anniversary_month)
-                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                     params.append(month_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1389,7 +1389,7 @@ class CacheManager:
         
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
-            "date_taken": "COALESCE(e.date_taken, m.modified_time)",
+            "date_taken": "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
             "modified_time": "m.modified_time",
@@ -1398,7 +1398,7 @@ class CacheManager:
             "asc": "ASC",
             "desc": "DESC",
         }
-        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
+        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))")
         direction = allowed_directions.get(order_direction.lower(), "DESC")
         
         # v1.5.10: Compound cursor pagination using (sort_field, id)
@@ -1523,7 +1523,7 @@ class CacheManager:
 
         reference_latitude = exif_data.get('latitude')
         reference_longitude = exif_data.get('longitude')
-        use_location = bool(reference_latitude and reference_longitude and prefer_same_location)
+        use_location = bool(reference_latitude is not None and reference_longitude is not None and prefer_same_location)
 
         _LOGGER.info(
             "Burst detection: ref_date=%s, location_present=%s, window=%ds",

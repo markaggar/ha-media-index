@@ -1807,8 +1807,8 @@ def _register_services(hass: HomeAssistant):
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
             vol.Optional("time_window_seconds", default=10): cv.positive_int,
-            vol.Optional("location_tolerance_meters", default=50): cv.positive_int,
-            vol.Optional("min_group_size", default=2): cv.positive_int,
+            vol.Optional("location_tolerance_meters", default=50): cv.non_negative_int,
+            vol.Optional("min_group_size", default=2): vol.All(cv.positive_int, vol.Range(min=2)),
             vol.Optional("overwrite_existing", default=True): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,

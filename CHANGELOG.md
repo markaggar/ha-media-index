@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.0] 2026-04-12
+## [1.6.0] - 2026-04-12
 
 ### Added
 
@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Date Filtering Now Works for Files Without EXIF (`get_random_items`, `get_ordered_files`)**: Fixed silent type mismatch that caused date filters to be ignored when `date_taken` is NULL
+  - Root cause (PR #25 by kamiyo): `m.created_time` and `m.modified_time` are stored as ISO strings, but `e.date_taken` is a Unix integer. When `e.date_taken` is NULL, `COALESCE` fell back to the ISO string which SQLite silently coerced to 0 — so comparisons against Unix timestamps always failed
+  - Fix: wrap fallback columns with `unixepoch()` to convert ISO strings to integers before comparison
+  - Also fixes `strftime()` anniversary filters for the same reason (month/day matching was broken for files without EXIF)
+
+- **Date Fallback Now Uses Earliest of Created/Modified Time**: When `date_taken` EXIF is absent, filtering and sorting now use `MIN(unixepoch(m.created_time), unixepoch(m.modified_time))` instead of only `m.created_time`
+  - Fixes issue #24 (reported by kamiyo): copying files resets `created_time` to "now" on most OS/filesystems, causing old photos to appear as new — `modified_time` typically survives file copies and better reflects the original capture date
+  - Using the earlier of the two timestamps is the most conservative heuristic: whichever one was not reset by the copy is more likely the original date
+  - Applies to all date range filters, anniversary filters, and `date_taken` sort order in `get_ordered_files`
+
 - **`get_burst_photos` Iterative Flood-Fill**: Replaced naive single-pass grouping with an iterative convergence algorithm so all members of a burst group get the same result regardless of which photo is used as the reference
   - Previously, a 3-photo burst could return 2 members when queried from photo A and 3 members when queried from photo B (depending on which pair was within the time window of the reference)
   - Now iterates until the full connected set stabilises (typically 1–2 passes on real bursts)
@@ -31,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.10] - 2026-01-12
 
-## Added
+### Added
 
 - **Compound Cursor Pagination for `get_ordered_files`**: Fixes duplicate results when files share the same date_taken
   - Added `after_id` parameter (secondary cursor) for tie-breaking when sort values are equal
