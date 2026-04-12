@@ -1811,7 +1811,33 @@ class CacheManager:
         )
 
         # ------------------------------------------------------------------
-        # 1. Load all candidate rows (one query, sorted)
+        # 1. Clear stale burst data for all in-scope files (overwrite mode only)
+        #
+        # Without this, files previously in a large group (e.g. 15 s window) keep
+        # their old burst_count when re-indexed with a narrower window — causing the
+        # metadata header to show the old count while the live panel query finds fewer.
+        # ------------------------------------------------------------------
+        if overwrite_existing:
+            clear_where = (
+                "WHERE file_id IN ("
+                "  SELECT e.file_id FROM exif_data e"
+                "  JOIN media_files m ON m.id = e.file_id"
+                "  WHERE e.date_taken IS NOT NULL"
+            )
+            clear_params: list = []
+            if folder:
+                clear_where += "  AND m.folder LIKE ?"
+                clear_params.append(folder.rstrip("/") + "%")
+            clear_where += ")"
+            await self._db.execute(
+                f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL {clear_where}",
+                clear_params,
+            )
+            await self._db.commit()
+            _LOGGER.debug("index_burst_groups: cleared stale burst data for scope (folder=%s)", folder or "all")
+
+        # ------------------------------------------------------------------
+        # 2. Load all candidate rows (one query, sorted)
         # ------------------------------------------------------------------
         where_clause = "WHERE e.date_taken IS NOT NULL"
         params: list = []
