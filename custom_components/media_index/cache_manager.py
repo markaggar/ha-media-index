@@ -1448,14 +1448,23 @@ class CacheManager:
         sort_order: str = "time_asc"
     ) -> list[dict]:
         """Get burst photos taken near the same time as a reference photo.
-        
+
+        Uses iterative range expansion to find the complete burst group regardless
+        of which photo in the burst is used as the reference. After each query the
+        search range is widened to [min_found - window, max_found + window] and the
+        query is repeated until no new paths appear. This guarantees that a photo
+        near either edge of the burst still returns the full group.
+
+        The seconds_offset column and GPS filter are always anchored to the original
+        reference photo so results remain comparable across different reference choices.
+
         Args:
             reference_path: Path to the reference photo
-            time_window_seconds: Time window in seconds (default: 10)
-            prefer_same_location: Prioritize photos at same GPS location (default: True)
+            time_window_seconds: Maximum gap in seconds between consecutive burst photos (default: 10)
+            prefer_same_location: Only include photos at the same GPS location (default: True)
             location_tolerance_meters: GPS tolerance in meters (default: 50)
             sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
-            
+
         Returns:
             List of burst photos with metadata
         """
@@ -1464,29 +1473,32 @@ class CacheManager:
         if not reference_file:
             _LOGGER.error("Reference file not found: %s", reference_path)
             return []
-        
+
         # Extract EXIF data from nested object
         exif_data = reference_file.get('exif', {})
         if not exif_data:
             _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
             return []
-        
+
         reference_date_taken = exif_data.get('date_taken')
         if not reference_date_taken:
             _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
             return []
-        
+
         reference_latitude = exif_data.get('latitude')
         reference_longitude = exif_data.get('longitude')
-        
+        use_location = bool(reference_latitude and reference_longitude and prefer_same_location)
+
         _LOGGER.info(
             "Burst detection: ref_date=%s, location_present=%s, window=%ds",
-            reference_date_taken, reference_latitude is not None and reference_longitude is not None, time_window_seconds
+            reference_date_taken, use_location, time_window_seconds
         )
-        
-        # Build query
-        query = """
-            SELECT 
+
+        # Build base SELECT. seconds_offset is always relative to the original reference
+        # so the caller gets consistent timing deltas regardless of which iteration found
+        # a given photo.
+        base_query = """
+            SELECT
                 m.id,
                 m.path,
                 m.filename,
@@ -1506,63 +1518,92 @@ class CacheManager:
                 e.rating,
                 (e.date_taken - ?) AS seconds_offset
         """
-        
-        # Add GPS distance calculation if location available
-        if reference_latitude and reference_longitude and prefer_same_location:
-            query += f""",
+
+        if use_location:
+            base_query += """,
                 (6371000 * acos(
                     cos(radians(?)) * cos(radians(e.latitude)) *
                     cos(radians(e.longitude) - radians(?)) +
                     sin(radians(?)) * sin(radians(e.latitude))
                 )) AS distance_meters
             """
-        
-        query += """
+
+        base_query += """
             FROM media_files m
             JOIN exif_data e ON m.id = e.file_id
             WHERE e.date_taken IS NOT NULL
-              AND ABS(e.date_taken - ?) <= ?
+              AND e.date_taken BETWEEN ? AND ?
         """
-        
-        # Add location filter if applicable
-        if reference_latitude and reference_longitude and prefer_same_location:
-            query += f"""
+
+        if use_location:
+            base_query += """
               AND (6371000 * acos(
                   cos(radians(?)) * cos(radians(e.latitude)) *
                   cos(radians(e.longitude) - radians(?)) +
                   sin(radians(?)) * sin(radians(e.latitude))
               )) <= ?
             """
-        
-        # Add sorting
+
         if sort_order == "time_desc":
-            query += " ORDER BY e.date_taken DESC"
+            base_query += " ORDER BY e.date_taken DESC"
         else:
-            query += " ORDER BY e.date_taken ASC"
-        
-        # Build parameters
-        params = [reference_date_taken]
-        
-        if reference_latitude and reference_longitude and prefer_same_location:
-            params.extend([reference_latitude, reference_longitude, reference_latitude])
-        
-        params.extend([reference_date_taken, time_window_seconds])
-        
-        if reference_latitude and reference_longitude and prefer_same_location:
-            params.extend([
-                reference_latitude,
-                reference_longitude,
-                reference_latitude,
-                location_tolerance_meters
-            ])
-        
-        # Execute query
-        _LOGGER.debug("Burst query params: %s", params)
-        async with self._db.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-        
-        _LOGGER.debug("Burst query returned %d rows", len(rows))
-        return [dict(row) for row in rows]
+            base_query += " ORDER BY e.date_taken ASC"
+
+        # Iterative expansion: start with ±window around the reference timestamp,
+        # then widen to cover the earliest/latest found photo each time new photos appear.
+        range_min = reference_date_taken - time_window_seconds
+        range_max = reference_date_taken + time_window_seconds
+        found_paths: set = set()
+        result_rows: list = []
+        max_iterations = 20
+
+        for iteration in range(max_iterations):
+            # seconds_offset anchor is always the original reference
+            params = [reference_date_taken]
+            if use_location:
+                params.extend([reference_latitude, reference_longitude, reference_latitude])
+            params.extend([range_min, range_max])
+            if use_location:
+                params.extend([
+                    reference_latitude,
+                    reference_longitude,
+                    reference_latitude,
+                    location_tolerance_meters
+                ])
+
+            _LOGGER.debug(
+                "Burst query iteration %d: range=[%s, %s]",
+                iteration + 1, range_min, range_max
+            )
+            async with self._db.execute(base_query, params) as cursor:
+                rows = await cursor.fetchall()
+
+            row_dicts = [dict(row) for row in rows]
+            new_paths = {r['path'] for r in row_dicts} - found_paths
+
+            if not new_paths:
+                _LOGGER.debug(
+                    "Burst detection converged after %d iteration(s), %d photos",
+                    iteration + 1, len(result_rows)
+                )
+                break
+
+            # Absorb the newly found photos and widen the search range
+            found_paths |= new_paths
+            result_rows = row_dicts
+
+            all_times = [r['date_taken'] for r in row_dicts if r.get('date_taken')]
+            if all_times:
+                range_min = min(all_times) - time_window_seconds
+                range_max = max(all_times) + time_window_seconds
+        else:
+            _LOGGER.warning(
+                "Burst detection hit max iterations (%d) for %s",
+                max_iterations, reference_path
+            )
+
+        _LOGGER.debug("Burst query returned %d rows (stable)", len(result_rows))
+        return result_rows
     
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.
@@ -1682,6 +1723,233 @@ class CacheManager:
         
         return updated_count
     
+    async def index_burst_groups(
+        self,
+        folder: str | None = None,
+        time_window_seconds: int = 10,
+        location_tolerance_meters: int = 50,
+        min_group_size: int = 2,
+        overwrite_existing: bool = True,
+        progress_callback=None,
+    ) -> dict:
+        """Scan the library and write burst_count / burst_favorites to every file in every
+        detected burst group.
+
+        Algorithm (O(n log n)):
+          1. Fetch all rows with date_taken (+ optional GPS), ordered by date_taken ASC.
+          2. Walk the sorted list: consecutive photos within time_window_seconds form a group.
+             When the gap exceeds the window, the current group is finalised.
+          3. GPS sub-clustering: when GPS is present for every member of a group, split the
+             group into GPS clusters (using the same location_tolerance_meters radius).
+             Photos without GPS are placed in their own temporal-only sub-group.
+          4. Groups with fewer than min_group_size photos are ignored.
+          5. bust_count = total members; burst_favorites = JSON list of filenames of
+             members where is_favorited = 1.
+          6. Write results in batches of 500 to keep memory flat over large libraries.
+
+        Scale notes:
+          - Designed for 200 K+ item libraries.
+          - Uses a single sorted SELECT with no per-file round-trips.
+          - Commit frequency: every 500 rows updated to avoid holding a large transaction.
+
+        Args:
+            folder:                   Only process files under this folder prefix (None = all).
+            time_window_seconds:      Maximum gap between consecutive burst photos (default 10 s).
+            location_tolerance_meters: GPS cluster radius in metres (default 50 m).
+            min_group_size:           Minimum photos to constitute a burst group (default 2).
+            overwrite_existing:       If False, skip files that already have burst_count set.
+            progress_callback:        Optional async callable(groups_found, files_processed)
+                                      called every 500 files processed.
+
+        Returns:
+            Dict with keys: groups_found, files_updated, files_skipped, errors
+        """
+        import json
+        import math
+
+        _LOGGER.info(
+            "index_burst_groups: starting (folder=%s, window=%ds, location=%dm, min=%d)",
+            folder or "all", time_window_seconds, location_tolerance_meters, min_group_size
+        )
+
+        # ------------------------------------------------------------------
+        # 1. Load all candidate rows (one query, sorted)
+        # ------------------------------------------------------------------
+        where_clause = "WHERE e.date_taken IS NOT NULL"
+        params: list = []
+        if folder:
+            where_clause += " AND m.folder LIKE ?"
+            params.append(folder.rstrip("/") + "%")
+        if not overwrite_existing:
+            where_clause += " AND (e.burst_count IS NULL OR e.burst_count = 0)"
+
+        query = f"""
+            SELECT
+                m.path,
+                m.filename,
+                e.date_taken,
+                e.latitude,
+                e.longitude,
+                e.is_favorited,
+                e.file_id
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            {where_clause}
+            ORDER BY e.date_taken ASC
+        """
+
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+
+        total_rows = len(rows)
+        _LOGGER.info("index_burst_groups: loaded %d candidate rows", total_rows)
+
+        if total_rows == 0:
+            return {"groups_found": 0, "files_updated": 0, "files_skipped": 0, "errors": 0}
+
+        # ------------------------------------------------------------------
+        # 2. Temporal grouping (sorted walk)
+        # ------------------------------------------------------------------
+        def _gps_distance_m(lat1, lon1, lat2, lon2):
+            """Haversine distance in metres between two GPS points."""
+            R = 6_371_000
+            φ1, φ2 = math.radians(lat1), math.radians(lat2)
+            dφ = math.radians(lat2 - lat1)
+            dλ = math.radians(lon2 - lon1)
+            a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+            return R * 2 * math.asin(math.sqrt(a))
+
+        def _gps_cluster(members):
+            """Split a temporal group into GPS sub-clusters.
+
+            Members without GPS are put in a single no-GPS cluster.
+            Members with GPS are greedily assigned to the first existing cluster whose
+            centroid is within location_tolerance_meters, otherwise start a new cluster.
+            Returns a list of member-lists.
+            """
+            gps_clusters: list[list] = []   # [[row, ...], ...]
+            centroids: list[tuple] = []      # [(lat, lon), ...]
+            no_gps: list = []
+
+            for row in members:
+                lat, lon = row["latitude"], row["longitude"]
+                if lat is None or lon is None:
+                    no_gps.append(row)
+                    continue
+
+                assigned = False
+                for idx, (clat, clon) in enumerate(centroids):
+                    if _gps_distance_m(lat, lon, clat, clon) <= location_tolerance_meters:
+                        gps_clusters[idx].append(row)
+                        # Update centroid as running mean
+                        n = len(gps_clusters[idx])
+                        centroids[idx] = (
+                            clat + (lat - clat) / n,
+                            clon + (lon - clon) / n,
+                        )
+                        assigned = True
+                        break
+                if not assigned:
+                    gps_clusters.append([row])
+                    centroids.append((lat, lon))
+
+            result = [c for c in gps_clusters if c]  # non-empty GPS clusters
+            if no_gps:
+                result.append(no_gps)
+            return result
+
+        # Group rows into temporal bursts
+        temporal_groups: list[list] = []
+        current_group: list = [dict(rows[0])]
+
+        for i in range(1, len(rows)):
+            row = dict(rows[i])
+            prev_time = current_group[-1]["date_taken"]
+            curr_time = row["date_taken"]
+            if curr_time is not None and prev_time is not None and (curr_time - prev_time) <= time_window_seconds:
+                current_group.append(row)
+            else:
+                temporal_groups.append(current_group)
+                current_group = [row]
+        temporal_groups.append(current_group)
+
+        # Sub-cluster each temporal group by GPS
+        burst_groups: list[list] = []
+        for tg in temporal_groups:
+            if any(r.get("latitude") is not None for r in tg):
+                for cluster in _gps_cluster(tg):
+                    burst_groups.append(cluster)
+            else:
+                burst_groups.append(tg)
+
+        # Filter by minimum size
+        burst_groups = [g for g in burst_groups if len(g) >= min_group_size]
+
+        _LOGGER.info("index_burst_groups: found %d burst groups (>= %d photos)", len(burst_groups), min_group_size)
+
+        # ------------------------------------------------------------------
+        # 3. Write results in batches
+        # ------------------------------------------------------------------
+        groups_found = len(burst_groups)
+        files_updated = 0
+        files_skipped = 0
+        errors = 0
+        batch_writes: list[tuple] = []  # (favorites_json, burst_count, path)
+
+        for group in burst_groups:
+            burst_count = len(group)
+            favorited_filenames = [
+                r["filename"] for r in group if r.get("is_favorited")
+            ]
+            favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
+
+            for row in group:
+                batch_writes.append((favorites_json, burst_count, row["path"]))
+
+        # Execute in batches of 500
+        BATCH_SIZE = 500
+        for batch_start in range(0, len(batch_writes), BATCH_SIZE):
+            batch = batch_writes[batch_start: batch_start + BATCH_SIZE]
+            for favorites_json, burst_count, path in batch:
+                try:
+                    async with self._db.execute(
+                        """UPDATE exif_data
+                               SET burst_favorites = ?, burst_count = ?
+                             WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
+                        (favorites_json, burst_count, path),
+                    ) as cursor:
+                        if cursor.rowcount > 0:
+                            files_updated += 1
+                        else:
+                            files_skipped += 1
+                except Exception as exc:
+                    _LOGGER.warning("index_burst_groups: error updating %s: %s", path, exc)
+                    errors += 1
+
+            await self._db.commit()
+
+            processed_so_far = min(batch_start + BATCH_SIZE, len(batch_writes))
+            _LOGGER.debug(
+                "index_burst_groups: committed batch (%d/%d rows written)",
+                processed_so_far, len(batch_writes)
+            )
+            if progress_callback:
+                try:
+                    await progress_callback(groups_found, processed_so_far)
+                except Exception:
+                    pass
+
+        _LOGGER.info(
+            "index_burst_groups: done — groups=%d, updated=%d, skipped=%d, errors=%d",
+            groups_found, files_updated, files_skipped, errors,
+        )
+        return {
+            "groups_found": groups_found,
+            "files_updated": files_updated,
+            "files_skipped": files_skipped,
+            "errors": errors,
+        }
+
     async def delete_file(self, file_path: str) -> bool:
         """Delete file record from database.
         

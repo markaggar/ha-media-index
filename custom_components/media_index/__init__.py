@@ -45,6 +45,7 @@ from .const import (
     SERVICE_RESTORE_EDITED_FILES,
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
+    SERVICE_INDEX_BURST_GROUPS,
     SERVICE_INSTALL_LIBMEDIAINFO,
     SERVICE_CHECK_FILE_EXISTS,
 )
@@ -1557,7 +1558,48 @@ def _register_services(hass: HomeAssistant):
                 "status": "error",
                 "error": str(e)
             }
-    
+
+    async def handle_index_burst_groups(call):
+        """Handle index_burst_groups service call.
+
+        Scans the entire indexed library (or a sub-folder) and writes burst_count /
+        burst_favorites to every file that belongs to a detected burst group.  Designed
+        for large collections (200 K+ items) — uses a single sorted query then an
+        in-process walk rather than per-file DB round-trips.
+        """
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        folder              = call.data.get("folder", None)
+        time_window         = call.data.get("time_window_seconds", 10)
+        location_tolerance  = call.data.get("location_tolerance_meters", 50)
+        min_group_size      = call.data.get("min_group_size", 2)
+        overwrite_existing  = call.data.get("overwrite_existing", True)
+
+        _LOGGER.info(
+            "index_burst_groups service called: folder=%s, window=%ds, min_size=%d, overwrite=%s",
+            folder or "all", time_window, min_group_size, overwrite_existing,
+        )
+
+        try:
+            result = await cache_manager.index_burst_groups(
+                folder=folder,
+                time_window_seconds=time_window,
+                location_tolerance_meters=location_tolerance,
+                min_group_size=min_group_size,
+                overwrite_existing=overwrite_existing,
+            )
+            return {
+                "status": "success",
+                **result,
+            }
+        except Exception as e:
+            _LOGGER.error("Error in index_burst_groups service: %s", e)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
@@ -1755,7 +1797,21 @@ def _register_services(hass: HomeAssistant):
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
-    
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_INDEX_BURST_GROUPS,
+        handle_index_burst_groups,
+        schema=vol.Schema({
+            vol.Optional("folder"): cv.string,
+            vol.Optional("time_window_seconds", default=10): cv.positive_int,
+            vol.Optional("location_tolerance_meters", default=50): cv.positive_int,
+            vol.Optional("min_group_size", default=2): cv.positive_int,
+            vol.Optional("overwrite_existing", default=True): cv.boolean,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.ONLY,
+    )
+
     _LOGGER.info("Media Index services registered")
 
 
