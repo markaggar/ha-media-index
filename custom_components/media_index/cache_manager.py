@@ -1772,21 +1772,23 @@ class CacheManager:
         detected burst group.
 
         Algorithm (O(n log n)):
-          1. Fetch all rows with date_taken (+ optional GPS), ordered by date_taken ASC.
-          2. Walk the sorted list: consecutive photos within time_window_seconds form a group.
-             When the gap exceeds the window, the current group is finalised.
-          3. GPS sub-clustering: when GPS is present for every member of a group, split the
+          1. Stream rows with date_taken (+ optional GPS), ordered by date_taken ASC,
+             fetching FETCH_SIZE rows at a time — never loading the full library into memory.
+          2. Walk the stream: consecutive photos within time_window_seconds form a group.
+             When the gap exceeds the window, the current group is finalised immediately.
+          3. GPS sub-clustering: when GPS is present for any member of a group, split the
              group into GPS clusters (using the same location_tolerance_meters radius).
              Photos without GPS are placed in their own temporal-only sub-group.
           4. Groups with fewer than min_group_size photos are ignored.
-          5. bust_count = total members; burst_favorites = JSON list of filenames of
+          5. burst_count = total members; burst_favorites = JSON list of filenames of
              members where is_favorited = 1.
-          6. Write results in batches of 500 to keep memory flat over large libraries.
+          6. Write results in batches of WRITE_BATCH_SIZE to keep transactions short.
 
         Scale notes:
           - Designed for 200 K+ item libraries.
           - Uses a single sorted SELECT with no per-file round-trips.
-          - Commit frequency: every 500 rows updated to avoid holding a large transaction.
+          - Memory footprint: O(burst_size) — at most one temporal group in memory at a time.
+          - Commit frequency: every WRITE_BATCH_SIZE rows updated to avoid large transactions.
 
         Args:
             folder:                   Only process files under this folder prefix (None = all).
@@ -1834,17 +1836,10 @@ class CacheManager:
             ORDER BY e.date_taken ASC
         """
 
-        async with self._db.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-
-        total_rows = len(rows)
-        _LOGGER.info("index_burst_groups: loaded %d candidate rows", total_rows)
-
-        if total_rows == 0:
-            return {"groups_found": 0, "files_updated": 0, "files_skipped": 0, "errors": 0}
+        total_rows_seen = 0
 
         # ------------------------------------------------------------------
-        # 2. Temporal grouping (sorted walk)
+        # 2. Helper: GPS sub-clustering
         # ------------------------------------------------------------------
         def _gps_distance_m(lat1, lon1, lat2, lon2):
             """Haversine distance in metres between two GPS points."""
@@ -1863,8 +1858,8 @@ class CacheManager:
             centroid is within location_tolerance_meters, otherwise start a new cluster.
             Returns a list of member-lists.
             """
-            gps_clusters: list[list] = []   # [[row, ...], ...]
-            centroids: list[tuple] = []      # [(lat, lon), ...]
+            gps_clusters: list[list] = []
+            centroids: list[tuple] = []
             no_gps: list = []
 
             for row in members:
@@ -1877,7 +1872,6 @@ class CacheManager:
                 for idx, (clat, clon) in enumerate(centroids):
                     if _gps_distance_m(lat, lon, clat, clon) <= location_tolerance_meters:
                         gps_clusters[idx].append(row)
-                        # Update centroid as running mean
                         n = len(gps_clusters[idx])
                         centroids[idx] = (
                             clat + (lat - clat) / n,
@@ -1889,91 +1883,102 @@ class CacheManager:
                     gps_clusters.append([row])
                     centroids.append((lat, lon))
 
-            result = [c for c in gps_clusters if c]  # non-empty GPS clusters
+            result = [c for c in gps_clusters if c]
             if no_gps:
                 result.append(no_gps)
             return result
 
-        # Group rows into temporal bursts
-        temporal_groups: list[list] = []
-        current_group: list = [dict(rows[0])]
-
-        for i in range(1, len(rows)):
-            row = dict(rows[i])
-            prev_time = current_group[-1]["date_taken"]
-            curr_time = row["date_taken"]
-            if curr_time is not None and prev_time is not None and (curr_time - prev_time) <= time_window_seconds:
-                current_group.append(row)
-            else:
-                temporal_groups.append(current_group)
-                current_group = [row]
-        temporal_groups.append(current_group)
-
-        # Sub-cluster each temporal group by GPS
-        burst_groups: list[list] = []
-        for tg in temporal_groups:
-            if any(r.get("latitude") is not None for r in tg):
-                for cluster in _gps_cluster(tg):
-                    burst_groups.append(cluster)
-            else:
-                burst_groups.append(tg)
-
-        # Filter by minimum size
-        burst_groups = [g for g in burst_groups if len(g) >= min_group_size]
-
-        _LOGGER.info("index_burst_groups: found %d burst groups (>= %d photos)", len(burst_groups), min_group_size)
-
         # ------------------------------------------------------------------
-        # 3. Write results in batches
+        # 3. Streaming walk + incremental writes
         # ------------------------------------------------------------------
-        groups_found = len(burst_groups)
+        FETCH_SIZE = 1000      # rows fetched from DB per round-trip
+        WRITE_BATCH_SIZE = 500 # rows per commit
+
+        groups_found = 0
         files_updated = 0
         files_skipped = 0
         errors = 0
-        batch_writes: list[tuple] = []  # (favorites_json, burst_count, path)
+        pending_writes: list[tuple] = []  # (favorites_json, burst_count, path)
+        current_group: list = []
 
-        for group in burst_groups:
-            burst_count = len(group)
-            favorited_filenames = [
-                r["filename"] for r in group if r.get("is_favorited")
-            ]
-            favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
-
-            for row in group:
-                batch_writes.append((favorites_json, burst_count, row["path"]))
-
-        # Execute in batches of 500
-        BATCH_SIZE = 500
-        for batch_start in range(0, len(batch_writes), BATCH_SIZE):
-            batch = batch_writes[batch_start: batch_start + BATCH_SIZE]
-            for favorites_json, burst_count, path in batch:
+        async def _flush_writes():
+            nonlocal files_updated, files_skipped, errors
+            for favorites_json, burst_count, path in pending_writes:
                 try:
                     async with self._db.execute(
                         """UPDATE exif_data
                                SET burst_favorites = ?, burst_count = ?
                              WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
                         (favorites_json, burst_count, path),
-                    ) as cursor:
-                        if cursor.rowcount > 0:
+                    ) as upd_cursor:
+                        if upd_cursor.rowcount > 0:
                             files_updated += 1
                         else:
                             files_skipped += 1
                 except Exception as exc:
                     _LOGGER.warning("index_burst_groups: error updating %s: %s", path, exc)
                     errors += 1
-
             await self._db.commit()
+            pending_writes.clear()
 
-            processed_so_far = min(batch_start + BATCH_SIZE, len(batch_writes))
-            _LOGGER.debug(
-                "index_burst_groups: committed batch (%d/%d rows written)",
-                processed_so_far, len(batch_writes)
-            )
-            if progress_callback:
-                try:
-                    await progress_callback(groups_found, processed_so_far)
-                except Exception:
-                    pass
+        async def _commit_group(members):
+            nonlocal groups_found
+            clusters = _gps_cluster(members) if any(
+                r.get("latitude") is not None for r in members
+            ) else [members]
+
+            for cluster in clusters:
+                if len(cluster) < min_group_size:
+                    continue
+                groups_found += 1
+                burst_count = len(cluster)
+                favorited_filenames = [r["filename"] for r in cluster if r.get("is_favorited")]
+                favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
+                for row in cluster:
+                    pending_writes.append((favorites_json, burst_count, row["path"]))
+
+            if len(pending_writes) >= WRITE_BATCH_SIZE:
+                await _flush_writes()
+                _LOGGER.debug(
+                    "index_burst_groups: wrote batch — groups=%d, updated=%d",
+                    groups_found, files_updated,
+                )
+                if progress_callback:
+                    try:
+                        await progress_callback(groups_found, files_updated + files_skipped)
+                    except Exception:
+                        pass
+
+        async with self._db.execute(query, params) as cursor:
+            while True:
+                raw_batch = await cursor.fetchmany(FETCH_SIZE)
+                if not raw_batch:
+                    break
+                total_rows_seen += len(raw_batch)
+                for raw_row in raw_batch:
+                    row = dict(raw_row)
+                    if current_group:
+                        prev_time = current_group[-1]["date_taken"]
+                        curr_time = row["date_taken"]
+                        if (
+                            curr_time is not None
+                            and prev_time is not None
+                            and (curr_time - prev_time) <= time_window_seconds
+                        ):
+                            current_group.append(row)
+                        else:
+                            await _commit_group(current_group)
+                            current_group = [row]
+                    else:
+                        current_group = [row]
+
+        # Finalise the last group and flush any remaining writes
+        if current_group:
+            await _commit_group(current_group)
+        if pending_writes:
+            await _flush_writes()
+
+        _LOGGER.info("index_burst_groups: processed %d rows", total_rows_seen)
 
         _LOGGER.info(
             "index_burst_groups: done — groups=%d, updated=%d, skipped=%d, errors=%d",

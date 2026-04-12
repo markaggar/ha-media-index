@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
-  - Writes results in 500-row commit batches to stay memory-efficient on large libraries
+  - Streams rows from the database in 1000-row batches — memory footprint is O(burst_size), not O(library_size); safe for 200K+ libraries
+  - Writes results in 500-row commit batches
   - Returns `{groups_found, files_updated, files_skipped, errors}` for progress feedback
   - Run this once (or after bulk imports) to enable backend-level burst filtering in `get_random_items`
   - See `media_index.index_burst_groups` in the services documentation

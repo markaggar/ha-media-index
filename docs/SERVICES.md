@@ -338,10 +338,10 @@ data:
 - `errors`: Number of files that could not be written
 
 **How it works:**
-- Sorts all indexed files by `date_taken` (O(n log n))
-- Walks the sorted list grouping consecutive photos within the configured time window
-- Sub-clusters by GPS proximity when coordinates are available for all group members
-- Writes `burst_count` and `burst_favorites` to `exif_data` in 500-row batches
+- Streams all indexed files sorted by `date_taken` using 1000-row fetch batches — memory footprint is O(burst_size), not O(library_size)
+- Groups consecutive photos within the configured time window; each group is processed and written immediately when complete
+- Sub-clusters by GPS proximity when coordinates are available for group members
+- Writes `burst_count` and `burst_favorites` to `exif_data` in 500-row commit batches
 - Idempotent: safe to run multiple times; already-correct rows are skipped when `overwrite_existing: false`
 
 **Example:**
