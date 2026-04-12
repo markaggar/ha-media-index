@@ -4,7 +4,7 @@ A Home Assistant custom integration for indexing and querying media files with E
 
 ## Project Overview
 
-**Current Version**: v1.5.10
+**Current Version**: v1.6.0
 **Status**: Production ready
 **Type**: Home Assistant Custom Integration (Python)
 
@@ -319,7 +319,7 @@ Located in `scripts/`:
 ### When Making Changes
 
 1. Make code changes
-2. Update CHANGELOG.md under **current version** (e.g., v1.5.10)
+2. Update CHANGELOG.md under **current version** (e.g., v1.6.0)
 3. Add to appropriate section (Added/Changed/Fixed)
 4. **DO NOT** update version in manifest.json
 5. Commit with descriptive message

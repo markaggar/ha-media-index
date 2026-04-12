@@ -321,7 +321,7 @@ data:
 
 ### `media_index.index_burst_groups`
 
-**New in v1.5.10** - Scan the entire library and write burst group membership to every file. Run this once (or after bulk imports) to enable database-level burst filtering in `get_random_items`.
+**New in v1.6.0** - Scan the entire library and write burst group membership to every file. Run this once (or after bulk imports) to enable database-level burst filtering in `get_random_items`.
 
 **Parameters:** None
 
@@ -576,13 +576,13 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 - **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v1.3)
 - **`get_related_files`** (v1.5+) - Powers "Burst Review" feature for reviewing rapid-fire photos
 - **`update_burst_metadata`** (v1.5+) - Saves burst review favorites to file metadata
-- **`index_burst_groups`** (v1.5.10+) - One-shot library scan that enables backend-level burst filtering in `get_random_items`
+- **`index_burst_groups`** (v1.6.0+) - One-shot library scan that enables backend-level burst filtering in `get_random_items`
 - **`mark_favorite`** - Called when clicking favorite button on Media Card
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
 
-## v1.5.10 Enhancements Summary
+## v1.6.0 Enhancements Summary
 
 ### New Services
 - ✨ **`index_burst_groups`** - Full-library burst indexer; enables SQL-level filtering of non-favorite burst members

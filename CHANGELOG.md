@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.10] - 2026-01-12
+## [1.6.0] 2026-04-12
 
 ### Added
 
-- **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_group_id` and `burst_count` to every file in each burst group
-  - Groups photos by time proximity (15s window) and optional GPS sub-clustering (20m tolerance)
+- **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
+  - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
   - Writes results in 500-row commit batches to stay memory-efficient on large libraries
   - Returns `{groups_found, files_updated, files_skipped, errors}` for progress feedback
   - Run this once (or after bulk imports) to enable backend-level burst filtering in `get_random_items`
@@ -18,8 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`auto_select_burst_favorite` Parameter for `get_random_items`**: When `true`, the SQL query excludes non-favorite burst members whose group has at least one indexed favorite
   - Filtering is done in the database before results are sent to the card — no client-side splicing or timers
-  - Only applies to files where `burst_group_id` is set (i.e., `index_burst_groups` has run); non-indexed files are returned normally
-  - Used automatically by Media Card v5.9.1+ when `auto_select_burst_favorite: true` is configured
+  - Only applies to files where `burst_count` is set (i.e., `index_burst_groups` has run); non-indexed files are returned normally
+  - Used automatically by Media Card v5.9.0+ when `auto_select_burst_favorite: true` is configured
+
+
+### Fixed
+
+- **`get_burst_photos` Iterative Flood-Fill**: Replaced naive single-pass grouping with an iterative convergence algorithm so all members of a burst group get the same result regardless of which photo is used as the reference
+  - Previously, a 3-photo burst could return 2 members when queried from photo A and 3 members when queried from photo B (depending on which pair was within the time window of the reference)
+  - Now iterates until the full connected set stabilises (typically 1–2 passes on real bursts)
+
+
+## [1.5.10] - 2026-01-12
+
+## Added
 
 - **Compound Cursor Pagination for `get_ordered_files`**: Fixes duplicate results when files share the same date_taken
   - Added `after_id` parameter (secondary cursor) for tie-breaking when sort values are equal
@@ -28,10 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Backward compatible: `after_value` still works alone, `after_id` is optional
 
 ### Fixed
-
-- **`get_burst_photos` Iterative Flood-Fill**: Replaced naive single-pass grouping with an iterative convergence algorithm so all members of a burst group get the same result regardless of which photo is used as the reference
-  - Previously, a 3-photo burst could return 2 members when queried from photo A and 3 members when queried from photo B (depending on which pair was within the time window of the reference)
-  - Now iterates until the full connected set stabilises (typically 1–2 passes on real bursts)
 
 - **File Watcher Log Spam**: Reduced per-file logging to DEBUG level to prevent "logging too frequently" warnings
   - Changed individual file add/update/remove logs from INFO to DEBUG level
@@ -42,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Root cause: Simple cursor `after_value` couldn't distinguish between files with same date
   - Fix: Added `m.id` to ORDER BY clause for deterministic ordering: `ORDER BY sort_field DESC, m.id DESC`
   - Compound cursor allows advancing past all items with same date value
+
 
 ## [1.5.9] - 2026-01-07
 
