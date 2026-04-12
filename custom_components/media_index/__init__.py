@@ -79,6 +79,7 @@ SERVICE_GET_RANDOM_ITEMS_SCHEMA = vol.Schema({
     vol.Optional("anniversary_window_days", default=0): cv.positive_int,
     vol.Optional("priority_new_files", default=False): cv.boolean,
     vol.Optional("new_files_threshold_seconds", default=3600): cv.positive_int,
+    vol.Optional("auto_select_burst_favorite", default=False): cv.boolean,
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
@@ -810,6 +811,7 @@ def _register_services(hass: HomeAssistant):
             favorites_only=call.data.get("favorites_only", False),
             priority_new_files=call.data.get("priority_new_files", False),
             new_files_threshold_seconds=call.data.get("new_files_threshold_seconds", 3600),
+            auto_select_burst_favorite=call.data.get("auto_select_burst_favorite", False),
         )
         
         # Add media_source_uri to each item if configured

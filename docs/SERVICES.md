@@ -116,7 +116,8 @@ Get random media files from the index (used by Media Card).
 - `anniversary_day` (optional): Day for anniversary matching (`"01"`-`"31"` or `"*"` for any day)
 - `anniversary_window_days` (optional, default: 0): Expand ±N days around target date for anniversary matching
 - `priority_new_files` (optional, default: false): Prioritize recently scanned files
-- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files (1 hour) 
+- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files (1 hour)
+- `auto_select_burst_favorite` (optional, default: false): Exclude non-favorite images from burst groups that have an indexed favorite (requires `index_burst_groups` to have been run first)
 
 **Returns:** List of media items with metadata (includes `media_source_uri` in v1.4+)
 
@@ -317,6 +318,46 @@ data:
   media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
   prefer_same_location: false
 ```
+
+### `media_index.index_burst_groups`
+
+**New in v1.5.10** - Scan the entire library and write burst group membership to every file. Run this once (or after bulk imports) to enable database-level burst filtering in `get_random_items`.
+
+**Parameters:** None
+
+**Returns:**
+- `status`: `"ok"` or `"error"`
+- `groups_found`: Number of distinct burst groups identified
+- `files_updated`: Number of files written with burst metadata
+- `files_skipped`: Files already up-to-date (no change needed)
+- `errors`: Number of files that could not be written
+
+**How it works:**
+- Sorts all indexed files by `date_taken` / `created_time` (O(n log n))
+- Walks the sorted list grouping photos within a 15-second sliding window
+- Sub-clusters by GPS proximity (20m) when coordinates are available
+- Writes `burst_group_id` (UUID), `burst_count`, and `burst_favorites` to `exif_data` in 500-row batches
+- Idempotent: safe to run multiple times; already-correct rows are skipped
+
+**Example:**
+```yaml
+service: media_index.index_burst_groups
+target:
+  entity_id: sensor.media_index_photos_total_files
+```
+
+**Response example:**
+```json
+{
+  "status": "ok",
+  "groups_found": 842,
+  "files_updated": 3107,
+  "files_skipped": 41823,
+  "errors": 0
+}
+```
+
+**Tip:** After running `index_burst_groups`, enable `auto_select_burst_favorite: true` in Media Card and the card will automatically receive only favorited images from burst groups — no 2-second timers, no client-side splicing.
 
 ### `media_index.update_burst_metadata`
 
@@ -535,10 +576,22 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 - **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v1.3)
 - **`get_related_files`** (v1.5+) - Powers "Burst Review" feature for reviewing rapid-fire photos
 - **`update_burst_metadata`** (v1.5+) - Saves burst review favorites to file metadata
+- **`index_burst_groups`** (v1.5.10+) - One-shot library scan that enables backend-level burst filtering in `get_random_items`
 - **`mark_favorite`** - Called when clicking favorite button on Media Card
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
+
+## v1.5.10 Enhancements Summary
+
+### New Services
+- ✨ **`index_burst_groups`** - Full-library burst indexer; enables SQL-level filtering of non-favorite burst members
+
+### Enhanced Services
+- 🌟 **`get_random_items`** - Added `auto_select_burst_favorite` parameter; non-favorite burst members are excluded in the database query before results reach the card
+
+### Bug Fixes
+- 🐛 **`get_burst_photos`** - Iterative flood-fill for consistent group membership regardless of reference photo
 
 ## v1.5 Enhancements Summary
 

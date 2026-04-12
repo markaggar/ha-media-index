@@ -801,7 +801,8 @@ class CacheManager:
         anniversary_window_days: int = 0,
         favorites_only: bool = False,
         priority_new_files: bool = False,
-        new_files_threshold_seconds: int = 3600
+        new_files_threshold_seconds: int = 3600,
+        auto_select_burst_favorite: bool = False
     ) -> list[dict]:
         """Get random media files with optional filters and EXIF data.
         
@@ -851,6 +852,8 @@ class CacheManager:
                     e.location_state,
                     e.location_country,
                     e.is_favorited,
+                    e.burst_count,
+                    e.burst_favorites,
                     e.camera_make,
                     e.camera_model
                 FROM media_files m
@@ -877,6 +880,17 @@ class CacheManager:
             
             if favorites_only:
                 new_files_query += " AND e.is_favorited = 1"
+
+            if auto_select_burst_favorite:
+                # Exclude non-favorite members of burst groups that have a known favorite.
+                # Items with burst_count IS NULL are not part of any burst — returned as normal.
+                # Items in a burst group with no favorites (burst_favorites IS NULL) are also
+                # returned normally (nothing better to show).
+                new_files_query += (
+                    " AND NOT (e.burst_count > 0"
+                    " AND COALESCE(e.is_favorited, 0) = 0"
+                    " AND e.burst_favorites IS NOT NULL)"
+                )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
@@ -985,7 +999,8 @@ class CacheManager:
                     anniversary_month=anniversary_month,
                     anniversary_day=anniversary_day,
                     anniversary_window_days=anniversary_window_days,
-                    favorites_only=favorites_only
+                    favorites_only=favorites_only,
+                    auto_select_burst_favorite=auto_select_burst_favorite
                 )
                 result = new_files + random_files
             else:
@@ -1012,6 +1027,8 @@ class CacheManager:
                     e.location_state,
                     e.location_country,
                     e.is_favorited,
+                    e.burst_count,
+                    e.burst_favorites,
                     e.camera_make,
                     e.camera_model
                 FROM media_files m
@@ -1039,6 +1056,17 @@ class CacheManager:
             
             if favorites_only:
                 query += " AND e.is_favorited = 1"
+
+            if auto_select_burst_favorite:
+                # Exclude non-favorite members of burst groups that have a known favorite.
+                # Items with burst_count IS NULL are not part of any burst — returned as normal.
+                # Items in a burst group with no favorites (burst_favorites IS NULL) are also
+                # returned normally (nothing better to show).
+                query += (
+                    " AND NOT (e.burst_count > 0"
+                    " AND COALESCE(e.is_favorited, 0) = 0"
+                    " AND e.burst_favorites IS NOT NULL)"
+                )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
@@ -1141,7 +1169,8 @@ class CacheManager:
         anniversary_month: str | None = None,
         anniversary_day: str | None = None,
         anniversary_window_days: int = 0,
-        favorites_only: bool = False
+        favorites_only: bool = False,
+        auto_select_burst_favorite: bool = False
     ) -> list[dict]:
         """Get random files excluding specified IDs (helper for priority queue).
         
@@ -1210,6 +1239,13 @@ class CacheManager:
         
         if favorites_only:
             query += " AND e.is_favorited = 1"
+
+        if auto_select_burst_favorite:
+            query += (
+                " AND NOT (e.burst_count > 0"
+                " AND COALESCE(e.is_favorited, 0) = 0"
+                " AND e.burst_favorites IS NOT NULL)"
+            )
         
         # Timestamp filtering (takes precedence over date filtering)
         if timestamp_from is not None:
