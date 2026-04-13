@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Previously, files previously in a group (e.g. with a 15s window) kept their old `burst_count` when re-indexed with a narrower window (e.g. 3s) — causing the metadata header to show the old count while the live burst panel query found fewer photos
   - Fix: all in-scope `burst_count` and `burst_favorites` values are reset before new groups are written (only when `overwrite_existing=True`)
 
+- **`index_burst_groups` Write Loop Now Uses `executemany` + Direct `file_id`**: Eliminated N subqueries per write batch
+  - Previously each write did `WHERE file_id = (SELECT id FROM media_files WHERE path = ?)` — one extra SELECT per file
+  - Fix: `file_id` (already fetched by the initial query) is stored in the pending-writes list; writes use `executemany` for a single batch statement per 500-row chunk
+  - `files_skipped` in the return value now reflects files not placed in any qualifying group (rather than rows with zero rowcount)
+
 - **Date Filtering Now Works for Files Without EXIF (`get_random_items`, `get_ordered_files`)**: Fixed silent type mismatch that caused date filters to be ignored when `date_taken` is NULL
   - Root cause (PR #25 by kamiyo): `m.created_time` and `m.modified_time` are stored as ISO strings, but `e.date_taken` is a Unix integer. When `e.date_taken` is NULL, `COALESCE` fell back to the ISO string which SQLite silently coerced to 0 — so comparisons against Unix timestamps always failed
   - Fix: wrap fallback columns with `unixepoch()` to convert ISO strings to integers before comparison
