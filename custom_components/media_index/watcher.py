@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, Callable, Awaitable
 from datetime import datetime
 
 from watchdog.observers import Observer
@@ -26,13 +26,23 @@ RATE_LIMIT_DELAY = 0.5  # seconds - delay between processing batches
 class MediaFileEventHandler(FileSystemEventHandler):
     """Handler for media file system events with throttling."""
     
-    def __init__(self, scanner: MediaScanner, cache: CacheManager, hass: HomeAssistant):
+    def __init__(
+        self,
+        scanner: MediaScanner,
+        cache: CacheManager,
+        hass: HomeAssistant,
+        burst_index_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        burst_auto_index_interval_hours: int = 24,
+    ):
         """Initialize the event handler."""
         super().__init__()
         self.scanner = scanner
         self.cache = cache
         self.hass = hass
-        
+        self._burst_index_callback = burst_index_callback
+        self._burst_auto_index_interval_hours = burst_auto_index_interval_hours
+        self._last_burst_index_time: Dict[str, datetime] = {}
+
         # Event queues for batching
         self._pending_new: Dict[str, datetime] = {}  # path -> timestamp
         self._pending_modified: Dict[str, datetime] = {}
@@ -156,6 +166,9 @@ class MediaFileEventHandler(FileSystemEventHandler):
                     # Mark as processing
                     self._is_processing = True
                     
+                    # Track folders touched in this batch for burst indexing
+                    touched_folders: Set[str] = set()
+
                     # Process deletions first (fast, no EXIF extraction)
                     if self._pending_deleted:
                         deleted_batch = list(self._pending_deleted)[:MAX_BATCH_SIZE]
@@ -163,6 +176,7 @@ class MediaFileEventHandler(FileSystemEventHandler):
                         
                         _LOGGER.info("Processing %d deleted files", len(deleted_batch))
                         for file_path in deleted_batch:
+                            touched_folders.add(str(Path(file_path).parent))
                             await self._handle_deleted_file(file_path)
                     
                     # Process new files (expensive: EXIF, geocoding, etc.)
@@ -176,6 +190,7 @@ class MediaFileEventHandler(FileSystemEventHandler):
                         
                         _LOGGER.info("Processing %d new files (batched)", len(new_batch))
                         for file_path, _ in new_batch:
+                            touched_folders.add(str(Path(file_path).parent))
                             await self._handle_new_file(file_path)
                     
                     # Process modified files
@@ -188,8 +203,13 @@ class MediaFileEventHandler(FileSystemEventHandler):
                         
                         _LOGGER.info("Processing %d modified files (batched)", len(mod_batch))
                         for file_path, _ in mod_batch:
+                            touched_folders.add(str(Path(file_path).parent))
                             await self._handle_modified_file(file_path)
                     
+                    # Trigger burst indexing for touched folders (rate-limited per folder)
+                    if self._burst_index_callback and touched_folders:
+                        await self._trigger_burst_index_for_folders(touched_folders)
+
                     # Always yield to event loop after each iteration for consistent rate limiting
                     await asyncio.sleep(RATE_LIMIT_DELAY)
                     
@@ -201,6 +221,20 @@ class MediaFileEventHandler(FileSystemEventHandler):
             self._is_processing = False
             _LOGGER.debug("Batch processor stopped (no pending events)")
     
+    async def _trigger_burst_index_for_folders(self, folders: Set[str]):
+        """Trigger burst indexing for folders that have passed the cooldown interval."""
+        interval_seconds = self._burst_auto_index_interval_hours * 3600
+        now = datetime.now()
+        for folder in folders:
+            last_run = self._last_burst_index_time.get(folder)
+            if last_run is None or (now - last_run).total_seconds() >= interval_seconds:
+                _LOGGER.debug("Triggering burst index for folder: %s", folder)
+                try:
+                    await self._burst_index_callback(folder)
+                    self._last_burst_index_time[folder] = now
+                except Exception as err:
+                    _LOGGER.error("Burst index callback failed for %s: %s", folder, err)
+
     async def _handle_new_file(self, file_path: str):
         """Handle new file addition."""
         try:
@@ -237,13 +271,26 @@ class MediaFileEventHandler(FileSystemEventHandler):
 class MediaWatcher:
     """File system watcher for media folders."""
     
-    def __init__(self, scanner: MediaScanner, cache: CacheManager, hass: HomeAssistant):
+    def __init__(
+        self,
+        scanner: MediaScanner,
+        cache: CacheManager,
+        hass: HomeAssistant,
+        burst_index_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        burst_auto_index_interval_hours: int = 24,
+    ):
         """Initialize the watcher."""
         self.scanner = scanner
         self.cache = cache
         self.hass = hass
         self.observer: Optional[Observer] = None
-        self.event_handler = MediaFileEventHandler(scanner, cache, hass)
+        self.event_handler = MediaFileEventHandler(
+            scanner,
+            cache,
+            hass,
+            burst_index_callback=burst_index_callback,
+            burst_auto_index_interval_hours=burst_auto_index_interval_hours,
+        )
         self._watched_paths = []
         _LOGGER.info("MediaWatcher initialized")
     

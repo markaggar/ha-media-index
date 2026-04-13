@@ -56,6 +56,11 @@ CONF_BATCH_SIZE: Final = "batch_size"
 CONF_CACHE_MAX_AGE: Final = "cache_max_age_days"
 CONF_ENABLE_WATCHER: Final = "enable_watcher"
 CONF_AUTO_INSTALL_LIBMEDIAINFO: Final = "auto_install_libmediainfo"
+CONF_AUTO_BURST_INDEX: Final = "auto_burst_index"
+CONF_BURST_TIME_WINDOW_SECONDS: Final = "burst_time_window_seconds"
+CONF_BURST_LOCATION_TOLERANCE_METERS: Final = "burst_location_tolerance_meters"
+CONF_BURST_AUTO_INDEX_INTERVAL_HOURS: Final = "burst_auto_index_interval_hours"
+CONF_BURST_INDEX_AFTER_SCAN: Final = "burst_index_after_scan"
 
 # Defaults
 DEFAULT_BASE_FOLDER: Final = "/media"
@@ -71,6 +76,11 @@ DEFAULT_BATCH_SIZE: Final = 100
 DEFAULT_CACHE_MAX_AGE: Final = 90
 DEFAULT_ENABLE_WATCHER: Final = True
 DEFAULT_AUTO_INSTALL_LIBMEDIAINFO: Final = False
+DEFAULT_AUTO_BURST_INDEX: Final = False
+DEFAULT_BURST_TIME_WINDOW_SECONDS: Final = 10
+DEFAULT_BURST_LOCATION_TOLERANCE_METERS: Final = 50
+DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS: Final = 24
+DEFAULT_BURST_INDEX_AFTER_SCAN: Final = False
 
 # Installation timeouts and delays
 INSTALL_TIMEOUT_APK: Final = 30  # Reduced from 60 to fail faster when internet is down

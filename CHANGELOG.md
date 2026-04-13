@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Only applies to files where `burst_count` is set (i.e., `index_burst_groups` has run); non-indexed files are returned normally
   - Used automatically by Media Card v5.9.0+ when `auto_select_burst_favorite: true` is configured
 
+- **Automatic Burst Group Indexing**: Five new options flow settings that keep burst group data current without manual service calls
+  - `auto_burst_index` (bool, default `false`): Master enable. When `false`, all automatic burst indexing is disabled
+  - `burst_time_window_seconds` (int, default `10`): Max consecutive-shot gap to consider files part of the same burst
+  - `burst_location_tolerance_meters` (int, default `50`): Max GPS distance between shots in the same burst group
+  - `burst_auto_index_interval_hours` (int, default `24`): Per-folder cooldown for watcher-triggered indexing — prevents re-indexing the same folder more than once per interval even if many files arrive
+  - `burst_index_after_scan` (bool, default `false`): Re-index the full library after each scheduled scan completes (useful for libraries managed via scheduled import scripts)
+  - Watcher trigger: after each batch of file events is processed, affected parent folders are enqueued for burst indexing subject to the cooldown interval
+  - Post-scan trigger: if both `auto_burst_index` and `burst_index_after_scan` are enabled, a full-library `index_burst_groups` call runs at the end of every scheduled scan
+
 
 ### Fixed
 

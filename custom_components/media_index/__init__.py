@@ -25,10 +25,20 @@ from .const import (
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_AUTO_BURST_INDEX,
+    CONF_BURST_TIME_WINDOW_SECONDS,
+    CONF_BURST_LOCATION_TOLERANCE_METERS,
+    CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    CONF_BURST_INDEX_AFTER_SCAN,
     DEFAULT_ENABLE_WATCHER,
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_AUTO_BURST_INDEX,
+    DEFAULT_BURST_TIME_WINDOW_SECONDS,
+    DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
+    DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    DEFAULT_BURST_INDEX_AFTER_SCAN,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
     SCAN_SCHEDULE_STARTUP_ONLY,
@@ -103,9 +113,9 @@ SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
     vol.Required("mode"): vol.In(["burst", "anniversary"]),
     
     # Burst mode parameters
-    vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
+    vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
     vol.Optional("prefer_same_location", default=True): cv.boolean,
-    vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
+    vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
     
     # Anniversary mode parameters
     vol.Optional("window_days", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
@@ -301,6 +311,11 @@ def _setup_scheduled_scan(
     base_folder: str,
     watched_folders: list,
     scan_schedule: str,
+    cache_manager: "CacheManager" = None,
+    auto_burst_index: bool = False,
+    burst_index_after_scan: bool = False,
+    burst_time_window_seconds: int = 10,
+    burst_location_tolerance_meters: int = 50,
 ) -> None:
     """Setup scheduled scanning based on config.
     
@@ -311,6 +326,11 @@ def _setup_scheduled_scan(
         base_folder: Base folder path
         watched_folders: List of watched folders
         scan_schedule: Schedule type (hourly/daily/weekly)
+        cache_manager: CacheManager instance (required for burst indexing)
+        auto_burst_index: Whether auto burst indexing is enabled
+        burst_index_after_scan: Run full-library burst index after each scheduled scan
+        burst_time_window_seconds: Max gap between burst shots (seconds)
+        burst_location_tolerance_meters: Max GPS distance between burst shots (meters)
     """
     async def _scheduled_scan_callback(now):
         """Run scheduled scan if not already running."""
@@ -337,6 +357,18 @@ def _setup_scheduled_scan(
             scan_schedule, entry.title or entry.entry_id, base_folder
         )
         await scanner.scan_folder(base_folder, watched_folders)
+
+        # Optionally re-index burst groups across the full library after scan
+        if auto_burst_index and burst_index_after_scan and cache_manager is not None:
+            _LOGGER.info("Running full-library burst group index after scheduled scan")
+            try:
+                await cache_manager.index_burst_groups(
+                    time_window_seconds=burst_time_window_seconds,
+                    location_tolerance_meters=burst_location_tolerance_meters,
+                    overwrite_existing=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Post-scan burst index failed: %s", err)
     
     # Determine scan interval
     if scan_schedule == SCAN_SCHEDULE_HOURLY:
@@ -579,7 +611,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     
     # Initialize watcher
-    watcher = MediaWatcher(scanner, cache_manager, hass)
+    auto_burst_index = config.get(CONF_AUTO_BURST_INDEX, DEFAULT_AUTO_BURST_INDEX)
+    burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+    burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+    burst_auto_index_interval_hours = config.get(CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS)
+
+    burst_index_callback = None
+    if auto_burst_index:
+        async def _burst_index_callback(folder: str) -> None:
+            """Index burst groups for a specific folder."""
+            _LOGGER.debug("Auto burst index triggered for folder: %s", folder)
+            await cache_manager.index_burst_groups(
+                folder=folder,
+                time_window_seconds=burst_time_window_seconds,
+                location_tolerance_meters=burst_location_tolerance_meters,
+                overwrite_existing=True,
+            )
+        burst_index_callback = _burst_index_callback
+
+    watcher = MediaWatcher(
+        scanner,
+        cache_manager,
+        hass,
+        burst_index_callback=burst_index_callback,
+        burst_auto_index_interval_hours=burst_auto_index_interval_hours,
+    )
     
     # Construct media_source_uri automatically if not configured
     # This ensures v1.4+ upgrade path works seamlessly without config changes
@@ -654,8 +710,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Setup scheduled scanning
     scan_schedule = config.get(CONF_SCAN_SCHEDULE, DEFAULT_SCAN_SCHEDULE)
+    burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
     if scan_schedule != SCAN_SCHEDULE_STARTUP_ONLY:
-        _setup_scheduled_scan(hass, entry, scanner, base_folder, watched_folders, scan_schedule)
+        _setup_scheduled_scan(
+            hass, entry, scanner, base_folder, watched_folders, scan_schedule,
+            cache_manager=cache_manager,
+            auto_burst_index=auto_burst_index,
+            burst_index_after_scan=burst_index_after_scan,
+            burst_time_window_seconds=burst_time_window_seconds,
+            burst_location_tolerance_meters=burst_location_tolerance_meters,
+        )
     
     # Setup weekly VACUUM task to compact database
     async def _weekly_vacuum_callback(now):
