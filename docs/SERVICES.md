@@ -116,7 +116,8 @@ Get random media files from the index (used by Media Card).
 - `anniversary_day` (optional): Day for anniversary matching (`"01"`-`"31"` or `"*"` for any day)
 - `anniversary_window_days` (optional, default: 0): Expand ±N days around target date for anniversary matching
 - `priority_new_files` (optional, default: false): Prioritize recently scanned files
-- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files (1 hour) 
+- `new_files_threshold_seconds` (optional, default: 3600): Seconds threshold for "new" files (1 hour)
+- `auto_select_burst_favorite` (optional, default: false): Exclude non-favorite images from burst groups that have an indexed favorite (requires `index_burst_groups` to have been run first)
 
 **Returns:** List of media items with metadata (includes `media_source_uri` in v1.4+)
 
@@ -317,6 +318,55 @@ data:
   media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
   prefer_same_location: false
 ```
+
+### `media_index.index_burst_groups`
+
+**New in v1.6.0** - Scan the entire library and write burst group membership to every file. Run this once (or after bulk imports) to enable database-level burst filtering in `get_random_items`.
+
+**Parameters:**
+- `folder` (optional): Limit the scan to files under this folder prefix. Omit to scan the entire library.
+- `time_window_seconds` (optional, default: 10): Maximum gap in seconds between consecutive photos in the same burst group.
+- `location_tolerance_meters` (optional, default: 50): GPS radius in metres for grouping photos at the same location. Use 0 to disable GPS sub-clustering.
+- `min_group_size` (optional, default: 2): Minimum number of photos required to be considered a burst group.
+- `overwrite_existing` (optional, default: true): If true, recalculate burst data for all matching files. If false, skip files that already have `burst_count` set.
+
+**Returns:**
+- `status`: `"success"` or `"error"`
+- `groups_found`: Number of distinct burst groups identified
+- `files_updated`: Number of files written with burst metadata
+- `files_skipped`: Files already up-to-date (no change needed)
+- `errors`: Number of files that could not be written
+
+**How it works:**
+- Streams all indexed files sorted by `date_taken` using 1000-row fetch batches — memory footprint is O(burst_size), not O(library_size)
+- Groups consecutive photos within the configured time window; each group is processed and written immediately when complete
+- Sub-clusters by GPS proximity when coordinates are available for group members
+- Writes `burst_count` and `burst_favorites` to `exif_data` in 500-row commit batches
+- Idempotent: safe to run multiple times; already-correct rows are skipped when `overwrite_existing: false`
+
+**Example:**
+```yaml
+service: media_index.index_burst_groups
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  time_window_seconds: 10
+  location_tolerance_meters: 50
+  min_group_size: 2
+```
+
+**Response example:**
+```json
+{
+  "status": "success",
+  "groups_found": 842,
+  "files_updated": 3107,
+  "files_skipped": 41823,
+  "errors": 0
+}
+```
+
+**Tip:** After running `index_burst_groups`, enable `auto_select_burst_favorite: true` in Media Card and the card will automatically receive only favorited images from burst groups — no 2-second timers, no client-side splicing.
 
 ### `media_index.update_burst_metadata`
 
@@ -535,10 +585,22 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 - **`get_ordered_files`** - Used automatically by Media Card for sequential slideshow mode (v1.3)
 - **`get_related_files`** (v1.5+) - Powers "Burst Review" feature for reviewing rapid-fire photos
 - **`update_burst_metadata`** (v1.5+) - Saves burst review favorites to file metadata
+- **`index_burst_groups`** (v1.6.0+) - One-shot library scan that enables backend-level burst filtering in `get_random_items`
 - **`mark_favorite`** - Called when clicking favorite button on Media Card
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
+
+## v1.6.0 Enhancements Summary
+
+### New Services
+- ✨ **`index_burst_groups`** - Full-library burst indexer; enables SQL-level filtering of non-favorite burst members
+
+### Enhanced Services
+- 🌟 **`get_random_items`** - Added `auto_select_burst_favorite` parameter; non-favorite burst members are excluded in the database query before results reach the card
+
+### Bug Fixes
+- 🐛 **`get_burst_photos`** - Iterative flood-fill for consistent group membership regardless of reference photo
 
 ## v1.5 Enhancements Summary
 

@@ -87,6 +87,12 @@ get_random_items:
           min: 60
           max: 86400
           mode: box
+    auto_select_burst_favorite:
+      name: Auto-Select Burst Favorite
+      description: Exclude non-favorite images from burst groups that have an indexed favorite (requires index_burst_groups to have been run first)
+      default: false
+      selector:
+        boolean:
 
 get_ordered_files:
   name: Get Ordered Media Files
@@ -486,3 +492,62 @@ check_file_exists:
       example: "media-source://media_source/media/photo/Photos/2023/IMG_001.jpg"
       selector:
         text:
+
+index_burst_groups:
+  name: Index Burst Groups
+  description: >
+    Scan the entire indexed library and write burst_count / burst_favorites to every
+    file that belongs to a detected burst group. Designed for large collections
+    (200 K+ items). Uses a single sorted pass — no per-file queries. Run this once
+    after the initial library scan, or whenever you want to refresh burst data across
+    the whole library.
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    folder:
+      name: Folder
+      description: Limit the scan to files under this folder prefix. Omit to scan the entire library.
+      required: false
+      example: "/media/photo/PhotoLibrary/Bursts"
+      selector:
+        text:
+    time_window_seconds:
+      name: Time Window (seconds)
+      description: Maximum gap in seconds between consecutive photos in the same burst group.
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: s
+    location_tolerance_meters:
+      name: Location Tolerance (metres)
+      description: GPS radius in metres for grouping photos at the same location. Photos without GPS coordinates are grouped by time only.
+      required: false
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: m
+    min_group_size:
+      name: Minimum Group Size
+      description: Minimum number of photos required to be considered a burst group.
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 2
+          max: 20
+    overwrite_existing:
+      name: Overwrite Existing
+      description: >
+        If true (default), recalculate and overwrite burst_count / burst_favorites for all
+        matching files. If false, only populate files that have no existing burst_count.
+      required: false
+      default: true
+      selector:
+        boolean:

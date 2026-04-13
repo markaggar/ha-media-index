@@ -801,7 +801,8 @@ class CacheManager:
         anniversary_window_days: int = 0,
         favorites_only: bool = False,
         priority_new_files: bool = False,
-        new_files_threshold_seconds: int = 3600
+        new_files_threshold_seconds: int = 3600,
+        auto_select_burst_favorite: bool = False
     ) -> list[dict]:
         """Get random media files with optional filters and EXIF data.
         
@@ -851,6 +852,8 @@ class CacheManager:
                     e.location_state,
                     e.location_country,
                     e.is_favorited,
+                    e.burst_count,
+                    e.burst_favorites,
                     e.camera_make,
                     e.camera_model
                 FROM media_files m
@@ -877,10 +880,21 @@ class CacheManager:
             
             if favorites_only:
                 new_files_query += " AND e.is_favorited = 1"
+
+            if auto_select_burst_favorite:
+                # Exclude non-favorite members of burst groups that have a known favorite.
+                # Items with burst_count IS NULL are not part of any burst — returned as normal.
+                # Items in a burst group with no favorites (burst_favorites IS NULL) are also
+                # returned normally (nothing better to show).
+                new_files_query += (
+                    " AND NOT (COALESCE(e.burst_count, 0) > 0"
+                    " AND COALESCE(e.is_favorited, 0) = 0"
+                    " AND e.burst_favorites IS NOT NULL)"
+                )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -890,13 +904,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -906,7 +920,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    new_files_query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    new_files_query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -923,11 +937,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -937,7 +951,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -985,7 +999,8 @@ class CacheManager:
                     anniversary_month=anniversary_month,
                     anniversary_day=anniversary_day,
                     anniversary_window_days=anniversary_window_days,
-                    favorites_only=favorites_only
+                    favorites_only=favorites_only,
+                    auto_select_burst_favorite=auto_select_burst_favorite
                 )
                 result = new_files + random_files
             else:
@@ -1012,6 +1027,8 @@ class CacheManager:
                     e.location_state,
                     e.location_country,
                     e.is_favorited,
+                    e.burst_count,
+                    e.burst_favorites,
                     e.camera_make,
                     e.camera_model
                 FROM media_files m
@@ -1039,10 +1056,21 @@ class CacheManager:
             
             if favorites_only:
                 query += " AND e.is_favorited = 1"
+
+            if auto_select_burst_favorite:
+                # Exclude non-favorite members of burst groups that have a known favorite.
+                # Items with burst_count IS NULL are not part of any burst — returned as normal.
+                # Items in a burst group with no favorites (burst_favorites IS NULL) are also
+                # returned normally (nothing better to show).
+                query += (
+                    " AND NOT (COALESCE(e.burst_count, 0) > 0"
+                    " AND COALESCE(e.is_favorited, 0) = 0"
+                    " AND e.burst_favorites IS NOT NULL)"
+                )
             
             # Timestamp filtering (takes precedence over date filtering)
             if timestamp_from is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp_from)
             elif date_from is not None:
                 # Validate date_from is a valid date string using datetime.strptime
@@ -1052,13 +1080,13 @@ class CacheManager:
                     dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                     timestamp = int(dt.timestamp())
-                    query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                    query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
             
             if timestamp_to is not None:
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp_to)
             elif date_to is not None:
                 # Validate date_to is a valid date string using datetime.strptime
@@ -1068,7 +1096,7 @@ class CacheManager:
                     dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                     # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                     timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                    query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                    query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                     params.append(timestamp)
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1085,11 +1113,11 @@ class CacheManager:
                             # Generate day range with window
                             day_min = max(1, day_int - anniversary_window_days)
                             day_max = min(31, day_int + anniversary_window_days)
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                             params.extend([day_min, day_max])
                         else:
                             # Exact day match
-                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                            ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                             params.append(day_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1099,7 +1127,7 @@ class CacheManager:
                 if anniversary_month and anniversary_month != "*":
                     try:
                         month_int = int(anniversary_month)
-                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(month_int)
                     except ValueError:
                         _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1141,7 +1169,8 @@ class CacheManager:
         anniversary_month: str | None = None,
         anniversary_day: str | None = None,
         anniversary_window_days: int = 0,
-        favorites_only: bool = False
+        favorites_only: bool = False,
+        auto_select_burst_favorite: bool = False
     ) -> list[dict]:
         """Get random files excluding specified IDs (helper for priority queue).
         
@@ -1210,10 +1239,17 @@ class CacheManager:
         
         if favorites_only:
             query += " AND e.is_favorited = 1"
+
+        if auto_select_burst_favorite:
+            query += (
+                " AND NOT (COALESCE(e.burst_count, 0) > 0"
+                " AND COALESCE(e.is_favorited, 0) = 0"
+                " AND e.burst_favorites IS NOT NULL)"
+            )
         
         # Timestamp filtering (takes precedence over date filtering)
         if timestamp_from is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
             params.append(timestamp_from)
         elif date_from is not None:
             # Validate date_from is a valid date string
@@ -1222,13 +1258,13 @@ class CacheManager:
                 dt = datetime.strptime(date_from_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (matches how EXIF timestamps are stored)
                 timestamp = int(dt.timestamp())
-                query += " AND COALESCE(e.date_taken, m.created_time) >= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
         
         if timestamp_to is not None:
-            query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
             params.append(timestamp_to)
         elif date_to is not None:
             # Validate date_to is a valid date string
@@ -1237,7 +1273,7 @@ class CacheManager:
                 dt = datetime.strptime(date_to_str, "%Y-%m-%d")
                 # Convert to Unix timestamp using server local time (end of local day = start of next day minus 1)
                 timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
-                query += " AND COALESCE(e.date_taken, m.created_time) <= ?"
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
                 params.append(timestamp)
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
@@ -1253,10 +1289,10 @@ class CacheManager:
                     if anniversary_window_days > 0:
                         day_min = max(1, day_int - anniversary_window_days)
                         day_max = min(31, day_int + anniversary_window_days)
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) BETWEEN ? AND ?")
                         params.extend([day_min, day_max])
                     else:
-                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                        ann_conditions.append("CAST(strftime('%d', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                         params.append(day_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_day parameter: %s", anniversary_day)
@@ -1265,7 +1301,7 @@ class CacheManager:
             if anniversary_month and anniversary_month != "*":
                 try:
                     month_int = int(anniversary_month)
-                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, m.created_time), 'unixepoch', 'localtime') AS INTEGER) = ?")
+                    ann_conditions.append("CAST(strftime('%m', COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))), 'unixepoch', 'localtime') AS INTEGER) = ?")
                     params.append(month_int)
                 except ValueError:
                     _LOGGER.warning("Invalid anniversary_month parameter: %s", anniversary_month)
@@ -1353,16 +1389,16 @@ class CacheManager:
         
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
-            "date_taken": "COALESCE(e.date_taken, m.modified_time)",
+            "date_taken": "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
-            "modified_time": "m.modified_time",
+            "modified_time": "unixepoch(m.modified_time)",
         }
         allowed_directions = {
             "asc": "ASC",
             "desc": "DESC",
         }
-        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, m.modified_time)")
+        sort_field = allowed_sort_fields.get(order_by, "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))")
         direction = allowed_directions.get(order_direction.lower(), "DESC")
         
         # v1.5.10: Compound cursor pagination using (sort_field, id)
@@ -1448,14 +1484,23 @@ class CacheManager:
         sort_order: str = "time_asc"
     ) -> list[dict]:
         """Get burst photos taken near the same time as a reference photo.
-        
+
+        Uses iterative range expansion to find the complete burst group regardless
+        of which photo in the burst is used as the reference. After each query the
+        search range is widened to [min_found - window, max_found + window] and the
+        query is repeated until no new paths appear. This guarantees that a photo
+        near either edge of the burst still returns the full group.
+
+        The seconds_offset column and GPS filter are always anchored to the original
+        reference photo so results remain comparable across different reference choices.
+
         Args:
             reference_path: Path to the reference photo
-            time_window_seconds: Time window in seconds (default: 10)
-            prefer_same_location: Prioritize photos at same GPS location (default: True)
+            time_window_seconds: Maximum gap in seconds between consecutive burst photos (default: 10)
+            prefer_same_location: Only include photos at the same GPS location (default: True)
             location_tolerance_meters: GPS tolerance in meters (default: 50)
             sort_order: Sort order - 'time_asc' or 'time_desc' (default: time_asc)
-            
+
         Returns:
             List of burst photos with metadata
         """
@@ -1464,29 +1509,32 @@ class CacheManager:
         if not reference_file:
             _LOGGER.error("Reference file not found: %s", reference_path)
             return []
-        
+
         # Extract EXIF data from nested object
         exif_data = reference_file.get('exif', {})
         if not exif_data:
             _LOGGER.error("Reference file has no EXIF data: %s", reference_path)
             return []
-        
+
         reference_date_taken = exif_data.get('date_taken')
         if not reference_date_taken:
             _LOGGER.error("Reference file has no date_taken in EXIF: %s", reference_path)
             return []
-        
+
         reference_latitude = exif_data.get('latitude')
         reference_longitude = exif_data.get('longitude')
-        
+        use_location = bool(reference_latitude is not None and reference_longitude is not None and prefer_same_location)
+
         _LOGGER.info(
             "Burst detection: ref_date=%s, location_present=%s, window=%ds",
-            reference_date_taken, reference_latitude is not None and reference_longitude is not None, time_window_seconds
+            reference_date_taken, use_location, time_window_seconds
         )
-        
-        # Build query
-        query = """
-            SELECT 
+
+        # Build base SELECT. seconds_offset is always relative to the original reference
+        # so the caller gets consistent timing deltas regardless of which iteration found
+        # a given photo.
+        base_query = """
+            SELECT
                 m.id,
                 m.path,
                 m.filename,
@@ -1506,63 +1554,92 @@ class CacheManager:
                 e.rating,
                 (e.date_taken - ?) AS seconds_offset
         """
-        
-        # Add GPS distance calculation if location available
-        if reference_latitude and reference_longitude and prefer_same_location:
-            query += f""",
+
+        if use_location:
+            base_query += """,
                 (6371000 * acos(
                     cos(radians(?)) * cos(radians(e.latitude)) *
                     cos(radians(e.longitude) - radians(?)) +
                     sin(radians(?)) * sin(radians(e.latitude))
                 )) AS distance_meters
             """
-        
-        query += """
+
+        base_query += """
             FROM media_files m
             JOIN exif_data e ON m.id = e.file_id
             WHERE e.date_taken IS NOT NULL
-              AND ABS(e.date_taken - ?) <= ?
+              AND e.date_taken BETWEEN ? AND ?
         """
-        
-        # Add location filter if applicable
-        if reference_latitude and reference_longitude and prefer_same_location:
-            query += f"""
+
+        if use_location:
+            base_query += """
               AND (6371000 * acos(
                   cos(radians(?)) * cos(radians(e.latitude)) *
                   cos(radians(e.longitude) - radians(?)) +
                   sin(radians(?)) * sin(radians(e.latitude))
               )) <= ?
             """
-        
-        # Add sorting
+
         if sort_order == "time_desc":
-            query += " ORDER BY e.date_taken DESC"
+            base_query += " ORDER BY e.date_taken DESC"
         else:
-            query += " ORDER BY e.date_taken ASC"
-        
-        # Build parameters
-        params = [reference_date_taken]
-        
-        if reference_latitude and reference_longitude and prefer_same_location:
-            params.extend([reference_latitude, reference_longitude, reference_latitude])
-        
-        params.extend([reference_date_taken, time_window_seconds])
-        
-        if reference_latitude and reference_longitude and prefer_same_location:
-            params.extend([
-                reference_latitude,
-                reference_longitude,
-                reference_latitude,
-                location_tolerance_meters
-            ])
-        
-        # Execute query
-        _LOGGER.debug("Burst query params: %s", params)
-        async with self._db.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-        
-        _LOGGER.debug("Burst query returned %d rows", len(rows))
-        return [dict(row) for row in rows]
+            base_query += " ORDER BY e.date_taken ASC"
+
+        # Iterative expansion: start with ±window around the reference timestamp,
+        # then widen to cover the earliest/latest found photo each time new photos appear.
+        range_min = reference_date_taken - time_window_seconds
+        range_max = reference_date_taken + time_window_seconds
+        found_paths: set = set()
+        result_rows: list = []
+        max_iterations = 20
+
+        for iteration in range(max_iterations):
+            # seconds_offset anchor is always the original reference
+            params = [reference_date_taken]
+            if use_location:
+                params.extend([reference_latitude, reference_longitude, reference_latitude])
+            params.extend([range_min, range_max])
+            if use_location:
+                params.extend([
+                    reference_latitude,
+                    reference_longitude,
+                    reference_latitude,
+                    location_tolerance_meters
+                ])
+
+            _LOGGER.debug(
+                "Burst query iteration %d: range=[%s, %s]",
+                iteration + 1, range_min, range_max
+            )
+            async with self._db.execute(base_query, params) as cursor:
+                rows = await cursor.fetchall()
+
+            row_dicts = [dict(row) for row in rows]
+            new_paths = {r['path'] for r in row_dicts} - found_paths
+
+            if not new_paths:
+                _LOGGER.debug(
+                    "Burst detection converged after %d iteration(s), %d photos",
+                    iteration + 1, len(result_rows)
+                )
+                break
+
+            # Absorb the newly found photos and widen the search range
+            found_paths |= new_paths
+            result_rows = row_dicts
+
+            all_times = [r['date_taken'] for r in row_dicts if r.get('date_taken')]
+            if all_times:
+                range_min = min(all_times) - time_window_seconds
+                range_max = max(all_times) + time_window_seconds
+        else:
+            _LOGGER.warning(
+                "Burst detection hit max iterations (%d) for %s",
+                max_iterations, reference_path
+            )
+
+        _LOGGER.debug("Burst query returned %d rows (stable)", len(result_rows))
+        return result_rows
     
     async def get_file_by_id(self, file_id: int) -> dict | None:
         """Get file metadata by database ID.
@@ -1682,6 +1759,259 @@ class CacheManager:
         
         return updated_count
     
+    async def index_burst_groups(
+        self,
+        folder: str | None = None,
+        time_window_seconds: int = 10,
+        location_tolerance_meters: int = 50,
+        min_group_size: int = 2,
+        overwrite_existing: bool = True,
+        progress_callback=None,
+    ) -> dict:
+        """Scan the library and write burst_count / burst_favorites to every file in every
+        detected burst group.
+
+        Algorithm (O(n log n)):
+          1. Stream rows with date_taken (+ optional GPS), ordered by date_taken ASC,
+             fetching FETCH_SIZE rows at a time — never loading the full library into memory.
+          2. Walk the stream: consecutive photos within time_window_seconds form a group.
+             When the gap exceeds the window, the current group is finalised immediately.
+          3. GPS sub-clustering: when GPS is present for any member of a group, split the
+             group into GPS clusters (using the same location_tolerance_meters radius).
+             Photos without GPS are placed in their own temporal-only sub-group.
+          4. Groups with fewer than min_group_size photos are ignored.
+          5. burst_count = total members; burst_favorites = JSON list of filenames of
+             members where is_favorited = 1.
+          6. Write results in batches of WRITE_BATCH_SIZE to keep transactions short.
+
+        Scale notes:
+          - Designed for 200 K+ item libraries.
+          - Uses a single sorted SELECT with no per-file round-trips.
+          - Memory footprint: O(burst_size) — at most one temporal group in memory at a time.
+          - Commit frequency: every WRITE_BATCH_SIZE rows updated to avoid large transactions.
+
+        Args:
+            folder:                   Only process files under this folder prefix (None = all).
+            time_window_seconds:      Maximum gap between consecutive burst photos (default 10 s).
+            location_tolerance_meters: GPS cluster radius in metres (default 50 m).
+            min_group_size:           Minimum photos to constitute a burst group (default 2).
+            overwrite_existing:       If False, skip files that already have burst_count set.
+            progress_callback:        Optional async callable(groups_found, files_updated)
+                                      called when a write batch is flushed.
+
+        Returns:
+            Dict with keys: groups_found, files_updated, files_skipped, errors
+        """
+        import json
+        import math
+
+        _LOGGER.info(
+            "index_burst_groups: starting (folder=%s, window=%ds, location=%dm, min=%d)",
+            folder or "all", time_window_seconds, location_tolerance_meters, min_group_size
+        )
+
+        # ------------------------------------------------------------------
+        # 1. Clear stale burst data for all in-scope files (overwrite mode only)
+        #
+        # Without this, files previously in a large group (e.g. 15 s window) keep
+        # their old burst_count when re-indexed with a narrower window — causing the
+        # metadata header to show the old count while the live panel query finds fewer.
+        # ------------------------------------------------------------------
+        if overwrite_existing:
+            clear_where = (
+                "WHERE file_id IN ("
+                "  SELECT e.file_id FROM exif_data e"
+                "  JOIN media_files m ON m.id = e.file_id"
+                "  WHERE e.date_taken IS NOT NULL"
+            )
+            clear_params: list = []
+            if folder:
+                clear_where += "  AND m.folder LIKE ?"
+                clear_params.append(folder.rstrip("/") + "%")
+            clear_where += ")"
+            await self._db.execute(
+                f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL {clear_where}",
+                clear_params,
+            )
+            await self._db.commit()
+            _LOGGER.debug("index_burst_groups: cleared stale burst data for scope (folder=%s)", folder or "all")
+
+        # ------------------------------------------------------------------
+        # 2. Load all candidate rows (one query, sorted)
+        # ------------------------------------------------------------------
+        where_clause = "WHERE e.date_taken IS NOT NULL"
+        params: list = []
+        if folder:
+            where_clause += " AND m.folder LIKE ?"
+            params.append(folder.rstrip("/") + "%")
+        if not overwrite_existing:
+            where_clause += " AND (e.burst_count IS NULL OR e.burst_count = 0)"
+
+        query = f"""
+            SELECT
+                m.path,
+                m.filename,
+                e.date_taken,
+                e.latitude,
+                e.longitude,
+                e.is_favorited,
+                e.file_id
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            {where_clause}
+            ORDER BY e.date_taken ASC
+        """
+
+        total_rows_seen = 0
+
+        # ------------------------------------------------------------------
+        # 2. Helper: GPS sub-clustering
+        # ------------------------------------------------------------------
+        def _gps_distance_m(lat1, lon1, lat2, lon2):
+            """Haversine distance in metres between two GPS points."""
+            R = 6_371_000
+            φ1, φ2 = math.radians(lat1), math.radians(lat2)
+            dφ = math.radians(lat2 - lat1)
+            dλ = math.radians(lon2 - lon1)
+            a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+            return R * 2 * math.asin(math.sqrt(a))
+
+        def _gps_cluster(members):
+            """Split a temporal group into GPS sub-clusters.
+
+            Members without GPS are put in a single no-GPS cluster.
+            Members with GPS are greedily assigned to the first existing cluster whose
+            centroid is within location_tolerance_meters, otherwise start a new cluster.
+            Returns a list of member-lists.
+            """
+            gps_clusters: list[list] = []
+            centroids: list[tuple] = []
+            no_gps: list = []
+
+            for row in members:
+                lat, lon = row["latitude"], row["longitude"]
+                if lat is None or lon is None:
+                    no_gps.append(row)
+                    continue
+
+                assigned = False
+                for idx, (clat, clon) in enumerate(centroids):
+                    if _gps_distance_m(lat, lon, clat, clon) <= location_tolerance_meters:
+                        gps_clusters[idx].append(row)
+                        n = len(gps_clusters[idx])
+                        centroids[idx] = (
+                            clat + (lat - clat) / n,
+                            clon + (lon - clon) / n,
+                        )
+                        assigned = True
+                        break
+                if not assigned:
+                    gps_clusters.append([row])
+                    centroids.append((lat, lon))
+
+            result = [c for c in gps_clusters if c]
+            if no_gps:
+                result.append(no_gps)
+            return result
+
+        # ------------------------------------------------------------------
+        # 3. Streaming walk + incremental writes
+        # ------------------------------------------------------------------
+        FETCH_SIZE = 1000      # rows fetched from DB per round-trip
+        WRITE_BATCH_SIZE = 500 # rows per commit
+
+        groups_found = 0
+        files_updated = 0
+        errors = 0
+        pending_writes: list[tuple] = []  # (favorites_json, burst_count, file_id)
+        current_group: list = []
+
+        async def _flush_writes():
+            nonlocal files_updated, errors
+            if not pending_writes:
+                return
+            try:
+                await self._db.executemany(
+                    "UPDATE exif_data SET burst_favorites = ?, burst_count = ? WHERE file_id = ?",
+                    pending_writes,
+                )
+                files_updated += len(pending_writes)
+            except Exception as exc:
+                _LOGGER.warning("index_burst_groups: batch update error: %s", exc)
+                errors += len(pending_writes)
+            await self._db.commit()
+            pending_writes.clear()
+
+        async def _commit_group(members):
+            nonlocal groups_found
+            clusters = _gps_cluster(members) if any(
+                r.get("latitude") is not None for r in members
+            ) else [members]
+
+            for cluster in clusters:
+                if len(cluster) < min_group_size:
+                    continue
+                groups_found += 1
+                burst_count = len(cluster)
+                favorited_filenames = [r["filename"] for r in cluster if r.get("is_favorited")]
+                favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
+                for row in cluster:
+                    pending_writes.append((favorites_json, burst_count, row["file_id"]))
+
+            if len(pending_writes) >= WRITE_BATCH_SIZE:
+                await _flush_writes()
+                _LOGGER.debug(
+                    "index_burst_groups: wrote batch — groups=%d, updated=%d",
+                    groups_found, files_updated,
+                )
+                if progress_callback:
+                    try:
+                        await progress_callback(groups_found, files_updated)
+                    except Exception:
+                        pass
+
+        async with self._db.execute(query, params) as cursor:
+            while True:
+                raw_batch = await cursor.fetchmany(FETCH_SIZE)
+                if not raw_batch:
+                    break
+                total_rows_seen += len(raw_batch)
+                for raw_row in raw_batch:
+                    row = dict(raw_row)
+                    if current_group:
+                        prev_time = current_group[-1]["date_taken"]
+                        curr_time = row["date_taken"]
+                        if (
+                            curr_time is not None
+                            and prev_time is not None
+                            and (curr_time - prev_time) <= time_window_seconds
+                        ):
+                            current_group.append(row)
+                        else:
+                            await _commit_group(current_group)
+                            current_group = [row]
+                    else:
+                        current_group = [row]
+
+        # Finalise the last group and flush any remaining writes
+        if current_group:
+            await _commit_group(current_group)
+        if pending_writes:
+            await _flush_writes()
+
+        _LOGGER.info("index_burst_groups: processed %d rows", total_rows_seen)
+
+        _LOGGER.info(
+            "index_burst_groups: done — groups=%d, updated=%d, skipped=%d, errors=%d",
+            groups_found, files_updated, total_rows_seen - files_updated, errors,
+        )
+        return {
+            "groups_found": groups_found,
+            "files_updated": files_updated,
+            "files_skipped": total_rows_seen - files_updated,
+            "errors": errors,
+        }
+
     async def delete_file(self, file_path: str) -> bool:
         """Delete file record from database.
         

@@ -119,6 +119,7 @@ SERVICE_MARK_FOR_EDIT: Final = "mark_for_edit"
 SERVICE_RESTORE_EDITED_FILES: Final = "restore_edited_files"
 SERVICE_CLEANUP_DATABASE: Final = "cleanup_database"
 SERVICE_UPDATE_BURST_METADATA: Final = "update_burst_metadata"
+SERVICE_INDEX_BURST_GROUPS: Final = "index_burst_groups"
 SERVICE_INSTALL_LIBMEDIAINFO: Final = "install_libmediainfo"
 SERVICE_CHECK_FILE_EXISTS: Final = "check_file_exists"
 

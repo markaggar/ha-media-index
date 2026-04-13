@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-12
+
+### Added
+
+- **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
+  - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
+  - Streams rows from the database in 1000-row batches — memory footprint is O(burst_size), not O(library_size); safe for 200K+ libraries
+  - Writes results in 500-row commit batches
+  - Returns `{groups_found, files_updated, files_skipped, errors}` for progress feedback
+  - Run this once (or after bulk imports) to enable backend-level burst filtering in `get_random_items`
+  - See `media_index.index_burst_groups` in the services documentation
+
+- **`auto_select_burst_favorite` Parameter for `get_random_items`**: When `true`, the SQL query excludes non-favorite burst members whose group has at least one indexed favorite
+  - Filtering is done in the database before results are sent to the card — no client-side splicing or timers
+  - Only applies to files where `burst_count` is set (i.e., `index_burst_groups` has run); non-indexed files are returned normally
+  - Used automatically by Media Card v5.9.0+ when `auto_select_burst_favorite: true` is configured
+
+
+### Fixed
+
+- **`index_burst_groups` Now Clears Stale Burst Data Before Re-indexing**: Re-running with a narrower time window now correctly removes burst groups from files that no longer qualify
+  - Previously, files previously in a group (e.g. with a 15s window) kept their old `burst_count` when re-indexed with a narrower window (e.g. 3s) — causing the metadata header to show the old count while the live burst panel query found fewer photos
+  - Fix: all in-scope `burst_count` and `burst_favorites` values are reset before new groups are written (only when `overwrite_existing=True`)
+
+- **`index_burst_groups` Write Loop Now Uses `executemany` + Direct `file_id`**: Eliminated N subqueries per write batch
+  - Previously each write did `WHERE file_id = (SELECT id FROM media_files WHERE path = ?)` — one extra SELECT per file
+  - Fix: `file_id` (already fetched by the initial query) is stored in the pending-writes list; writes use `executemany` for a single batch statement per 500-row chunk
+  - `files_skipped` in the return value now reflects files not placed in any qualifying group (rather than rows with zero rowcount)
+
+- **Date Filtering Now Works for Files Without EXIF (`get_random_items`, `get_ordered_files`)**: Fixed silent type mismatch that caused date filters to be ignored when `date_taken` is NULL
+  - Root cause (PR #25 by kamiyo): `m.created_time` and `m.modified_time` are stored as ISO strings, but `e.date_taken` is a Unix integer. When `e.date_taken` is NULL, `COALESCE` fell back to the ISO string which SQLite silently coerced to 0 — so comparisons against Unix timestamps always failed
+  - Fix: wrap fallback columns with `unixepoch()` to convert ISO strings to integers before comparison
+  - Also fixes `strftime()` anniversary filters for the same reason (month/day matching was broken for files without EXIF)
+
+- **Date Fallback Now Uses Earliest of Created/Modified Time**: When `date_taken` EXIF is absent, filtering and sorting now use `MIN(unixepoch(m.created_time), unixepoch(m.modified_time))` instead of only `m.created_time`
+  - Fixes issue #24 (reported by kamiyo): copying files resets `created_time` to "now" on most OS/filesystems, causing old photos to appear as new — `modified_time` typically survives file copies and better reflects the original capture date
+  - Using the earlier of the two timestamps is the most conservative heuristic: whichever one was not reset by the copy is more likely the original date
+  - Applies to all date range filters, anniversary filters, and `date_taken` sort order in `get_ordered_files`
+
+- **`get_burst_photos` Iterative Flood-Fill**: Replaced naive single-pass grouping with an iterative convergence algorithm so all members of a burst group get the same result regardless of which photo is used as the reference
+  - Previously, a 3-photo burst could return 2 members when queried from photo A and 3 members when queried from photo B (depending on which pair was within the time window of the reference)
+  - Now iterates until the full connected set stabilises (typically 1–2 passes on real bursts)
+
+- **`modified_time` Sort Order Now Numeric in `get_ordered_files`**: `order_by: modified_time` now maps to `unixepoch(m.modified_time)` instead of raw `m.modified_time`
+  - `m.modified_time` is stored as an ISO 8601 string; sorting it lexicographically can produce incorrect order compared to the numeric `date_taken` fallback introduced in v1.6.0
+  - Fix: wrapping with `unixepoch()` ensures consistent numeric comparison for all sort fields
+
+- **`auto_select_burst_favorite` Added to `services.yaml`**: The parameter was functional but missing from the service definition, so it did not appear in the Home Assistant service UI
+  - Added boolean field to `get_random_items` service definition with description and default value
+
+
 ## [1.5.10] - 2026-01-12
 
 ### Added
@@ -26,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Root cause: Simple cursor `after_value` couldn't distinguish between files with same date
   - Fix: Added `m.id` to ORDER BY clause for deterministic ordering: `ORDER BY sort_field DESC, m.id DESC`
   - Compound cursor allows advancing past all items with same date value
+
 
 ## [1.5.9] - 2026-01-07
 
