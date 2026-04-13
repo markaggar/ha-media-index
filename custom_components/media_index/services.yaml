@@ -87,6 +87,12 @@ get_random_items:
           min: 60
           max: 86400
           mode: box
+    auto_select_burst_favorite:
+      name: Auto-Select Burst Favorite
+      description: Exclude non-favorite images from burst groups that have an indexed favorite (requires index_burst_groups to have been run first)
+      default: false
+      selector:
+        boolean:
 
 get_ordered_files:
   name: Get Ordered Media Files

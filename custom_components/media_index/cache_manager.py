@@ -1392,7 +1392,7 @@ class CacheManager:
             "date_taken": "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
-            "modified_time": "m.modified_time",
+            "modified_time": "unixepoch(m.modified_time)",
         }
         allowed_directions = {
             "asc": "ASC",
@@ -1796,8 +1796,8 @@ class CacheManager:
             location_tolerance_meters: GPS cluster radius in metres (default 50 m).
             min_group_size:           Minimum photos to constitute a burst group (default 2).
             overwrite_existing:       If False, skip files that already have burst_count set.
-            progress_callback:        Optional async callable(groups_found, files_processed)
-                                      called every 500 files processed.
+            progress_callback:        Optional async callable(groups_found, files_updated)
+                                      called when a write batch is flushed.
 
         Returns:
             Dict with keys: groups_found, files_updated, files_skipped, errors
