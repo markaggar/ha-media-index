@@ -1922,28 +1922,23 @@ class CacheManager:
 
         groups_found = 0
         files_updated = 0
-        files_skipped = 0
         errors = 0
-        pending_writes: list[tuple] = []  # (favorites_json, burst_count, path)
+        pending_writes: list[tuple] = []  # (favorites_json, burst_count, file_id)
         current_group: list = []
 
         async def _flush_writes():
             nonlocal files_updated, files_skipped, errors
-            for favorites_json, burst_count, path in pending_writes:
-                try:
-                    async with self._db.execute(
-                        """UPDATE exif_data
-                               SET burst_favorites = ?, burst_count = ?
-                             WHERE file_id = (SELECT id FROM media_files WHERE path = ?)""",
-                        (favorites_json, burst_count, path),
-                    ) as upd_cursor:
-                        if upd_cursor.rowcount > 0:
-                            files_updated += 1
-                        else:
-                            files_skipped += 1
-                except Exception as exc:
-                    _LOGGER.warning("index_burst_groups: error updating %s: %s", path, exc)
-                    errors += 1
+            if not pending_writes:
+                return
+            try:
+                await self._db.executemany(
+                    "UPDATE exif_data SET burst_favorites = ?, burst_count = ? WHERE file_id = ?",
+                    pending_writes,
+                )
+                files_updated += len(pending_writes)
+            except Exception as exc:
+                _LOGGER.warning("index_burst_groups: batch update error: %s", exc)
+                errors += len(pending_writes)
             await self._db.commit()
             pending_writes.clear()
 
@@ -1961,7 +1956,7 @@ class CacheManager:
                 favorited_filenames = [r["filename"] for r in cluster if r.get("is_favorited")]
                 favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
                 for row in cluster:
-                    pending_writes.append((favorites_json, burst_count, row["path"]))
+                    pending_writes.append((favorites_json, burst_count, row["file_id"]))
 
             if len(pending_writes) >= WRITE_BATCH_SIZE:
                 await _flush_writes()
@@ -2008,12 +2003,12 @@ class CacheManager:
 
         _LOGGER.info(
             "index_burst_groups: done — groups=%d, updated=%d, skipped=%d, errors=%d",
-            groups_found, files_updated, files_skipped, errors,
+            groups_found, files_updated, total_rows_seen - files_updated, errors,
         )
         return {
             "groups_found": groups_found,
             "files_updated": files_updated,
-            "files_skipped": files_skipped,
+            "files_skipped": total_rows_seen - files_updated,
             "errors": errors,
         }
 
