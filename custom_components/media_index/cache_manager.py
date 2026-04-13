@@ -1927,7 +1927,7 @@ class CacheManager:
         current_group: list = []
 
         async def _flush_writes():
-            nonlocal files_updated, files_skipped, errors
+            nonlocal files_updated, errors
             if not pending_writes:
                 return
             try:
@@ -1966,7 +1966,7 @@ class CacheManager:
                 )
                 if progress_callback:
                     try:
-                        await progress_callback(groups_found, files_updated + files_skipped)
+                        await progress_callback(groups_found, files_updated)
                     except Exception:
                         pass
 
