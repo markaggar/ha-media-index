@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Previously, a 3-photo burst could return 2 members when queried from photo A and 3 members when queried from photo B (depending on which pair was within the time window of the reference)
   - Now iterates until the full connected set stabilises (typically 1–2 passes on real bursts)
 
+- **`modified_time` Sort Order Now Numeric in `get_ordered_files`**: `order_by: modified_time` now maps to `unixepoch(m.modified_time)` instead of raw `m.modified_time`
+  - `m.modified_time` is stored as an ISO 8601 string; sorting it lexicographically can produce incorrect order compared to the numeric `date_taken` fallback introduced in v1.6.0
+  - Fix: wrapping with `unixepoch()` ensures consistent numeric comparison for all sort fields
+
+- **`auto_select_burst_favorite` Added to `services.yaml`**: The parameter was functional but missing from the service definition, so it did not appear in the Home Assistant service UI
+  - Added boolean field to `get_random_items` service definition with description and default value
+
 
 ## [1.5.10] - 2026-01-12
 
