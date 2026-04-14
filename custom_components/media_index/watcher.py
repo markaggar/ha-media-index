@@ -24,9 +24,8 @@ RATE_LIMIT_DELAY = 0.5  # seconds - delay between processing batches
 
 
 class MediaFileEventHandler(FileSystemEventHandler):
-        self._burst_index_locks: Dict[str, asyncio.Lock] = {}
     """Handler for media file system events with throttling."""
-    
+
     def __init__(
         self,
         scanner: MediaScanner,
@@ -43,12 +42,13 @@ class MediaFileEventHandler(FileSystemEventHandler):
         self._burst_index_callback = burst_index_callback
         self._burst_auto_index_interval_hours = burst_auto_index_interval_hours
         self._last_burst_index_time: Dict[str, datetime] = {}
+        self._burst_index_locks: Dict[str, asyncio.Lock] = {}
 
         # Event queues for batching
         self._pending_new: Dict[str, datetime] = {}  # path -> timestamp
         self._pending_modified: Dict[str, datetime] = {}
         self._pending_deleted: Set[str] = set()
-        
+
         # Processing control
         self._processor_task = None
         self._is_processing = False
