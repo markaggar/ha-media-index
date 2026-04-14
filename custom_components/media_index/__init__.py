@@ -1870,8 +1870,8 @@ def _register_services(hass: HomeAssistant):
         handle_index_burst_groups,
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
-            vol.Optional("time_window_seconds", default=10): cv.positive_int,
-            vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional("time_window_seconds", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+            vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
             vol.Optional("min_group_size", default=2): vol.All(cv.positive_int, vol.Range(min=2)),
             vol.Optional("overwrite_existing", default=True): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),

@@ -521,7 +521,7 @@ index_burst_groups:
       selector:
         number:
           min: 1
-          max: 120
+          max: 300
           unit_of_measurement: s
     location_tolerance_meters:
       name: Location Tolerance (metres)
@@ -530,7 +530,7 @@ index_burst_groups:
       default: 50
       selector:
         number:
-          min: 0
+          min: 1
           max: 1000
           unit_of_measurement: m
     min_group_size:
