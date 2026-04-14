@@ -74,13 +74,11 @@ or
 2. Click "Integrations"
 3. Search for 'Media Index'
 4. Click "Install"
-5. **Install libmediainfo** (see Prerequisites above if you need video metadata)
-6. Restart Home Assistant
+5. Restart Home Assistant
 
 ### Manual
 1. Copy the `custom_components/media_index` folder to your Home Assistant `custom_components` directory
-2. **Install libmediainfo** (see Prerequisites above if you need video metadata)
-3. Restart Home Assistant
+2. Restart Home Assistant
 
 ## How It Works
 
