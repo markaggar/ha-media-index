@@ -213,30 +213,6 @@ get_related_files:
       example: "media-source://media_source/media/photo/Photos/2023/IMG_1234.jpg"
       selector:
         text:
-    time_window_seconds:
-      name: Time Window (Burst Mode)
-      description: Time window in seconds (±) around reference photo's timestamp (burst mode only)
-      default: 120
-      selector:
-        number:
-          min: 10
-          max: 3600
-          mode: box
-    prefer_same_location:
-      name: Prefer Same Location (Burst Mode)
-      description: Filter by GPS proximity if available (burst mode only, fallback to time-only if no GPS)
-      default: true
-      selector:
-        boolean:
-    location_tolerance_meters:
-      name: Location Tolerance (Burst Mode)
-      description: Maximum distance in meters for GPS matching (burst mode only)
-      default: 50
-      selector:
-        number:
-          min: 10
-          max: 1000
-          mode: box
     window_days:
       name: Window Days (Anniversary Mode)
       description: Days before/after reference date to include (anniversary mode only, e.g., 3 = ±3 days)

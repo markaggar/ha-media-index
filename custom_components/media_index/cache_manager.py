@@ -118,6 +118,7 @@ class CacheManager:
                 metering_mode TEXT,
                 white_balance TEXT,
                 flash TEXT,
+                burst_id TEXT,
                 FOREIGN KEY (file_id) REFERENCES media_files(id) ON DELETE CASCADE
             )
         """)
@@ -250,7 +251,8 @@ class CacheManager:
             'metering_mode': 'TEXT',
             'white_balance': 'TEXT',
             'burst_favorites': 'TEXT',
-            'burst_count': 'INTEGER'
+            'burst_count': 'INTEGER',
+            'burst_id': 'TEXT',
         }
         
         # Validate against whitelist to prevent SQL injection
@@ -523,7 +525,7 @@ class CacheManager:
         existing_data = None
         async with self._db.execute("""
             SELECT location_name, location_city, location_state, location_country,
-                   rating, is_favorited, burst_count, burst_favorites
+                   rating, is_favorited, burst_count, burst_favorites, burst_id
             FROM exif_data
             WHERE file_id = ?
         """, (file_id,)) as cursor:
@@ -538,6 +540,7 @@ class CacheManager:
                     'is_favorited': row[5],
                     'burst_count': row[6],
                     'burst_favorites': row[7],
+                    'burst_id': row[8],
                 }
         
         await self._db.execute("""
@@ -547,8 +550,8 @@ class CacheManager:
              rating, is_favorited,
              iso, aperture, shutter_speed, focal_length, focal_length_35mm,
              exposure_compensation, metering_mode, white_balance, flash,
-             burst_count, burst_favorites)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             burst_count, burst_favorites, burst_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             file_id,
             exif_data.get('camera_make'),
@@ -578,6 +581,7 @@ class CacheManager:
             # Preserve existing burst data - never cleared by a rescan
             existing_data['burst_count'] if existing_data else None,
             existing_data['burst_favorites'] if existing_data else None,
+            existing_data['burst_id'] if existing_data else None,
         ))
         
         await self._db.commit()
@@ -1480,7 +1484,61 @@ class CacheManager:
             file_data['exif'] = dict(exif_row)
         
         return file_data
-    
+
+    async def get_burst_photos_by_burst_id(
+        self,
+        burst_id: str,
+        reference_date_taken: int,
+        sort_order: str = "time_asc",
+    ) -> list[dict]:
+        """Fast path: get burst photos by pre-indexed burst_id.
+
+        Used when index_burst_groups has already computed burst groups and stored
+        burst_id on each member. Returns the same column set as get_burst_photos
+        including seconds_offset anchored to reference_date_taken.
+
+        Args:
+            burst_id:             The burst_id value from the reference file's exif row.
+            reference_date_taken: Unix timestamp of the reference file (for seconds_offset).
+            sort_order:           'time_asc' or 'time_desc'.
+
+        Returns:
+            List of dicts matching the shape returned by get_burst_photos.
+        """
+        order = "DESC" if sort_order == "time_desc" else "ASC"
+        query = f"""
+            SELECT
+                m.id,
+                m.path,
+                m.filename,
+                m.folder,
+                m.file_type,
+                m.file_size,
+                m.modified_time,
+                e.date_taken,
+                e.camera_make,
+                e.camera_model,
+                e.latitude,
+                e.longitude,
+                e.location_city,
+                e.location_state,
+                e.location_country,
+                e.is_favorited,
+                e.rating,
+                (e.date_taken - ?) AS seconds_offset
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            WHERE e.burst_id = ?
+            ORDER BY e.date_taken {order}
+        """
+        async with self._db.execute(query, [reference_date_taken, burst_id]) as cursor:
+            rows = await cursor.fetchall()
+        result = [dict(row) for row in rows]
+        _LOGGER.debug(
+            "get_burst_photos_by_burst_id: burst_id=%s, found %d photos", burst_id, len(result)
+        )
+        return result
+
     async def get_burst_photos(
         self,
         reference_path: str,
@@ -1836,7 +1894,7 @@ class CacheManager:
                 clear_params.append(folder.rstrip("/") + "%")
             clear_where += ")"
             await self._db.execute(
-                f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL {clear_where}",
+                f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL, burst_id = NULL {clear_where}",
                 clear_params,
             )
             await self._db.commit()
@@ -1929,7 +1987,7 @@ class CacheManager:
         groups_found = 0
         files_updated = 0
         errors = 0
-        pending_writes: list[tuple] = []  # (favorites_json, burst_count, file_id)
+        pending_writes: list[tuple] = []  # (favorites_json, burst_count, burst_id, file_id)
         current_group: list = []
 
         async def _flush_writes():
@@ -1938,7 +1996,7 @@ class CacheManager:
                 return
             try:
                 await self._db.executemany(
-                    "UPDATE exif_data SET burst_favorites = ?, burst_count = ? WHERE file_id = ?",
+                    "UPDATE exif_data SET burst_favorites = ?, burst_count = ?, burst_id = ? WHERE file_id = ?",
                     pending_writes,
                 )
                 files_updated += len(pending_writes)
@@ -1961,8 +2019,9 @@ class CacheManager:
                 burst_count = len(cluster)
                 favorited_filenames = [r["filename"] for r in cluster if r.get("is_favorited")]
                 favorites_json = json.dumps(favorited_filenames) if favorited_filenames else None
+                burst_id = str(min(row["file_id"] for row in cluster))
                 for row in cluster:
-                    pending_writes.append((favorites_json, burst_count, row["file_id"]))
+                    pending_writes.append((favorites_json, burst_count, burst_id, row["file_id"]))
 
             if len(pending_writes) >= WRITE_BATCH_SIZE:
                 await _flush_writes()

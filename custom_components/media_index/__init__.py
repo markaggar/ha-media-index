@@ -112,11 +112,6 @@ SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
     vol.Optional("media_source_uri"): cv.string,
     vol.Required("mode"): vol.In(["burst", "anniversary"]),
     
-    # Burst mode parameters
-    vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
-    vol.Optional("prefer_same_location", default=True): cv.boolean,
-    vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
-    
     # Anniversary mode parameters
     vol.Optional("window_days", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
     vol.Optional("years_back", default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
@@ -1018,14 +1013,42 @@ def _register_services(hass: HomeAssistant):
         sort_order = call.data.get("sort_order", "time_asc")
         
         if mode == "burst":
-            # Burst detection mode
-            items = await cache_manager.get_burst_photos(
-                reference_path=reference_path,
-                time_window_seconds=call.data.get("time_window_seconds", 120),
-                prefer_same_location=call.data.get("prefer_same_location", True),
-                location_tolerance_meters=call.data.get("location_tolerance_meters", 50),
-                sort_order=sort_order
-            )
+            # Burst detection: use pre-indexed burst_id for fast path, fall back to
+            # proximity search (with integration-configured or hardcoded defaults) when
+            # the file hasn't been indexed yet.
+            reference_file = await cache_manager.get_file_by_path(reference_path)
+            ref_exif = (reference_file or {}).get('exif', {}) if reference_file else {}
+            burst_id = ref_exif.get('burst_id') if ref_exif else None
+            ref_date_taken = ref_exif.get('date_taken') if ref_exif else None
+
+            if burst_id and ref_date_taken is not None:
+                _LOGGER.debug("Burst fast path: burst_id=%s for %s", burst_id, reference_path)
+                items = await cache_manager.get_burst_photos_by_burst_id(
+                    burst_id=burst_id,
+                    reference_date_taken=ref_date_taken,
+                    sort_order=sort_order,
+                )
+            else:
+                # Fallback: at-query-time proximity search using integration config defaults
+                time_window = config.get(
+                    CONF_BURST_TIME_WINDOW_SECONDS,
+                    DEFAULT_BURST_TIME_WINDOW_SECONDS,
+                )
+                location_tolerance = config.get(
+                    CONF_BURST_LOCATION_TOLERANCE_METERS,
+                    DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
+                )
+                _LOGGER.debug(
+                    "Burst fallback path: window=%ds, location=%dm for %s",
+                    time_window, location_tolerance, reference_path,
+                )
+                items = await cache_manager.get_burst_photos(
+                    reference_path=reference_path,
+                    time_window_seconds=time_window,
+                    prefer_same_location=True,
+                    location_tolerance_meters=location_tolerance,
+                    sort_order=sort_order,
+                )
             _LOGGER.info("Found %d burst photos for %s", len(items), reference_path)
             
         elif mode == "anniversary":
