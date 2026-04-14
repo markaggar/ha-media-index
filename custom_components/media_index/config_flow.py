@@ -317,8 +317,8 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
                     vol.Optional(
                         CONF_BURST_LOCATION_TOLERANCE_METERS,
-                        default=max(1, current_burst_location_tolerance)
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+                        default=max(0, current_burst_location_tolerance)
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
                     vol.Optional(
                         CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, default=current_burst_interval_hours
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),

@@ -42,7 +42,7 @@ class MediaFileEventHandler(FileSystemEventHandler):
         self._burst_index_callback = burst_index_callback
         self._burst_auto_index_interval_hours = burst_auto_index_interval_hours
         self._last_burst_index_time: Dict[str, datetime] = {}
-        self._burst_index_locks: Dict[str, asyncio.Lock] = {}
+        self._burst_index_inflight: set = set()
 
         # Event queues for batching
         self._pending_new: Dict[str, datetime] = {}  # path -> timestamp
@@ -209,10 +209,8 @@ class MediaFileEventHandler(FileSystemEventHandler):
                     
                     # Trigger burst indexing for touched folders (rate-limited per folder)
                     if self._burst_index_callback and touched_folders:
+                        # Schedule burst indexing as a background task with per-folder in-flight guard
                         for folder in touched_folders:
-                            if folder not in self._burst_index_locks:
-                                self._burst_index_locks[folder] = asyncio.Lock()
-                            # Schedule burst indexing as a background task with per-folder lock
                             self.hass.async_create_task(self._run_burst_index_with_lock(folder))
 
                     # Always yield to event loop after each iteration for consistent rate limiting
@@ -227,16 +225,17 @@ class MediaFileEventHandler(FileSystemEventHandler):
             _LOGGER.debug("Batch processor stopped (no pending events)")
 
     async def _run_burst_index_with_lock(self, folder: str):
-        """Run burst index for a folder with a per-folder lock to prevent overlap."""
-        lock = self._burst_index_locks[folder]
-        if lock.locked():
+        """Run burst index for a folder, skipping if already in progress for this folder."""
+        if folder in self._burst_index_inflight:
             _LOGGER.debug("Burst index for %s is already running, skipping.", folder)
             return
-        async with lock:
-            try:
-                await self._trigger_burst_index_for_folders({folder})
-            except Exception as err:
-                _LOGGER.error("Error running burst index for %s: %s", folder, err)
+        self._burst_index_inflight.add(folder)
+        try:
+            await self._trigger_burst_index_for_folders({folder})
+        except Exception as err:
+            _LOGGER.error("Error running burst index for %s: %s", folder, err)
+        finally:
+            self._burst_index_inflight.discard(folder)
     
     async def _trigger_burst_index_for_folders(self, folders: Set[str]):
         """Trigger burst indexing for folders that have passed the cooldown interval."""

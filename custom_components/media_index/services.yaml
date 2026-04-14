@@ -501,12 +501,12 @@ index_burst_groups:
           unit_of_measurement: s
     location_tolerance_meters:
       name: Location Tolerance (metres)
-      description: GPS radius in metres for grouping photos at the same location. Photos without GPS coordinates are grouped by time only.
+      description: GPS radius in metres for grouping photos at the same location. Set to 0 to group by time only (ignore GPS). Photos without GPS coordinates are always grouped by time only.
       required: false
       default: 50
       selector:
         number:
-          min: 1
+          min: 0
           max: 1000
           unit_of_measurement: m
     min_group_size:

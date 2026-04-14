@@ -156,6 +156,11 @@ class CacheManager:
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_exif_favorited ON exif_data(is_favorited)
         """)
+
+        # Index for burst_id fast-path lookups
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exif_burst_id ON exif_data(burst_id)
+        """)
         
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS geocode_cache (

@@ -620,7 +620,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 folder=folder,
                 time_window_seconds=burst_time_window_seconds,
                 location_tolerance_meters=burst_location_tolerance_meters,
-                overwrite_existing=True,
+                overwrite_existing=False,
             )
         burst_index_callback = _burst_index_callback
 
@@ -1045,7 +1045,7 @@ def _register_services(hass: HomeAssistant):
                 items = await cache_manager.get_burst_photos(
                     reference_path=reference_path,
                     time_window_seconds=time_window,
-                    prefer_same_location=True,
+                    prefer_same_location=location_tolerance > 0,
                     location_tolerance_meters=location_tolerance,
                     sort_order=sort_order,
                 )
@@ -1720,12 +1720,13 @@ def _register_services(hass: HomeAssistant):
         async def _scan_and_burst():
             await scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
             if auto_burst_index and burst_index_after_scan:
-                _LOGGER.info("Running full-library burst group index after manual scan")
+                _LOGGER.info("Running burst group index for %s after manual scan", folder_path)
                 try:
                     await cache_manager.index_burst_groups(
+                        folder=folder_path,
                         time_window_seconds=burst_time_window_seconds,
                         location_tolerance_meters=burst_location_tolerance_meters,
-                        overwrite_existing=True,
+                        overwrite_existing=False,
                     )
                 except Exception as err:
                     _LOGGER.error("Post-scan burst index failed: %s", err)

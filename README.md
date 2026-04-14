@@ -40,8 +40,8 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Efficient querying** from SQLite database
 
 ### 📸 Burst Detection & Review
-- **Burst Indexing** - Automatically or manually scan the library and mark burst photos using integration-level configurable time and distance settings
-- **Time-based burst detection** - find photos taken within the configured `burst_time_window_seconds` of a reference photo (default 10 seconds)
+- **Burst Indexing** - Automatically or manually scan the library and mark burst photos using customizable time and distance settings
+- **Time-based burst detection** - find photos taken within ±N seconds of a reference photo (default ±10 seconds)
 - **GPS-based filtering** - match photos by location proximity using Haversine distance (default 50 meters)
 - **Automatic fallback** to time-only matching when GPS data unavailable
 - **Burst metadata persistence** - save favorite selections and burst counts to file metadata
