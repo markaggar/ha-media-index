@@ -1687,12 +1687,29 @@ def _register_services(hass: HomeAssistant):
         watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
         
         _LOGGER.info("🔄 TRIGGER: Manual scan service call for %s (force=%s)", folder_path, force_rescan)
-        
-        # Start scan as background task
-        hass.async_create_task(
-            scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
-        )
-        
+
+        auto_burst_index = config.get(CONF_AUTO_BURST_INDEX, DEFAULT_AUTO_BURST_INDEX)
+        burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
+        burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+        burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        async def _scan_and_burst():
+            await scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
+            if auto_burst_index and burst_index_after_scan:
+                _LOGGER.info("Running full-library burst group index after manual scan")
+                try:
+                    await cache_manager.index_burst_groups(
+                        time_window_seconds=burst_time_window_seconds,
+                        location_tolerance_meters=burst_location_tolerance_meters,
+                        overwrite_existing=True,
+                    )
+                except Exception as err:
+                    _LOGGER.error("Post-scan burst index failed: %s", err)
+
+        # Start scan (+ optional burst index) as background task
+        hass.async_create_task(_scan_and_burst())
+
         return {"status": "scan_started", "folder": folder_path}
     
     async def handle_check_file_exists(call):

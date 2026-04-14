@@ -519,11 +519,11 @@ class CacheManager:
         if not exif_data:
             return
         
-        # Check if EXIF data already exists - preserve geocoded location and favorite data
+        # Check if EXIF data already exists - preserve geocoded location, favorite, and burst data
         existing_data = None
         async with self._db.execute("""
             SELECT location_name, location_city, location_state, location_country,
-                   rating, is_favorited
+                   rating, is_favorited, burst_count, burst_favorites
             FROM exif_data
             WHERE file_id = ?
         """, (file_id,)) as cursor:
@@ -535,7 +535,9 @@ class CacheManager:
                     'location_state': row[2],
                     'location_country': row[3],
                     'rating': row[4],
-                    'is_favorited': row[5]
+                    'is_favorited': row[5],
+                    'burst_count': row[6],
+                    'burst_favorites': row[7],
                 }
         
         await self._db.execute("""
@@ -544,8 +546,9 @@ class CacheManager:
              location_name, location_city, location_state, location_country,
              rating, is_favorited,
              iso, aperture, shutter_speed, focal_length, focal_length_35mm,
-             exposure_compensation, metering_mode, white_balance, flash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             exposure_compensation, metering_mode, white_balance, flash,
+             burst_count, burst_favorites)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             file_id,
             exif_data.get('camera_make'),
@@ -572,6 +575,9 @@ class CacheManager:
             exif_data.get('metering_mode'),
             exif_data.get('white_balance'),
             exif_data.get('flash'),
+            # Preserve existing burst data - never cleared by a rescan
+            existing_data['burst_count'] if existing_data else None,
+            existing_data['burst_favorites'] if existing_data else None,
         ))
         
         await self._db.commit()
