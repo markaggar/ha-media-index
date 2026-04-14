@@ -110,7 +110,7 @@ For photos with GPS coordinates, the integration gradually adds location names:
   - Only new files or manual `geocode_file` service calls get the current language setting
   - To update all files to a new language: Use `geocode_file` service individually or clear database and re-scan
 
-### Video Metadata Extraction (GPS, Date):**
+### Video Metadata Extraction (GPS, Date):
 The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. Simply enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library during setup if it's missing - no restart or reload needed! Video metadata extraction is available immediately when the integration finishes loading. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled during the next restart (the option stays enabled).
 
 ### Database Performance
