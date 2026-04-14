@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
@@ -123,7 +124,7 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): bool,
                     vol.Optional(
                         CONF_SCAN_SCHEDULE, default=DEFAULT_SCAN_SCHEDULE
-                    ): vol.In(SCAN_SCHEDULES),
+                    ): selector.SelectSelector({"options": SCAN_SCHEDULES}),
                     vol.Optional(
                         CONF_EXTRACT_EXIF, default=DEFAULT_EXTRACT_EXIF
                     ): bool,
@@ -277,7 +278,7 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): str,
                     vol.Optional(
                         CONF_SCAN_SCHEDULE, default=current_schedule
-                    ): vol.In(SCAN_SCHEDULES),
+                    ): selector.SelectSelector({"options": SCAN_SCHEDULES}),
                     vol.Optional(
                         CONF_EXTRACT_EXIF, default=current_exif
                     ): bool,
