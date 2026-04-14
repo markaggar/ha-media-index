@@ -389,3 +389,34 @@ MIT License - see LICENSE file
 
 - **Issues**: [GitHub Issues](https://github.com/markaggar/ha-media-index/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/markaggar/ha-media-index/discussions)
+
+## Burst Group Automation & Scan Schedule Options
+
+The Media Index integration provides advanced options for controlling when and how burst groups are indexed, as well as how often your media library is scanned for changes. These options are available in the integration's configuration and options flow.
+
+### Scan Schedule
+- **Scan schedule** determines how often the integration performs a full scan of your media folders:
+  - **Startup only**: Scan runs only when Home Assistant starts. Fastest, but new files are only detected after a restart or manual scan.
+  - **Hourly**: Scan runs every hour. Good for libraries that change frequently.
+  - **Daily**: Scan runs once per day. Recommended for most users.
+  - **Weekly**: Scan runs once per week. Best for very large libraries or infrequent changes.
+- **Performance note:** More frequent scans keep your library up to date but can increase CPU and disk usage, especially with large collections.
+
+### Automatic Burst Group Indexing
+These options keep burst group (multiple images created at the same time and place) data current without manual service calls:
+- **auto_burst_index** (bool, default `false`): Master enable. When `false`, all automatic burst indexing is disabled.
+- **burst_time_window_seconds** (int, default `10`): Maximum time gap (in seconds) between consecutive photos to consider them part of the same burst group.
+- **burst_location_tolerance_meters** (int, default `50`): Maximum GPS distance (in meters) between shots in the same burst group. Set to `0` to disable location-based grouping.
+- **burst_auto_index_interval_hours** (int, default `24`): Minimum hours between automatic burst re-indexing of the same folder. Prevents excessive re-indexing when many files arrive in quick succession.
+- **burst_index_after_scan** (bool, default `false`): If enabled, a full-library burst re-index is performed after each scheduled scan completes. Useful for libraries managed by scheduled import scripts.
+
+#### How It Works
+- **Watcher trigger:** After each batch of file events, affected parent folders are enqueued for burst indexing, subject to the cooldown interval.
+- **Post-scan trigger:** If both `auto_burst_index` and `burst_index_after_scan` are enabled, a full-library burst re-index runs at the end of every scheduled scan.
+
+#### Performance Implications
+- **Large libraries:** Full-library burst re-indexing can be resource-intensive. For libraries with tens of thousands of files, set a longer scan schedule and avoid enabling both frequent scans and burst re-index after scan.
+- **Per-folder cooldown:** The cooldown interval prevents the same folder from being re-indexed too often, even if many files are added in a short period.
+- **Best practice:** For most users, enable `auto_burst_index` with a daily or weekly scan schedule and leave `burst_index_after_scan` disabled unless you need full-library reindexing after every scan.
+
+See the integration options panel in Home Assistant for descriptions and recommended defaults for each setting.
