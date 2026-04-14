@@ -50,7 +50,7 @@
           "scan_on_startup": "Scan on startup",
           "auto_burst_index": "Auto Burst Indexing",
           "burst_time_window_seconds": "Burst Time Window (seconds)",
-          "burst_location_tolerance_meters": "Burst GPS Tolerance (meters, 0 = disabled)",
+          "burst_location_tolerance_meters": "Burst GPS Tolerance (meters)",
           "burst_auto_index_interval_hours": "Minimum Hours Between Watcher Re-indexes",
           "burst_index_after_scan": "Re-index Burst Groups After Each Full Scan"
         }
