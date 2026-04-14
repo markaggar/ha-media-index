@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Run this once (or after bulk imports) to enable backend-level burst filtering in `get_random_items`
   - See `media_index.index_burst_groups` in the services documentation
 
+- **`burst_id` Column on `exif_data`**: Every photo assigned to a burst group by `index_burst_groups` now receives a stable `burst_id` (the lowest `file_id` in the group). This enables O(1) lookups when the burst panel opens \u2014 no proximity math required. Pre-1.6.0 databases are migrated automatically on first load.
+
+- **`get_related_files` Fast Path via `burst_id`**: When the reference photo has a `burst_id`, the service returns all group members using a single indexed join. If the photo has not been indexed yet, the service falls back to at-query-time proximity detection using the integration\u2019s configured `burst_time_window_seconds` and `burst_location_tolerance_meters` (or safe hardcoded defaults). Callers (including Media Card) no longer pass time/location parameters \u2014 grouping thresholds are owned by the integration, not the client.
+
+- **Per-Folder Burst Grouping**: `index_burst_groups` can be called multiple times with different `time_window_seconds` / `location_tolerance_meters` per `folder`. Each folder\u2019s groups are stored independently via `burst_id`. `get_related_files` always honors the pre-computed grouping for each file, so folders can have different burst sensitivities without affecting one another.
+
 - **`auto_select_burst_favorite` Parameter for `get_random_items`**: When `true`, the SQL query excludes non-favorite burst members whose group has at least one indexed favorite
   - Filtering is done in the database before results are sent to the card — no client-side splicing or timers
   - Only applies to files where `burst_count` is set (i.e., `index_burst_groups` has run); non-indexed files are returned normally
