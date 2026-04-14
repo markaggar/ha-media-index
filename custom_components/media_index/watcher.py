@@ -24,6 +24,7 @@ RATE_LIMIT_DELAY = 0.5  # seconds - delay between processing batches
 
 
 class MediaFileEventHandler(FileSystemEventHandler):
+        self._burst_index_locks: Dict[str, asyncio.Lock] = {}
     """Handler for media file system events with throttling."""
     
     def __init__(
@@ -208,7 +209,22 @@ class MediaFileEventHandler(FileSystemEventHandler):
                     
                     # Trigger burst indexing for touched folders (rate-limited per folder)
                     if self._burst_index_callback and touched_folders:
-                        await self._trigger_burst_index_for_folders(touched_folders)
+                        for folder in touched_folders:
+                            if folder not in self._burst_index_locks:
+                                self._burst_index_locks[folder] = asyncio.Lock()
+                            # Schedule burst indexing as a background task with per-folder lock
+                            self.hass.async_create_task(self._run_burst_index_with_lock(folder))
+    async def _run_burst_index_with_lock(self, folder: str):
+        """Run burst index for a folder with a per-folder lock to prevent overlap."""
+        lock = self._burst_index_locks[folder]
+        if lock.locked():
+            _LOGGER.debug("Burst index for %s is already running, skipping.", folder)
+            return
+        async with lock:
+            try:
+                await self._trigger_burst_index_for_folders({folder})
+            except Exception as err:
+                _LOGGER.error("Error running burst index for %s: %s", folder, err)
 
                     # Always yield to event loop after each iteration for consistent rate limiting
                     await asyncio.sleep(RATE_LIMIT_DELAY)
