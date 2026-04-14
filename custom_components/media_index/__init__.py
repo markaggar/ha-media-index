@@ -25,10 +25,20 @@ from .const import (
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_AUTO_BURST_INDEX,
+    CONF_BURST_TIME_WINDOW_SECONDS,
+    CONF_BURST_LOCATION_TOLERANCE_METERS,
+    CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    CONF_BURST_INDEX_AFTER_SCAN,
     DEFAULT_ENABLE_WATCHER,
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_AUTO_BURST_INDEX,
+    DEFAULT_BURST_TIME_WINDOW_SECONDS,
+    DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
+    DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    DEFAULT_BURST_INDEX_AFTER_SCAN,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
     SCAN_SCHEDULE_STARTUP_ONLY,
@@ -101,11 +111,6 @@ SERVICE_GET_RELATED_FILES_SCHEMA = vol.Schema({
     vol.Optional("reference_path"): cv.string,
     vol.Optional("media_source_uri"): cv.string,
     vol.Required("mode"): vol.In(["burst", "anniversary"]),
-    
-    # Burst mode parameters
-    vol.Optional("time_window_seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
-    vol.Optional("prefer_same_location", default=True): cv.boolean,
-    vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
     
     # Anniversary mode parameters
     vol.Optional("window_days", default=3): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
@@ -301,6 +306,11 @@ def _setup_scheduled_scan(
     base_folder: str,
     watched_folders: list,
     scan_schedule: str,
+    cache_manager: "CacheManager" = None,
+    auto_burst_index: bool = False,
+    burst_index_after_scan: bool = False,
+    burst_time_window_seconds: int = 10,
+    burst_location_tolerance_meters: int = 50,
 ) -> None:
     """Setup scheduled scanning based on config.
     
@@ -311,6 +321,11 @@ def _setup_scheduled_scan(
         base_folder: Base folder path
         watched_folders: List of watched folders
         scan_schedule: Schedule type (hourly/daily/weekly)
+        cache_manager: CacheManager instance (required for burst indexing)
+        auto_burst_index: Whether auto burst indexing is enabled
+        burst_index_after_scan: Run full-library burst index after each scheduled scan
+        burst_time_window_seconds: Max gap between burst shots (seconds)
+        burst_location_tolerance_meters: Max GPS distance between burst shots (meters)
     """
     async def _scheduled_scan_callback(now):
         """Run scheduled scan if not already running."""
@@ -337,6 +352,18 @@ def _setup_scheduled_scan(
             scan_schedule, entry.title or entry.entry_id, base_folder
         )
         await scanner.scan_folder(base_folder, watched_folders)
+
+        # Optionally re-index burst groups across the full library after scan
+        if auto_burst_index and burst_index_after_scan and cache_manager is not None:
+            _LOGGER.info("Running full-library burst group index after scheduled scan")
+            try:
+                await cache_manager.index_burst_groups(
+                    time_window_seconds=burst_time_window_seconds,
+                    location_tolerance_meters=burst_location_tolerance_meters,
+                    overwrite_existing=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Post-scan burst index failed: %s", err)
     
     # Determine scan interval
     if scan_schedule == SCAN_SCHEDULE_HOURLY:
@@ -579,7 +606,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     
     # Initialize watcher
-    watcher = MediaWatcher(scanner, cache_manager, hass)
+    auto_burst_index = config.get(CONF_AUTO_BURST_INDEX, DEFAULT_AUTO_BURST_INDEX)
+    burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+    burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+    burst_auto_index_interval_hours = config.get(CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS)
+
+    burst_index_callback = None
+    if auto_burst_index:
+        async def _burst_index_callback(folder: str) -> None:
+            """Index burst groups for a specific folder."""
+            _LOGGER.debug("Auto burst index triggered for folder: %s", folder)
+            await cache_manager.index_burst_groups(
+                folder=folder,
+                time_window_seconds=burst_time_window_seconds,
+                location_tolerance_meters=burst_location_tolerance_meters,
+                overwrite_existing=False,
+            )
+        burst_index_callback = _burst_index_callback
+
+    watcher = MediaWatcher(
+        scanner,
+        cache_manager,
+        hass,
+        burst_index_callback=burst_index_callback,
+        burst_auto_index_interval_hours=burst_auto_index_interval_hours,
+    )
     
     # Construct media_source_uri automatically if not configured
     # This ensures v1.4+ upgrade path works seamlessly without config changes
@@ -654,8 +705,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Setup scheduled scanning
     scan_schedule = config.get(CONF_SCAN_SCHEDULE, DEFAULT_SCAN_SCHEDULE)
+    burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
     if scan_schedule != SCAN_SCHEDULE_STARTUP_ONLY:
-        _setup_scheduled_scan(hass, entry, scanner, base_folder, watched_folders, scan_schedule)
+        _setup_scheduled_scan(
+            hass, entry, scanner, base_folder, watched_folders, scan_schedule,
+            cache_manager=cache_manager,
+            auto_burst_index=auto_burst_index,
+            burst_index_after_scan=burst_index_after_scan,
+            burst_time_window_seconds=burst_time_window_seconds,
+            burst_location_tolerance_meters=burst_location_tolerance_meters,
+        )
     
     # Setup weekly VACUUM task to compact database
     async def _weekly_vacuum_callback(now):
@@ -954,14 +1013,42 @@ def _register_services(hass: HomeAssistant):
         sort_order = call.data.get("sort_order", "time_asc")
         
         if mode == "burst":
-            # Burst detection mode
-            items = await cache_manager.get_burst_photos(
-                reference_path=reference_path,
-                time_window_seconds=call.data.get("time_window_seconds", 120),
-                prefer_same_location=call.data.get("prefer_same_location", True),
-                location_tolerance_meters=call.data.get("location_tolerance_meters", 50),
-                sort_order=sort_order
-            )
+            # Burst detection: use pre-indexed burst_id for fast path, fall back to
+            # proximity search (with integration-configured or hardcoded defaults) when
+            # the file hasn't been indexed yet.
+            reference_file = await cache_manager.get_file_by_path(reference_path)
+            ref_exif = (reference_file or {}).get('exif', {}) if reference_file else {}
+            burst_id = ref_exif.get('burst_id') if ref_exif else None
+            ref_date_taken = ref_exif.get('date_taken') if ref_exif else None
+
+            if burst_id and ref_date_taken is not None:
+                _LOGGER.debug("Burst fast path: burst_id=%s for %s", burst_id, reference_path)
+                items = await cache_manager.get_burst_photos_by_burst_id(
+                    burst_id=burst_id,
+                    reference_date_taken=ref_date_taken,
+                    sort_order=sort_order,
+                )
+            else:
+                # Fallback: at-query-time proximity search using integration config defaults
+                time_window = config.get(
+                    CONF_BURST_TIME_WINDOW_SECONDS,
+                    DEFAULT_BURST_TIME_WINDOW_SECONDS,
+                )
+                location_tolerance = config.get(
+                    CONF_BURST_LOCATION_TOLERANCE_METERS,
+                    DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
+                )
+                _LOGGER.debug(
+                    "Burst fallback path: window=%ds, location=%dm for %s",
+                    time_window, location_tolerance, reference_path,
+                )
+                items = await cache_manager.get_burst_photos(
+                    reference_path=reference_path,
+                    time_window_seconds=time_window,
+                    prefer_same_location=location_tolerance > 0,
+                    location_tolerance_meters=location_tolerance,
+                    sort_order=sort_order,
+                )
             _LOGGER.info("Found %d burst photos for %s", len(items), reference_path)
             
         elif mode == "anniversary":
@@ -1623,12 +1710,30 @@ def _register_services(hass: HomeAssistant):
         watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
         
         _LOGGER.info("🔄 TRIGGER: Manual scan service call for %s (force=%s)", folder_path, force_rescan)
-        
-        # Start scan as background task
-        hass.async_create_task(
-            scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
-        )
-        
+
+        auto_burst_index = config.get(CONF_AUTO_BURST_INDEX, DEFAULT_AUTO_BURST_INDEX)
+        burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
+        burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+        burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        async def _scan_and_burst():
+            await scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
+            if auto_burst_index and burst_index_after_scan:
+                _LOGGER.info("Running burst group index for %s after manual scan", folder_path)
+                try:
+                    await cache_manager.index_burst_groups(
+                        folder=folder_path,
+                        time_window_seconds=burst_time_window_seconds,
+                        location_tolerance_meters=burst_location_tolerance_meters,
+                        overwrite_existing=False,
+                    )
+                except Exception as err:
+                    _LOGGER.error("Post-scan burst index failed: %s", err)
+
+        # Start scan (+ optional burst index) as background task
+        hass.async_create_task(_scan_and_burst())
+
         return {"status": "scan_started", "folder": folder_path}
     
     async def handle_check_file_exists(call):
@@ -1806,8 +1911,8 @@ def _register_services(hass: HomeAssistant):
         handle_index_burst_groups,
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
-            vol.Optional("time_window_seconds", default=10): cv.positive_int,
-            vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional("time_window_seconds", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+            vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
             vol.Optional("min_group_size", default=2): vol.All(cv.positive_int, vol.Range(min=2)),
             vol.Optional("overwrite_existing", default=True): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),

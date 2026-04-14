@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
@@ -25,6 +26,11 @@ from .const import (
     CONF_BATCH_SIZE,
     CONF_CACHE_MAX_AGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_AUTO_BURST_INDEX,
+    CONF_BURST_TIME_WINDOW_SECONDS,
+    CONF_BURST_LOCATION_TOLERANCE_METERS,
+    CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    CONF_BURST_INDEX_AFTER_SCAN,
     DEFAULT_BASE_FOLDER,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
@@ -37,6 +43,11 @@ from .const import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CACHE_MAX_AGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_AUTO_BURST_INDEX,
+    DEFAULT_BURST_TIME_WINDOW_SECONDS,
+    DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
+    DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
+    DEFAULT_BURST_INDEX_AFTER_SCAN,
     SCAN_SCHEDULES,
 )
 
@@ -113,7 +124,7 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): bool,
                     vol.Optional(
                         CONF_SCAN_SCHEDULE, default=DEFAULT_SCAN_SCHEDULE
-                    ): vol.In(SCAN_SCHEDULES),
+                    ): selector.SelectSelector({"options": SCAN_SCHEDULES}),
                     vol.Optional(
                         CONF_EXTRACT_EXIF, default=DEFAULT_EXTRACT_EXIF
                     ): bool,
@@ -234,6 +245,26 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_SCAN_ON_STARTUP,
             self.config_entry.data.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP),
         )
+        current_auto_burst_index = self.config_entry.options.get(
+            CONF_AUTO_BURST_INDEX,
+            self.config_entry.data.get(CONF_AUTO_BURST_INDEX, DEFAULT_AUTO_BURST_INDEX),
+        )
+        current_burst_time_window = self.config_entry.options.get(
+            CONF_BURST_TIME_WINDOW_SECONDS,
+            self.config_entry.data.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS),
+        )
+        current_burst_location_tolerance = self.config_entry.options.get(
+            CONF_BURST_LOCATION_TOLERANCE_METERS,
+            self.config_entry.data.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS),
+        )
+        current_burst_interval_hours = self.config_entry.options.get(
+            CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
+            self.config_entry.data.get(CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS),
+        )
+        current_burst_index_after_scan = self.config_entry.options.get(
+            CONF_BURST_INDEX_AFTER_SCAN,
+            self.config_entry.data.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -247,7 +278,7 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): str,
                     vol.Optional(
                         CONF_SCAN_SCHEDULE, default=current_schedule
-                    ): vol.In(SCAN_SCHEDULES),
+                    ): selector.SelectSelector({"options": SCAN_SCHEDULES}),
                     vol.Optional(
                         CONF_EXTRACT_EXIF, default=current_exif
                     ): bool,
@@ -277,6 +308,22 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): bool,
                     vol.Optional(
                         CONF_SCAN_ON_STARTUP, default=current_scan_on_startup
+                    ): bool,
+                    vol.Optional(
+                        CONF_AUTO_BURST_INDEX, default=current_auto_burst_index
+                    ): bool,
+                    vol.Optional(
+                        CONF_BURST_TIME_WINDOW_SECONDS, default=current_burst_time_window
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+                    vol.Optional(
+                        CONF_BURST_LOCATION_TOLERANCE_METERS,
+                        default=max(0, current_burst_location_tolerance)
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
+                    vol.Optional(
+                        CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, default=current_burst_interval_hours
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
+                    vol.Optional(
+                        CONF_BURST_INDEX_AFTER_SCAN, default=current_burst_index_after_scan
                     ): bool,
                 }
             ),

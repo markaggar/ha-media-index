@@ -6,7 +6,7 @@
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?logo=buy-me-a-coffee)](https://buymeacoffee.com/markaggar)
 
-A custom Home Assistant integration that indexes media files (images and videos) from local folders, extracts EXIF/metadata, provides geocoding, and offers services for random media selection, favorites management, and file operations. Specifically designed for the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card), but can easily be used by any other card, integration or automation/script through Home Assistant Actions (Services) or WebSocket API calls.
+A custom Home Assistant integration that indexes media files (images and videos) from local folders, extracts EXIF/metadata, provides geocoding, and offers services for random media selection, favorites management, and file operations. Specifically designed for [Media Card](https://github.com/markaggar/ha-media-card), but can easily be used by any other card, integration or automation/script through Home Assistant [Actions (Services)](docs/SERVICES.md) or [WebSocket APIs](docs/DEVELOPER_API.md).
 
 ## Features
 
@@ -21,7 +21,7 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Reverse geocoding** of GPS coordinates to location names
 - **Smart caching** to minimize API calls (Nominatim)
 - **Progressive geocoding** during scans
-- Location hierarchy: name → city → state → country
+- **Location hierarchy**: name → city → state → country
 
 ### ⭐ Favorites & Ratings
 - **Star ratings** (0-5 stars) extracted from EXIF/XMP metadata
@@ -40,7 +40,8 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Efficient querying** from SQLite database
 
 ### 📸 Burst Detection & Review
-- **Time-based burst detection** - find photos taken within ±N seconds of a reference photo (default ±2 minutes)
+- **Burst Indexing** - Automatically or manually scan the library and mark burst photos using customizable time and distance settings
+- **Time-based burst detection** - find photos taken within ±N seconds of a reference photo (default ±10 seconds)
 - **GPS-based filtering** - match photos by location proximity using Haversine distance (default 50 meters)
 - **Automatic fallback** to time-only matching when GPS data unavailable
 - **Burst metadata persistence** - save favorite selections and burst counts to file metadata
@@ -51,43 +52,17 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Mark for editing** - moves files to `_Edit` folder
 - **Database cleanup** - automatically removes deleted files from index
 
+## Using with Media Cards
+
+Media Index is designed to work seamlessly with [Media Card](https://github.com/markaggar/ha-media-card):
+
+- **Instant slideshow loading** - No waiting for folder scans
+- **Smart random selection** - Avoids repetition within slideshow sessions  
+- **Rich metadata display** - Shows location names, ratings, and EXIF data
+- **Interactive controls** - Favorite, delete, and mark for editing directly from the card
+- **Background updates** - New photos appear automatically without restart
+
 ## Installation
-
-### Prerequisites
-
-**For Video Metadata Extraction (GPS, Date):**
-
-The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. You have two options:
-
-1. **Automatic Installation** (Recommended for Home Assistant OS/Supervised): Enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library during setup if it's missing - no restart or reload needed! Video metadata extraction is available immediately when the integration finishes loading. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled during the next restart (the option stays enabled).
-
-2. **Manual Installation**: Install `libmediainfo` yourself (instructions below). After installation, manually reload the integration in Settings → Devices & Services → Media Index → ⋮ → Reload.
-
-**Home Assistant OS/Supervised (Docker):**
-```bash
-# SSH into your Home Assistant container or use the [Advanced SSH & Web Terminal](https://github.com/hassio-addons/addon-ssh) add-on available in Home Assistant OS
-docker exec -it homeassistant bash
-
-# Install libmediainfo
-apk add libmediainfo
-
-# Exit and restart Home Assistant
-exit
-```
-
-**Home Assistant Core (Manual Install):**
-```bash
-# Debian/Ubuntu
-sudo apt-get install libmediainfo-dev
-
-# Fedora/RHEL
-sudo dnf install libmediainfo-devel
-
-# macOS
-brew install media-info
-```
-
-**Note:** If `libmediainfo` is not installed, video metadata extraction will be limited (no GPS or date extraction from videos). Image metadata extraction is unaffected.
 
 ### HACS (Recommended)
 
@@ -99,13 +74,51 @@ or
 2. Click "Integrations"
 3. Search for 'Media Index'
 4. Click "Install"
-5. **Install libmediainfo** (see Prerequisites above if you need video metadata)
-6. Restart Home Assistant
+5. Restart Home Assistant
 
 ### Manual
 1. Copy the `custom_components/media_index` folder to your Home Assistant `custom_components` directory
-2. **Install libmediainfo** (see Prerequisites above if you need video metadata)
-3. Restart Home Assistant
+2. Restart Home Assistant
+
+## How It Works
+
+The Media Index integration runs in the background to keep your media organized and accessible:
+
+### Initial Indexing
+When first set up, the integration scans your configured folders and:
+- **Discovers all media files** (images and videos) in your folders
+- **Extracts metadata** like date taken, GPS coordinates, camera settings, and star ratings
+- **Stores everything in a local database** for fast access during slideshows
+
+### Real-Time Monitoring  
+After initial setup, the integration watches for changes:
+- **New files added** → Automatically indexed and added to database
+- **Files moved/deleted** → Database updated to reflect changes
+- **Files edited** → Re-scanned to pick up metadata changes
+
+### Geocoding (Location Names)
+For photos with GPS coordinates, the integration gradually adds location names:
+- **Rate limited to 1 request per second** to respect Nominatim API limits
+- **Works progressively** during scans - doesn't slow down initial indexing
+- **Caches results** to avoid repeated API calls for the same coordinates
+- **Provides location hierarchy** from specific place names to country level
+- **Language support**: Uses Home Assistant's configured language by default
+  - Location names are cached permanently once geocoded
+  - Existing files keep their original language
+  - Only new files or manual `geocode_file` service calls get the current language setting
+  - To update all files to a new language: Use `geocode_file` service individually or clear database and re-scan
+
+### Video Metadata Extraction (GPS, Date):
+The integration uses `pymediainfo` (Python package) which requires the `libmediainfo` system library. Simply enable the `auto_install_libmediainfo` option in integration configuration. The integration will automatically install the library during setup if it's missing - no restart or reload needed! Video metadata extraction is available immediately when the integration finishes loading. ⚠️ **Note**: After each Home Assistant core upgrade, the library will be automatically reinstalled during the next restart (the option stays enabled).
+
+### Database Performance
+The integration uses an optimized SQLite database that:
+- **Responds instantly** to random media requests from your slideshow cards
+- **Tracks exclusions** to avoid showing the same photos repeatedly
+- **Maintains favorites and ratings** with both database and file metadata
+- **Grows efficiently** as your media collection expands
+
+This background processing means your Media Cards can display random photos instantly without scanning folders every time!
 
 ## Configuration
 
@@ -116,7 +129,7 @@ or
 5. If your Media folders in the front end media browse dialogs are not prefixed by 'media-source://media_source/media', then copy and paste the full media-source:// URI (from the HA Media Card config) that points to the same place as the base media folder you specified in the previous step. It is critical that these both point to the same folder structure, e.g.: 
    - base media folder: /config/www/local
    - media source URI: media-source://media_source/local  
-6. Configure optional settings (watched folders, EXIF extraction, geocoding)
+6. Configure optional settings (watched folders, scan frequency, EXIF extraction, geocoding, libmediainfo install, burst indexing)
 
 💡 **Multi-Instance Support:** You can add multiple instances with different base folders (e.g., one for Photos, one for Videos) by repeating this process with different folder paths.
 
@@ -160,6 +173,23 @@ media/Photo/OneDrive/Mark-Pictures/Samsung Gallery/DCIM/Camera
 - Quotes are not needed (they're stripped automatically)
 - The integration scans the entire base folder regardless, but watches only specified folders for real-time updates
 
+### Scan Schedule & Burst Group Indexing Options
+
+The Media Index integration configuration provides options for controlling how often your media library is scanned for changes and when and how burst groups are indexed. 
+
+#### Scan Schedule
+- **Scan schedule** determines when/how often the integration performs a full scan of your media folders. More frequent scans keep your library up to date but can increase CPU and disk usage, especially with large collections.
+
+#### Automatic Burst Group Indexing
+These options keep burst group (multiple images created at the same time and place) data current without manual service calls:
+- **auto_burst_index** (bool, default `false`): Master enable. When `false`, all automatic burst indexing is disabled.
+- **burst_auto_index_interval_hours** (int, default `24`): Minimum hours between automatic burst re-indexing of watched folder. Prevents excessive re-indexing when many files arrive in quick succession. If no new files are detected in the watch folders when the interval is ended, burst re-indexing will not occur.
+- **burst_index_after_scan** (bool, default `false`): If enabled, a full-library burst re-index is performed after each scheduled scan completes. Useful for libraries managed by scheduled import scripts.
+
+**Best practice:** For most users, enable `auto_burst_index` with a daily or weekly scan schedule and leave `burst_index_after_scan` disabled unless you need full-library reindexing after every scan.
+
+See the integration options panel in Home Assistant for descriptions and recommended defaults for each setting.
+
 ### Reconfiguration
 
 After setup, you can reconfigure options via:
@@ -184,16 +214,6 @@ service: media_index.restore_edited_files
 
 The integration provides additional services for advanced use cases and Media Card integration. See [SERVICES.md](docs/SERVICES.md) for complete documentation of all available services including:
 
-- `get_random_items` - Random media selection with anniversary mode support (used by Media Card)
-- `get_related_files` - Find related photos by date/time or burst detection mode
-- `update_burst_metadata` - Save burst review session data to file metadata
-- `mark_favorite` - Toggle favorite status
-- `delete_media` - Move files to `_Junk` folder
-- `mark_for_edit` - Move files to `_Edit` folder
-- `get_file_metadata` - Get detailed metadata
-- `geocode_file` - Force geocoding
-- `scan_folder` - Manual folder scanning
-
 ## Sensors
 
 The integration creates the following sensors for each configured entry:
@@ -208,53 +228,6 @@ The integration creates the following sensors for each configured entry:
 - `total_folders`: Number of watched folders
 - `geocoded_files`: Number of files with location data
 - `favorited_files`: Number of favorited files
-
-## How It Works
-
-The Media Index integration runs in the background to keep your media organized and accessible:
-
-### Initial Indexing
-When first set up, the integration scans your configured folders and:
-- **Discovers all media files** (images and videos) in your folders
-- **Extracts metadata** like date taken, GPS coordinates, camera settings, and star ratings
-- **Stores everything in a local database** for fast access during slideshows
-
-### Real-Time Monitoring  
-After initial setup, the integration watches for changes:
-- **New files added** → Automatically indexed and added to database
-- **Files moved/deleted** → Database updated to reflect changes
-- **Files edited** → Re-scanned to pick up metadata changes
-
-### Geocoding (Location Names)
-For photos with GPS coordinates, the integration gradually adds location names:
-- **Rate limited to 1 request per second** to respect Nominatim API limits
-- **Works progressively** during scans - doesn't slow down initial indexing
-- **Caches results** to avoid repeated API calls for the same coordinates
-- **Provides location hierarchy** from specific place names to country level
-- **Language support**: Uses Home Assistant's configured language by default
-  - Location names are cached permanently once geocoded
-  - Existing files keep their original language
-  - Only new files or manual `geocode_file` service calls get the current language setting
-  - To update all files to a new language: Use `geocode_file` service individually or clear database and re-scan
-
-### Database Performance
-The integration uses an optimized SQLite database that:
-- **Responds instantly** to random media requests from your slideshow cards
-- **Tracks exclusions** to avoid showing the same photos repeatedly
-- **Maintains favorites and ratings** with both database and file metadata
-- **Grows efficiently** as your media collection expands
-
-This background processing means your Media Cards can display random photos instantly without scanning folders every time!
-
-## Using with Media Cards
-
-Media Index is designed to work seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
-
-- **Instant slideshow loading** - No waiting for folder scans
-- **Smart random selection** - Avoids repetition within slideshow sessions  
-- **Rich metadata display** - Shows location names, ratings, and EXIF data
-- **Interactive controls** - Favorite, delete, and mark for editing directly from the card
-- **Background updates** - New photos appear automatically without restart
 
 ## Performance
 
@@ -300,24 +273,6 @@ To reset the database, delete this file and trigger a rescan.
 
 ## Limitations & Known Issues
 
-### Multi-Instance Support
-
-✅ **Full multi-instance support with target selectors**
-
-You can configure multiple integration instances (e.g., separate folders for Photos and Videos) and services will work with all instances using target selectors:
-
-**Usage:**
-```yaml
-service: media_index.restore_edited_files
-target:
-  entity_id: sensor.media_index_photos_total_files
-```
-
-**Benefits:**
-- Separate instances for different media collections
-- Independent configuration per instance (different watched folders, settings)
-- Services can target specific instances or all instances
-
 ### Video Rating Persistence
 
 **⚠️ Video ratings are stored in the database only, not written to MP4 files.**
@@ -355,8 +310,6 @@ Import ratings from an exported file and apply to matching files.
 - Merge with existing ratings
 - Update database and EXIF (for images)
 
-
-
 ## Developer Integration
 
 For developers creating cards or integrations that consume Media Index services:
@@ -389,3 +342,5 @@ MIT License - see LICENSE file
 
 - **Issues**: [GitHub Issues](https://github.com/markaggar/ha-media-index/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/markaggar/ha-media-index/discussions)
+
+

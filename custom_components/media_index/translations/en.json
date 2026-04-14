@@ -13,7 +13,7 @@
           "extract_exif": "Extract EXIF metadata",
           "geocode_enabled": "Enable geocoding (GPS to location names)",
           "geocode_precision": "Coordinate precision (2-6 decimal places)",
-          "geocode_native_language": "Use native language names",
+          "geocode_native_language": "Use native language names (e.g., 日本 instead of Japan)",
           "max_startup_time": "Max startup scan time (seconds)",
           "concurrent_scans": "Concurrent scan workers",
           "auto_install_libmediainfo": "Auto-install libmediainfo for video metadata extraction. During initial setup, Home Assistant restart required after install. When using install_libmediainfo service, integration auto-reloads (no restart needed). If you have multiple Media Index instances, only enable this for one.",
@@ -46,7 +46,13 @@
           "concurrent_scans": "Concurrent scan workers",
           "auto_install_libmediainfo": "Auto-install libmediainfo (for video metadata extraction). Only enable for one instance if multiple Media Index instances are used.",
           "batch_size": "Batch size (files per batch)",
-          "cache_max_age_days": "Cache max age (days)"
+          "cache_max_age_days": "Cache max age (days)",
+          "scan_on_startup": "Scan on startup",
+          "auto_burst_index": "Auto Burst Indexing",
+          "burst_time_window_seconds": "Burst Time Window (seconds)",
+          "burst_location_tolerance_meters": "Burst GPS Tolerance (meters)",
+          "burst_auto_index_interval_hours": "Minimum Hours Between Watcher Re-indexes",
+          "burst_index_after_scan": "Re-index Burst Groups After Each Full Scan"
         }
       }
     }

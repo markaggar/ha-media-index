@@ -267,56 +267,40 @@ data:
 
 ### `media_index.get_related_files`
 
-**New in v1.5** - Find related photos by date/time or burst detection mode.
+**New in v1.5, updated in v1.6.0** - Find related photos for a reference file.
 
 **Parameters:**
 - `mode` (required): `"burst"` for burst detection or `"anniversary"` for same-day photos across years
 - `reference_path` (optional): Filesystem path to reference photo
 - `media_source_uri` (optional): Media-source URI (alternative to reference_path)
-
-**Burst Mode Parameters:**
-- `time_window_seconds` (optional, default: 120): Time window in seconds (±) around reference timestamp
-- `prefer_same_location` (optional, default: true): Enable GPS proximity filtering (fallback to time-only if no GPS)
-- `location_tolerance_meters` (optional, default: 50): Maximum GPS distance in meters for matching
+- `sort_order` (optional, default: `"time_asc"`): Result ordering (`time_asc` or `time_desc`)
 
 **Anniversary Mode Parameters:**
 - `window_days` (optional, default: 3): Days before/after reference date to include (±N days)
 - `years_back` (optional, default: 15): How many years back to search
 
-**Common Parameters:**
-- `sort_order` (optional, default: "time_asc"): Result ordering (`time_asc` or `time_desc`)
+**Note:** Provide either `reference_path` OR `media_source_uri`.
 
-**Note:** Provide either `reference_path` OR `media_source_uri`
+**Burst Mode Behavior (v1.6.0+):**
 
-**Returns:** List of related photos with `seconds_offset`, `distance_meters`, `is_favorited`, `rating`, and `media_source_uri`
+Grouping thresholds are determined by the integration, not the caller — no time or location parameters are accepted for burst mode.
+
+1. **Fast path**: If the reference photo has a `burst_id` (assigned by `index_burst_groups`), all members of that pre-computed group are returned via a single indexed join. This is the normal case after `index_burst_groups` has run.
+2. **Fallback**: If the photo has no `burst_id`, at-query-time proximity detection runs using the `burst_time_window_seconds` and `burst_location_tolerance_meters` values configured in the integration options (Settings → Devices & Services → Media Index → Configure). Safe hardcoded defaults are used when connecting to a media_index version older than v1.6.0.
+
+**Returns:** List of related photos with `seconds_offset`, `distance_meters` (fallback path only), `is_favorited`, `rating`, and `media_source_uri`.
 
 **Use cases:**
-- Burst Review feature in Media Card - compare rapid-fire shots to select the best photo
-- Find photos taken at the same location and time
-- Review burst sequences with GPS filtering
+- Burst Review panel in Media Card — compare rapid-fire shots to select the best photo
+- Finding all members of a burst group for batch-favorite or batch-delete workflows
 
-**Examples:**
+**Example:**
 ```yaml
-# Find burst photos within ±2 minutes (default)
+# Burst mode — no time/location params needed; integration handles grouping
 service: media_index.get_related_files
 data:
   mode: burst
   media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
-
-# Custom time window and GPS tolerance
-service: media_index.get_related_files
-data:
-  mode: burst
-  media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
-  time_window_seconds: 300
-  location_tolerance_meters: 100
-
-# Time-only matching (disable GPS filtering)
-service: media_index.get_related_files
-data:
-  mode: burst
-  media_source_uri: media-source://media_source/media/Photo/PhotoLibrary/IMG_1234.jpg
-  prefer_same_location: false
 ```
 
 ### `media_index.index_burst_groups`
@@ -341,8 +325,29 @@ data:
 - Streams all indexed files sorted by `date_taken` using 1000-row fetch batches — memory footprint is O(burst_size), not O(library_size)
 - Groups consecutive photos within the configured time window; each group is processed and written immediately when complete
 - Sub-clusters by GPS proximity when coordinates are available for group members
-- Writes `burst_count` and `burst_favorites` to `exif_data` in 500-row commit batches
+- Assigns a stable `burst_id` to every member of each group (the lowest `file_id` in the group); used by `get_related_files` for O(1) fast-path lookups
+- Writes `burst_count`, `burst_favorites`, and `burst_id` to `exif_data` in 500-row commit batches
 - Idempotent: safe to run multiple times; already-correct rows are skipped when `overwrite_existing: false`
+
+**Per-folder burst customization:**
+
+You can call `index_burst_groups` separately per folder with different thresholds — for example, a burst-heavy sports folder might use a 3-second window while a general library uses 10 seconds. Each folder’s `burst_id` assignments are stored independently, and `get_related_files` always honors the pre-computed group for each file regardless of what the global integration defaults are.
+
+```yaml
+# Tighter grouping for action/sports shots
+service: media_index.index_burst_groups
+data:
+  folder: /media/Photo/Sports
+  time_window_seconds: 3
+  location_tolerance_meters: 20
+
+# Looser grouping for general library (run without folder to cover everything else)
+service: media_index.index_burst_groups
+data:
+  time_window_seconds: 10
+  location_tolerance_meters: 50
+  overwrite_existing: false  # don't overwrite the Sports folder already processed above
+```
 
 **Example:**
 ```yaml
