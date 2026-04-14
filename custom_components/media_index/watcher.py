@@ -214,6 +214,18 @@ class MediaFileEventHandler(FileSystemEventHandler):
                                 self._burst_index_locks[folder] = asyncio.Lock()
                             # Schedule burst indexing as a background task with per-folder lock
                             self.hass.async_create_task(self._run_burst_index_with_lock(folder))
+
+                    # Always yield to event loop after each iteration for consistent rate limiting
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+
+                except Exception as err:
+                    _LOGGER.error("Error in batch processor: %s", err)
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+        finally:
+            # Ensure flag is reset even on exception
+            self._is_processing = False
+            _LOGGER.debug("Batch processor stopped (no pending events)")
+
     async def _run_burst_index_with_lock(self, folder: str):
         """Run burst index for a folder with a per-folder lock to prevent overlap."""
         lock = self._burst_index_locks[folder]
@@ -225,17 +237,6 @@ class MediaFileEventHandler(FileSystemEventHandler):
                 await self._trigger_burst_index_for_folders({folder})
             except Exception as err:
                 _LOGGER.error("Error running burst index for %s: %s", folder, err)
-
-                    # Always yield to event loop after each iteration for consistent rate limiting
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-                    
-                except Exception as err:
-                    _LOGGER.error("Error in batch processor: %s", err)
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-        finally:
-            # Ensure flag is reset even on exception
-            self._is_processing = False
-            _LOGGER.debug("Batch processor stopped (no pending events)")
     
     async def _trigger_burst_index_for_folders(self, folders: Set[str]):
         """Trigger burst indexing for folders that have passed the cooldown interval."""
