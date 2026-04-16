@@ -157,11 +157,6 @@ class CacheManager:
             CREATE INDEX IF NOT EXISTS idx_exif_favorited ON exif_data(is_favorited)
         """)
 
-        # Index for burst_id fast-path lookups
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_exif_burst_id ON exif_data(burst_id)
-        """)
-        
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS geocode_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -273,6 +268,11 @@ class CacheManager:
                 _LOGGER.info("Adding column '%s' to exif_data table", col_name)
                 await self._db.execute(f"ALTER TABLE exif_data ADD COLUMN {col_name} {col_type}")
         
+        # Add index for burst_id fast-path lookups (after column is guaranteed to exist)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exif_burst_id ON exif_data(burst_id)
+        """)
+
         await self._db.commit()
         _LOGGER.debug("Database migrations completed")
     
