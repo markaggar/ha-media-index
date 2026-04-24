@@ -58,6 +58,9 @@ from .const import (
     SERVICE_INDEX_BURST_GROUPS,
     SERVICE_INSTALL_LIBMEDIAINFO,
     SERVICE_CHECK_FILE_EXISTS,
+    SERVICE_UPDATE_SYNC_STATE,
+    SERVICE_GET_SYNC_STATE,
+    EVENT_SYNC_UPDATED,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -1917,6 +1920,71 @@ def _register_services(hass: HomeAssistant):
             vol.Optional("overwrite_existing", default=True): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
+    )
+
+    # --- Sync state services (cross-device queue sharing) ---
+
+    async def handle_update_sync_state(call):
+        """Write sync state for a shared queue group and fire a sync event."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        queue = call.data["queue"]
+        current_index = call.data["current_index"]
+
+        await cache_manager.upsert_sync_state(sync_group, queue, current_index)
+
+        # Fire event on the HA bus so all subscribed cards/followers receive it immediately.
+        # Services are callable by any authenticated user; the integration fires the event
+        # as the system so non-admin users can participate in sync sessions.
+        hass.bus.async_fire(
+            EVENT_SYNC_UPDATED,
+            {
+                "sync_group": sync_group,
+                "queue": queue,
+                "current_index": current_index,
+                "source_card_id": call.data.get("source_card_id", ""),
+                "is_paused": call.data.get("is_paused"),
+                "pause_intent": call.data.get("pause_intent", False),
+                "current_metadata": call.data.get("current_metadata"),
+                "written_at": call.data.get("written_at", 0),
+            },
+        )
+        _LOGGER.debug("Sync state updated for group '%s', index %d", sync_group, current_index)
+        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(queue)}
+
+    async def handle_get_sync_state(call):
+        """Return the current sync state for a shared queue group."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        state = await cache_manager.get_sync_state(sync_group)
+        if state is None:
+            return {"sync_group": sync_group, "found": False, "queue": [], "current_index": 0}
+        return {**state, "found": True}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_SYNC_STATE,
+        handle_update_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+            vol.Required("queue"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Required("current_index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_SYNC_STATE,
+        handle_get_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     _LOGGER.info("Media Index services registered")
