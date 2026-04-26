@@ -1987,6 +1987,38 @@ def _register_services(hass: HomeAssistant):
         supports_response=SupportsResponse.OPTIONAL,
     )
 
+    # ── WebSocket command: subscribe to sync events for a group ─────────────────
+    # Non-admin dashboard users cannot use the generic subscribe_events WebSocket
+    # command for custom integration events. We register our own command so that
+    # any authenticated user (admin or not) can subscribe to sync updates for a
+    # specific group.
+    from homeassistant.components import websocket_api
+
+    @websocket_api.websocket_command({
+        "type": "media_index/subscribe_sync",
+        "sync_group": str,
+    })
+    @websocket_api.async_response
+    async def handle_ws_subscribe_sync(hass, connection, msg):
+        """Stream sync-state updates for one shared-queue group to this connection."""
+        from homeassistant.core import callback as ha_callback
+
+        sync_group = msg["sync_group"]
+
+        @ha_callback
+        def forward_event(event):
+            if event.data.get("sync_group") != sync_group:
+                return
+            connection.send_message(
+                websocket_api.event_message(msg["id"], event.data)
+            )
+
+        unsubscribe = hass.bus.async_listen(EVENT_SYNC_UPDATED, forward_event)
+        connection.subscriptions[msg["id"]] = unsubscribe
+        connection.send_result(msg["id"])
+
+    websocket_api.async_register_command(hass, handle_ws_subscribe_sync)
+
     _LOGGER.info("Media Index services registered")
 
 
