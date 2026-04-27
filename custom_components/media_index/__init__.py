@@ -56,6 +56,7 @@ from .const import (
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
     SERVICE_INDEX_BURST_GROUPS,
+    SERVICE_FIND_DUPLICATE_FILES,
     SERVICE_INSTALL_LIBMEDIAINFO,
     SERVICE_CHECK_FILE_EXISTS,
     SERVICE_UPDATE_SYNC_STATE,
@@ -1692,6 +1693,84 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e),
             }
 
+    async def handle_find_duplicate_files(call):
+        """Handle find_duplicate_files service call.
+
+        Finds files within burst groups that share identical file_size, date_taken,
+        width, and height — indicating filesystem-level duplicates (e.g. uploaded twice).
+        Keeper selection is folder-pair aware: the folder contributing more files to
+        duplicate pairs is kept globally; non-keepers come from the other folder.
+        With dry_run=True (default) returns the groups without touching anything.
+        With dry_run=False and auto_delete=True, moves all non-keepers to _Junk.
+        """
+        import shutil
+
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry_id]["config"]
+
+        folder = call.data.get("folder")
+        prefer_folder = call.data.get("prefer_folder")
+        dry_run = call.data.get("dry_run", True)
+        auto_delete = call.data.get("auto_delete", False)
+
+        _LOGGER.info(
+            "find_duplicate_files: folder=%s, prefer_folder=%s, dry_run=%s, auto_delete=%s",
+            folder or "all", prefer_folder, dry_run, auto_delete,
+        )
+
+        try:
+            result = await cache_manager.find_duplicate_files(
+                folder=folder, prefer_folder=prefer_folder
+            )
+            sets = result["sets"]
+            folder_pairs = result["folder_pairs"]
+
+            duplicate_sets = len(sets)
+            total_duplicates = sum(len(s["duplicates"]) for s in sets)
+            deleted = 0
+            delete_errors = 0
+
+            if not dry_run and auto_delete and sets:
+                base_folder = config.get(CONF_BASE_FOLDER, "/media")
+                junk_folder = Path(base_folder) / "_Junk"
+                await hass.async_add_executor_job(junk_folder.mkdir, True, True)
+
+                for grp in sets:
+                    for dup in grp["duplicates"]:
+                        dup_path = dup["path"]
+                        try:
+                            file_name = Path(dup_path).name
+                            dest_path = junk_folder / file_name
+                            counter = 1
+                            while await hass.async_add_executor_job(dest_path.exists):
+                                stem = Path(dup_path).stem
+                                suffix = Path(dup_path).suffix
+                                dest_path = junk_folder / f"{stem}_{counter}{suffix}"
+                                counter += 1
+
+                            await hass.async_add_executor_job(shutil.move, dup_path, str(dest_path))
+                            await cache_manager.delete_file(dup_path)
+                            deleted += 1
+                            _LOGGER.debug("Moved duplicate to junk: %s -> %s", dup_path, dest_path)
+                        except Exception as del_err:
+                            _LOGGER.error("Failed to delete duplicate %s: %s", dup_path, del_err)
+                            delete_errors += 1
+
+            return {
+                "status": "success",
+                "dry_run": dry_run,
+                "duplicate_sets": duplicate_sets,
+                "total_duplicates": total_duplicates,
+                "deleted": deleted,
+                "delete_errors": delete_errors,
+                "folder_pairs": folder_pairs,
+                "groups": sets,
+            }
+        except Exception as e:
+            _LOGGER.error("Error in find_duplicate_files service: %s", e)
+            return {"status": "error", "error": str(e)}
+
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
@@ -1918,6 +1997,19 @@ def _register_services(hass: HomeAssistant):
             vol.Optional("location_tolerance_meters", default=50): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
             vol.Optional("min_group_size", default=2): vol.All(cv.positive_int, vol.Range(min=2)),
             vol.Optional("overwrite_existing", default=True): cv.boolean,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_FIND_DUPLICATE_FILES,
+        handle_find_duplicate_files,
+        schema=vol.Schema({
+            vol.Optional("folder"): cv.string,
+            vol.Optional("prefer_folder"): cv.string,
+            vol.Optional("dry_run", default=True): cv.boolean,
+            vol.Optional("auto_delete", default=False): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )

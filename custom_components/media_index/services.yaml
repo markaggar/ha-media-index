@@ -469,6 +469,57 @@ check_file_exists:
       selector:
         text:
 
+find_duplicate_files:
+  name: Find Duplicate Files
+  description: >
+    Find files within burst groups that are filesystem-level duplicates (same
+    file_size, date_taken, width, and height). Requires index_burst_groups to have
+    been run first so that burst_id values are populated.
+    Keeper selection is folder-pair aware: the folder contributing more duplicate
+    files across all pairs is kept globally, so keepers are not scattered randomly
+    between two folders. With dry_run=true (default) returns the duplicate groups
+    without touching any files. With dry_run=false and auto_delete=true, non-keeper
+    duplicates are moved to the _Junk folder.
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    folder:
+      name: Folder
+      description: Limit the search to files under this folder prefix. Omit to search the entire library.
+      required: false
+      example: "/media/photo/PhotoLibrary"
+      selector:
+        text:
+    prefer_folder:
+      name: Prefer Folder
+      description: >
+        If supplied, this folder is always chosen as the keeper folder for any
+        duplicate pair it appears in, overriding the automatic majority-vote logic.
+      required: false
+      example: "/media/photo/PhotoLibrary"
+      selector:
+        text:
+    dry_run:
+      name: Dry Run
+      description: >
+        If true (default), only reports duplicate groups without deleting anything.
+        Set to false together with auto_delete=true to actually move duplicates to _Junk.
+      required: false
+      default: true
+      selector:
+        boolean:
+    auto_delete:
+      name: Auto Delete
+      description: >
+        If true, non-keeper duplicates are moved to the _Junk folder when dry_run=false.
+        Has no effect when dry_run=true.
+      required: false
+      default: false
+      selector:
+        boolean:
+
 index_burst_groups:
   name: Index Burst Groups
   description: >
@@ -527,3 +578,56 @@ index_burst_groups:
       default: true
       selector:
         boolean:
+
+update_sync_state:
+  name: Update Sync State
+  description: >
+    Write the current navigation queue and position for a named sync group to the
+    media-index database, then fire a media_index.sync_updated event so all
+    subscribers (cards, cast devices) receive it immediately. Callable by any
+    authenticated user — no admin rights required.
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    sync_group:
+      name: Sync Group
+      description: Identifier for the shared queue (must match shared_queue_id on all cards in the group).
+      required: true
+      example: "living_room_slideshow"
+      selector:
+        text:
+    queue:
+      name: Queue
+      description: List of media_content_id values (up to 20 most recent items will be stored).
+      required: true
+      example: ["media-source://media_source/media/photo/Photos/IMG_001.jpg"]
+      selector:
+        object:
+    current_index:
+      name: Current Index
+      description: Zero-based index of the currently displayed item within the queue list.
+      required: true
+      example: 4
+      selector:
+        number:
+          min: 0
+
+get_sync_state:
+  name: Get Sync State
+  description: >
+    Return the stored navigation queue and current position for a named sync group.
+    Used by cards on reconnect to pick up where the other device left off.
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    sync_group:
+      name: Sync Group
+      description: Identifier for the shared queue to retrieve.
+      required: true
+      example: "living_room_slideshow"
+      selector:
+        text:

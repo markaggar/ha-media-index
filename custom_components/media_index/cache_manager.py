@@ -229,7 +229,17 @@ class CacheManager:
             INSERT OR IGNORE INTO geocode_stats (id, cache_hits, cache_misses)
             VALUES (1, 0, 0)
         """)
-        
+
+        # Sync state table for cross-device queue sharing (media_card shared_queue_id feature)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS sync_state (
+                sync_group TEXT PRIMARY KEY NOT NULL,
+                queue_json TEXT NOT NULL,
+                current_index INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )
+        """)
+
         await self._db.commit()
         _LOGGER.debug("Database schema created/verified")
         
@@ -2082,6 +2092,237 @@ class CacheManager:
             "errors": errors,
         }
 
+    async def find_duplicate_files(
+        self,
+        folder: str | None = None,
+        prefer_folder: str | None = None,
+    ) -> dict:
+        """Find duplicate files within burst groups using file_size + date_taken + dimensions.
+
+        Searches only within files that have a burst_id assigned (by index_burst_groups),
+        grouping by (burst_id, file_size, date_taken, width, height).  Any combination
+        with more than one member is a duplicate set.
+
+        Keeper selection works at the folder-pair level to avoid scattering keepers
+        randomly across two folders:
+
+          1. All duplicate sets are collected.
+          2. For each set whose members span exactly two folders, the folder pair is
+             tallied.  The folder appearing as the majority contributor (more member
+             files across all sets in that pair) becomes the keeper folder for the
+             whole pair.  Tie-breaks: more favorited files → alphabetically first path.
+          3. If ``prefer_folder`` is supplied that folder always wins any pair it
+             belongs to.
+          4. Within each set the keeper is the member in the keeper folder that is
+             most favorited / earliest modified_time / first alphabetically.  All
+             members in the other folder become duplicates.
+          5. For sets where all members share the same folder (or span three or more
+             folders) the classic per-file priority is used:
+             favorited → earliest modified_time → alphabetical path.
+
+        Args:
+            folder:        Optional folder prefix to restrict the search.
+            prefer_folder: Path prefix that should always be chosen as the keeper
+                           folder when it appears in a pair.
+
+        Returns:
+            {
+                "folder_pairs": [
+                    {
+                        "keeper_folder":    str,
+                        "duplicate_folder": str,
+                        "duplicate_sets":   int,
+                        "total_duplicates": int,
+                    }
+                ],
+                "sets": [
+                    {
+                        "burst_id":        str,
+                        "file_size":       int,
+                        "date_taken":      int,
+                        "width":           int | None,
+                        "height":          int | None,
+                        "duplicate_count": int,
+                        "keeper":   {"path": str, "folder": str, "file_id": int,
+                                     "is_favorited": int, "modified_time": int},
+                        "duplicates": [{"path": str, "folder": str, "file_id": int,
+                                        "is_favorited": int, "modified_time": int}],
+                    }
+                ],
+            }
+        """
+        from collections import defaultdict
+
+        where = "WHERE e.burst_id IS NOT NULL AND m.file_size IS NOT NULL AND e.date_taken IS NOT NULL"
+        params: list = []
+        if folder:
+            where += " AND m.folder LIKE ?"
+            params.append(folder.rstrip("/") + "%")
+
+        query = f"""
+            SELECT
+                e.burst_id,
+                m.file_size,
+                e.date_taken,
+                m.width,
+                m.height,
+                m.path,
+                m.folder,
+                m.id          AS file_id,
+                e.is_favorited,
+                m.modified_time
+            FROM media_files m
+            JOIN exif_data e ON m.id = e.file_id
+            {where}
+            ORDER BY e.burst_id, m.file_size, e.date_taken, m.width, m.height, m.modified_time, m.path
+        """
+
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+
+        # ------------------------------------------------------------------
+        # 1. Group rows into raw duplicate sets
+        # ------------------------------------------------------------------
+        raw_groups: dict[tuple, list[dict]] = defaultdict(list)
+        for raw in rows:
+            row = dict(raw)
+            key = (row["burst_id"], row["file_size"], row["date_taken"], row["width"], row["height"])
+            raw_groups[key].append(row)
+
+        raw_sets = [members for members in raw_groups.values() if len(members) >= 2]
+
+        # ------------------------------------------------------------------
+        # 2. Tally folder-pair votes and per-folder stats
+        # ------------------------------------------------------------------
+        # pair_stats[pair][folder] = {"count": int, "fav": int}
+        pair_stats: dict[tuple, dict[str, dict]] = {}
+        for members in raw_sets:
+            unique_folders = sorted(set(m["folder"] for m in members))
+            if len(unique_folders) != 2:
+                continue
+            pair = tuple(unique_folders)
+            if pair not in pair_stats:
+                pair_stats[pair] = {
+                    unique_folders[0]: {"count": 0, "fav": 0},
+                    unique_folders[1]: {"count": 0, "fav": 0},
+                }
+            for m in members:
+                f = m["folder"]
+                if f in pair_stats[pair]:
+                    pair_stats[pair][f]["count"] += 1
+                    if m["is_favorited"]:
+                        pair_stats[pair][f]["fav"] += 1
+
+        # ------------------------------------------------------------------
+        # 3. Decide keeper folder per pair
+        # ------------------------------------------------------------------
+        keeper_for_pair: dict[tuple, str] = {}
+        for pair, stats in pair_stats.items():
+            f0, f1 = pair
+            s0, s1 = stats[f0], stats[f1]
+            if prefer_folder and prefer_folder in pair:
+                keeper_for_pair[pair] = prefer_folder
+            elif s0["count"] > s1["count"]:
+                keeper_for_pair[pair] = f0
+            elif s1["count"] > s0["count"]:
+                keeper_for_pair[pair] = f1
+            elif s0["fav"] >= s1["fav"]:
+                keeper_for_pair[pair] = f0
+            else:
+                keeper_for_pair[pair] = f1
+
+        # ------------------------------------------------------------------
+        # 4. Build result sets with folder-pair-aware keeper assignment
+        # ------------------------------------------------------------------
+        def _per_file_sort(m):
+            return (
+                0 if m["is_favorited"] else 1,
+                m["modified_time"] if m["modified_time"] is not None else 2**63,
+                m["path"],
+            )
+
+        result_sets = []
+        for members in raw_sets:
+            unique_folders = sorted(set(m["folder"] for m in members))
+            pair = tuple(unique_folders)
+
+            if len(unique_folders) == 2 and pair in keeper_for_pair:
+                kfolder = keeper_for_pair[pair]
+                keeper_candidates = sorted(
+                    [m for m in members if m["folder"] == kfolder], key=_per_file_sort
+                )
+                dup_candidates = [m for m in members if m["folder"] != kfolder]
+                keeper = keeper_candidates[0]
+                dups = keeper_candidates[1:] + dup_candidates
+            else:
+                # Same folder or 3+ folders — per-file priority
+                sorted_m = sorted(members, key=_per_file_sort)
+                keeper = sorted_m[0]
+                dups = sorted_m[1:]
+
+            result_sets.append({
+                "burst_id": members[0]["burst_id"],
+                "file_size": members[0]["file_size"],
+                "date_taken": members[0]["date_taken"],
+                "width": members[0]["width"],
+                "height": members[0]["height"],
+                "duplicate_count": len(members),
+                "keeper": {
+                    "path": keeper["path"],
+                    "folder": keeper["folder"],
+                    "file_id": keeper["file_id"],
+                    "is_favorited": keeper["is_favorited"],
+                    "modified_time": keeper["modified_time"],
+                },
+                "duplicates": [
+                    {
+                        "path": d["path"],
+                        "folder": d["folder"],
+                        "file_id": d["file_id"],
+                        "is_favorited": d["is_favorited"],
+                        "modified_time": d["modified_time"],
+                    }
+                    for d in dups
+                ],
+            })
+
+        result_sets.sort(key=lambda g: g["duplicate_count"], reverse=True)
+
+        # ------------------------------------------------------------------
+        # 5. Build folder-pair summary
+        # ------------------------------------------------------------------
+        pair_summary = []
+        for pair, kfolder in keeper_for_pair.items():
+            dup_folder = pair[0] if pair[1] == kfolder else pair[1]
+            sets_in_pair = [
+                s for s in result_sets
+                if s["keeper"]["folder"] == kfolder
+                and any(d["folder"] == dup_folder for d in s["duplicates"])
+            ]
+            pair_summary.append({
+                "keeper_folder": kfolder,
+                "duplicate_folder": dup_folder,
+                "duplicate_sets": len(sets_in_pair),
+                "total_duplicates": sum(
+                    sum(1 for d in s["duplicates"] if d["folder"] == dup_folder)
+                    for s in sets_in_pair
+                ),
+            })
+        pair_summary.sort(key=lambda p: p["total_duplicates"], reverse=True)
+
+        total_dup_files = sum(len(s["duplicates"]) for s in result_sets)
+        _LOGGER.info(
+            "find_duplicate_files: %d sets, %d files to remove, %d folder pairs (scope=%s)",
+            len(result_sets),
+            total_dup_files,
+            len(pair_summary),
+            folder or "all",
+        )
+        return {
+            "folder_pairs": pair_summary,
+            "sets": result_sets,
+        }
+
     async def delete_file(self, file_path: str) -> bool:
         """Delete file record from database.
         
@@ -2230,4 +2471,46 @@ class CacheManager:
         if self._db:
             await self._db.close()
             _LOGGER.info("Cache database connection closed")
+
+    # ---------------------------------------------------------------------------
+    # Sync state methods (cross-device queue sharing)
+    # ---------------------------------------------------------------------------
+
+    async def upsert_sync_state(self, sync_group: str, queue: list, current_index: int) -> None:
+        """Write (or replace) sync state for a named sync group.
+
+        Only stores the most recent 20 queue items to keep the payload small.
+        """
+        import json
+        import time
+        trimmed = queue[-20:] if len(queue) > 20 else queue
+        await self._db.execute(
+            """
+            INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(sync_group) DO UPDATE SET
+                queue_json = excluded.queue_json,
+                current_index = excluded.current_index,
+                updated_at = excluded.updated_at
+            """,
+            (sync_group, json.dumps(trimmed), current_index, int(time.time())),
+        )
+        await self._db.commit()
+
+    async def get_sync_state(self, sync_group: str) -> dict | None:
+        """Return sync state for a named sync group, or None if not found."""
+        import json
+        async with self._db.execute(
+            "SELECT queue_json, current_index, updated_at FROM sync_state WHERE sync_group = ?",
+            (sync_group,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "sync_group": sync_group,
+            "queue": json.loads(row[0]),
+            "current_index": row[1],
+            "updated_at": row[2],
+        }
 
