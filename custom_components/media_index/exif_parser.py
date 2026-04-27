@@ -283,11 +283,26 @@ class ExifParser:
                     result['white_balance'] = wb_modes.get(exif['WhiteBalance'], 'Auto')
                 
                 # Parse XMP:Rating (stored in EXIF Rating tag or XMP metadata)
-                # Check standard Rating tag first (tag 0x4746)
+                # Check standard Rating tag first (tag 0x4746).
+                # PIL may return the value as int, bytes, float, or tuple depending on
+                # how the EXIF block was written (e.g. exiftool writes SHORT, but some
+                # files store it as LONG or RATIONAL), so we coerce before comparing.
                 if 'Rating' in exif:
-                    rating = exif['Rating']
-                    if isinstance(rating, int) and 0 <= rating <= 5:
-                        result['rating'] = rating
+                    rating_raw = exif['Rating']
+                    try:
+                        if isinstance(rating_raw, bytes):
+                            # e.g. b'\x05\x00' — little-endian SHORT
+                            rating_int = int.from_bytes(rating_raw[:2], 'little') if len(rating_raw) >= 2 else int(rating_raw[0])
+                        elif isinstance(rating_raw, tuple):
+                            # RATIONAL stored as (numerator, denominator)
+                            rating_int = int(rating_raw[0] / rating_raw[1]) if rating_raw[1] else 0
+                        else:
+                            rating_int = int(rating_raw)
+                        if 0 <= rating_int <= 5:
+                            result['rating'] = rating_int
+                            _LOGGER.debug("Rating tag found: raw=%r → %d", rating_raw, rating_int)
+                    except (ValueError, TypeError, ZeroDivisionError) as _e:
+                        _LOGGER.debug("Could not parse Rating tag value %r: %s", rating_raw, _e)
                 
                 # Parse image dimensions and orientation
                 # Try ExifImageWidth/Height first (from Exif IFD), then ImageWidth/Height (from main IFD)

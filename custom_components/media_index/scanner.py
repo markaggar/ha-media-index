@@ -387,11 +387,13 @@ class MediaScanner:
         finally:
             self._is_scanning = False
     
-    async def scan_file(self, file_path: str) -> bool:
+    async def scan_file(self, file_path: str, force: bool = False) -> bool:
         """Scan and index a single file.
         
         Args:
             file_path: Full path to the file to scan
+            force: If True, re-extract metadata even if the file modification time
+                   has not changed (useful after exiftool edits that preserve mtime)
             
         Returns:
             True if successfully indexed, False otherwise
@@ -422,9 +424,11 @@ class MediaScanner:
                     existing_modified = existing_file.get('modified_time', 0)
                     current_modified = metadata.get('modified_time', 0)
                     
-                    if existing_modified == current_modified:
+                    if existing_modified == current_modified and not force:
                         _LOGGER.debug("File already indexed with metadata, skipping re-extraction: %s", file_path)
                         return True  # Already indexed
+                    elif force:
+                        _LOGGER.debug("Force re-extraction requested for: %s", file_path)
                     else:
                         _LOGGER.info("File modification time changed, re-extracting metadata: %s", file_path)
             
