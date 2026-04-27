@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
+  - Requires `index_burst_groups` to have been run first so that `burst_id` values are populated
+  - Keeper selection is **folder-pair aware**: the folder contributing more duplicate files across all pairs becomes the keeper folder globally, preventing keepers from being scattered randomly between two folders
+  - Optional `prefer_folder` parameter overrides the automatic majority-vote logic for a specific folder
+  - `dry_run: true` (default) returns duplicate groups and a folder-pair summary without touching any files
+  - `dry_run: false` + `auto_delete: true` moves all non-keeper duplicates to the `_Junk` folder
+  - Returns `{folder_pairs, groups}` — `folder_pairs` gives a high-level per-pair summary (`keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`) for sanity-checking before deletion
+
+### Fixed
+
+- **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
+  - Added XMP fallback: after the EXIF 0x4746 check, `img.info['xmp']` is inspected for both attribute form (`xmp:Rating="5"`) and element form (`<xmp:Rating>5</xmp:Rating>`) using a regex — no extra dependencies
+  - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
+  - Covers ratings written by exiftool, Windows Explorer, Lightroom, and other XMP-first tools
+
+- **EXIF Rating Tag Type Coercion**: PIL may return the EXIF 0x4746 SHORT tag as `bytes`, `float`, `tuple`, or `int` depending on how the file was encoded. The previous `isinstance(rating, int)` guard silently dropped non-int values, leaving `rating=None` and actively marking files as not-favorited on every forced rescan
+  - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
+
+- **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
+
+- **Non-Admin WebSocket Subscription for Sync Events**: HA's generic `subscribe_events` WebSocket command requires admin for all custom integration events. Non-admin dashboard users received "Refusing to allow Home Dashboard to subscribe to event media_index.sync_updated"
+  - Registered a custom `media_index/subscribe_sync` WebSocket command via `websocket_api.async_register_command` (no `@require_admin` decorator), accessible to any authenticated user
+  - Filters by `sync_group` server-side so each connection only receives events for its own group
+
+- **Stale HA Sync Event Rejection**: When multiple cards shared a queue, delayed HA bus events (500ms debounce + bus latency) could arrive after a same-window `CustomEvent` had already advanced, bouncing cards back to a stale index
+  - Added `written_at` Unix ms timestamp to every `update_sync_state` service call payload; forwarded through the HA bus event data
+  - Receiving cards reject events older than `_lastAppliedSyncAt` (most recently accepted timestamp)
+
+### Added
+
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
   - Streams rows from the database in 1000-row batches — memory footprint is O(burst_size), not O(library_size); safe for 200K+ libraries
