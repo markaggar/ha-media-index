@@ -303,7 +303,29 @@ class ExifParser:
                             _LOGGER.debug("Rating tag found: raw=%r → %d", rating_raw, rating_int)
                     except (ValueError, TypeError, ZeroDivisionError) as _e:
                         _LOGGER.debug("Could not parse Rating tag value %r: %s", rating_raw, _e)
-                
+
+                # XMP fallback: if no EXIF Rating tag was found, look in the raw XMP
+                # bytes embedded in the file (written by exiftool -Rating=5 which
+                # defaults to XMP:Rating, not EXIF:Rating).  Pillow exposes the raw
+                # XMP block as img.info['xmp'] — we don't need an XML parser, a
+                # simple regex on the UTF-8 bytes is sufficient and has no extra deps.
+                if result['rating'] is None:
+                    try:
+                        xmp_bytes = img.info.get('xmp', b'')
+                        if xmp_bytes:
+                            import re as _re
+                            # Matches both attribute form:  xmp:Rating="5"
+                            # and element form:             <xmp:Rating>5</xmp:Rating>
+                            xmp_text = xmp_bytes.decode('utf-8', errors='replace') if isinstance(xmp_bytes, bytes) else xmp_bytes
+                            m = _re.search(r'xmp:Rating[=">]+\s*(\d)', xmp_text, _re.IGNORECASE)
+                            if m:
+                                xmp_rating = int(m.group(1))
+                                if 0 <= xmp_rating <= 5:
+                                    result['rating'] = xmp_rating
+                                    _LOGGER.debug("XMP Rating found: %d for %s", xmp_rating, path.name)
+                    except Exception as _xe:
+                        _LOGGER.debug("Could not parse XMP rating for %s: %s", path.name, _xe)
+
                 # Parse image dimensions and orientation
                 # Try ExifImageWidth/Height first (from Exif IFD), then ImageWidth/Height (from main IFD)
                 if 'ExifImageWidth' in exif:
