@@ -47,7 +47,14 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Burst metadata persistence** - save favorite selections and burst counts to file metadata
 - **Historical tracking** - burst review data persists even if files are deleted
 
-### 🗑️ File Management
+### � Duplicate Detection
+- **`find_duplicate_files` service** - detects filesystem-level duplicates within burst groups (same `file_size`, `date_taken`, and dimensions)
+- **Folder-pair aware** - designates one entire folder as the keeper rather than scattering keepers across both folders
+- **`prefer_folder` override** - force a specific folder to always be kept
+- **Safe dry-run mode** - previews duplicate groups and a folder-pair summary before deleting anything
+- **Auto-delete** - moves all non-keeper duplicates to `_Junk` when confirmed
+
+### �🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
 - **Mark for editing** - moves files to `_Edit` folder
 - **Database cleanup** - automatically removes deleted files from index
