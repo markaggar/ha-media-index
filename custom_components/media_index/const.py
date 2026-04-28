@@ -130,8 +130,12 @@ SERVICE_RESTORE_EDITED_FILES: Final = "restore_edited_files"
 SERVICE_CLEANUP_DATABASE: Final = "cleanup_database"
 SERVICE_UPDATE_BURST_METADATA: Final = "update_burst_metadata"
 SERVICE_INDEX_BURST_GROUPS: Final = "index_burst_groups"
+SERVICE_FIND_DUPLICATE_FILES: Final = "find_duplicate_files"
 SERVICE_INSTALL_LIBMEDIAINFO: Final = "install_libmediainfo"
 SERVICE_CHECK_FILE_EXISTS: Final = "check_file_exists"
+SERVICE_UPDATE_SYNC_STATE: Final = "update_sync_state"
+SERVICE_GET_SYNC_STATE: Final = "get_sync_state"
+EVENT_SYNC_UPDATED: Final = "media_index.sync_updated"
 
 # Attributes
 ATTR_SCAN_STATUS: Final = "scan_status"
