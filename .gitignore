@@ -48,4 +48,6 @@ htmlcov/
 LOCAL_SETUP.md
 scripts/
 test_*.py
+!tests/unit/test_*.py
+!tests/integration/test_*.py
 dev-docs/
