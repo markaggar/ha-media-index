@@ -19,17 +19,28 @@ class ExifParser:
         """Convert GPS coordinates from DMS (degrees, minutes, seconds) to decimal degrees.
         
         Args:
-            value: Tuple of (degrees, minutes, seconds) as Rational numbers
+            value: Tuple of (degrees, minutes, seconds). Each component may be:
+                   - a float/int (already converted by PIL)
+                   - an IFDRational object (supports float() conversion)
+                   - a (numerator, denominator) tuple (raw RATIONAL, e.g. from piexif)
             
         Returns:
             Decimal degrees as float, or None if conversion fails
         """
         try:
             d, m, s = value
-            # Convert Rational to float
-            degrees = float(d)
-            minutes = float(m) / 60.0
-            seconds = float(s) / 3600.0
+
+            def _to_float(v) -> float:
+                """Convert a single DMS component to float regardless of encoding."""
+                if isinstance(v, tuple) and len(v) == 2:
+                    # Raw (numerator, denominator) rational pair from piexif or older Pillow
+                    denom = v[1]
+                    return float(v[0]) / float(denom) if denom else 0.0
+                return float(v)  # float, int, or IFDRational
+
+            degrees = _to_float(d)
+            minutes = _to_float(m) / 60.0
+            seconds = _to_float(s) / 3600.0
             return degrees + minutes + seconds
         except (TypeError, ValueError, ZeroDivisionError) as err:
             _LOGGER.debug("Failed to convert GPS coordinates: %s", err)
@@ -220,6 +231,28 @@ class ExifParser:
                             gps_info[gps_tag_name] = gps_value
                 except (KeyError, AttributeError) as err:
                     _LOGGER.debug("No GPS IFD in %s: %s", path.name, err)
+
+                # Piexif fallback: PIL's get_ifd() can return an empty dict for GPS on
+                # some Pillow versions (particularly ARM64 Linux builds) even when the
+                # GPS IFD pointer exists in the main IFD.  In that case, fall back to
+                # piexif which reads the raw markers reliably across all platforms.
+                if not gps_info and path.suffix.lower() in {'.jpg', '.jpeg', '.tiff', '.tif'}:
+                    try:
+                        raw = piexif.load(file_path)
+                        for tag_id, raw_val in raw.get('GPS', {}).items():
+                            tag_name = GPSTAGS.get(tag_id, tag_id)
+                            # Piexif returns RATIONAL values as (num, denom) tuples.
+                            # Convert DMS triplets to plain tuple; leave refs as-is.
+                            if isinstance(raw_val, (list, tuple)) and len(raw_val) == 3:
+                                gps_info[tag_name] = tuple(raw_val)
+                            elif isinstance(raw_val, bytes):
+                                gps_info[tag_name] = raw_val.decode('ascii', errors='replace').strip('\x00')
+                            else:
+                                gps_info[tag_name] = raw_val
+                        if gps_info:
+                            _LOGGER.debug("GPS read via piexif fallback for %s", path.name)
+                    except Exception as _pe:
+                        _LOGGER.debug("Piexif GPS fallback failed for %s: %s", path.name, _pe)
                 
                 # Extract Exif sub-IFD (tag 0x8769) - contains camera settings
                 try:
