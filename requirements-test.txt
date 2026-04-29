@@ -1,0 +1,11 @@
+# Test dependencies for ha-media-index
+# Install with: pip install -r requirements-test.txt
+
+pytest>=7.4
+pytest-asyncio>=0.23
+requests>=2.28
+
+# Runtime deps also needed by the unit tests
+Pillow>=9.0
+piexif>=1.1
+aiosqlite>=0.19
