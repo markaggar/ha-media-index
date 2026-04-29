@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
   - Covers ratings written by exiftool, Windows Explorer, Lightroom, and other XMP-first tools
 
+- **GPS Coordinates Not Saved After GPS Tagging**: Files whose GPS was added by an external tool (e.g. a donor-based GPS tagger using piexif) were sometimes rescanned but returned `latitude: null` and `longitude: null` in the database
+  - Root cause: piexif writes DMS GPS values as `(numerator, denominator)` rational tuples — e.g. `((35, 1), (42, 1), (4104, 100))` for 35° 42′ 41.04″. Modern desktop Pillow pre-converts these to floats, but the ARM64 Linux build used by Home Assistant may return the raw rational tuples. `_convert_to_degrees()` called `float()` directly on the tuple element, which raised `TypeError` — silently caught, GPS returned `None`
+  - Fixed `_convert_to_degrees()` to handle both forms: if a DMS element is a `(num, denom)` tuple it divides before converting; floats/ints pass through unchanged
+  - Also added a piexif fallback: if Pillow's `get_ifd(0x8825)` returns an empty GPS IFD (another ARM64 quirk), the code re-reads GPS via `piexif.load()` which parses the raw EXIF bytes and always returns rational tuples
+
 - **EXIF Rating Tag Type Coercion**: PIL may return the EXIF 0x4746 SHORT tag as `bytes`, `float`, `tuple`, or `int` depending on how the file was encoded. The previous `isinstance(rating, int)` guard silently dropped non-int values, leaving `rating=None` and actively marking files as not-favorited on every forced rescan
   - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
 
