@@ -409,6 +409,12 @@ restore_edited_files:
       example: "/media/photo/Photos/2023/edited_photo.jpg"
       selector:
         text:
+    clear_failed:
+      name: Clear Failed Records
+      description: If true, failed restores (file missing, destination exists) are removed from the pending queue so they won't appear again.
+      default: false
+      selector:
+        boolean:
 
 restore_deleted_files:
   name: Restore Deleted Files
@@ -424,6 +430,12 @@ restore_deleted_files:
       example: "/media/photo/_Junk/bad_hair_day.jpg"
       selector:
         text:
+    clear_failed:
+      name: Clear Failed Records
+      description: If true, failed restores (file missing, destination exists) are removed from the pending queue so they won't appear again.
+      default: false
+      selector:
+        boolean:
 
 cleanup_database:
   name: Cleanup Database

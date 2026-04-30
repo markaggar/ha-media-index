@@ -212,11 +212,13 @@ SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema(
 SERVICE_RESTORE_EDITED_FILES_SCHEMA = vol.Schema({
     vol.Optional("folder_filter"): cv.string,  # e.g., "_Edit"
     vol.Optional("file_path"): cv.string,  # Restore specific file
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
     vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
     vol.Optional("file_path"): cv.string,  # Restore specific file from _Junk
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
     vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -1510,8 +1512,9 @@ def _register_services(hass: HomeAssistant):
         
         folder_filter = call.data.get("folder_filter", "_Edit")
         specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
         
-        _LOGGER.info("Restoring edited files (filter: %s, specific: %s)", folder_filter, specific_file)
+        _LOGGER.info("Restoring edited files (filter: %s, specific: %s, clear_failed: %s)", folder_filter, specific_file, clear_failed)
         
         try:
             # Get pending restores from move_history
@@ -1534,6 +1537,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if file still exists at new location
                     if not await hass.async_add_executor_job(os.path.exists, current_path):
                         _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1550,6 +1556,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if destination already exists
                     if await hass.async_add_executor_job(os.path.exists, original_path):
                         _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1581,6 +1590,9 @@ def _register_services(hass: HomeAssistant):
                     
                 except Exception as e:
                     _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
                     results.append({
                         "original_path": original_path,
                         "current_path": current_path,
@@ -1617,8 +1629,9 @@ def _register_services(hass: HomeAssistant):
         scanner = hass.data[DOMAIN][entry_id]["scanner"]
 
         specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
 
-        _LOGGER.info("Restoring deleted files from _Junk (specific: %s)", specific_file)
+        _LOGGER.info("Restoring deleted files from _Junk (specific: %s, clear_failed: %s)", specific_file, clear_failed)
 
         try:
             pending_moves = await cache_manager.get_pending_restores("_Junk")
@@ -1638,6 +1651,9 @@ def _register_services(hass: HomeAssistant):
                 try:
                     if not await hass.async_add_executor_job(os.path.exists, current_path):
                         _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1652,6 +1668,9 @@ def _register_services(hass: HomeAssistant):
 
                     if await hass.async_add_executor_job(os.path.exists, original_path):
                         _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1674,6 +1693,9 @@ def _register_services(hass: HomeAssistant):
 
                 except Exception as e:
                     _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
                     results.append({
                         "original_path": original_path,
                         "current_path": current_path,
