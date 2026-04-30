@@ -2212,7 +2212,7 @@ class CacheManager:
                     pair_stats[pair][f]["count"] += 1
                     if m["is_favorited"]:
                         pair_stats[pair][f]["fav"] += 1
-                    mtime = m["modified_time"] or 0
+                    mtime = int(m["modified_time"]) if m["modified_time"] is not None else 0
                     if mtime > pair_stats[pair][f]["max_mtime"]:
                         pair_stats[pair][f]["max_mtime"] = mtime
 
@@ -2248,9 +2248,10 @@ class CacheManager:
             # then alphabetical path as final tiebreaker.
             # Latest modified_time is preferred because files may have been renamed or
             # reorganised after the original capture (e.g. "recycling schedule.jpg").
+            mtime = int(m["modified_time"]) if m["modified_time"] is not None else 0
             return (
                 0 if m["is_favorited"] else 1,
-                -(m["modified_time"] if m["modified_time"] is not None else 0),
+                -mtime,
                 m["path"],
             )
 
