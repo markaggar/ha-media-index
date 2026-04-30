@@ -2191,6 +2191,15 @@ class CacheManager:
 
         raw_sets = [members for members in raw_groups.values() if len(members) >= 2]
 
+        def _safe_mtime(v) -> int:
+            """Coerce modified_time to int; returns 0 for NULL or non-numeric text."""
+            if v is None:
+                return 0
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return 0
+
         # ------------------------------------------------------------------
         # 2. Tally folder-pair votes and per-folder stats
         # ------------------------------------------------------------------
@@ -2212,7 +2221,7 @@ class CacheManager:
                     pair_stats[pair][f]["count"] += 1
                     if m["is_favorited"]:
                         pair_stats[pair][f]["fav"] += 1
-                    mtime = int(m["modified_time"]) if m["modified_time"] is not None else 0
+                    mtime = _safe_mtime(m["modified_time"])
                     if mtime > pair_stats[pair][f]["max_mtime"]:
                         pair_stats[pair][f]["max_mtime"] = mtime
 
@@ -2248,7 +2257,7 @@ class CacheManager:
             # then alphabetical path as final tiebreaker.
             # Latest modified_time is preferred because files may have been renamed or
             # reorganised after the original capture (e.g. "recycling schedule.jpg").
-            mtime = int(m["modified_time"]) if m["modified_time"] is not None else 0
+            mtime = _safe_mtime(m["modified_time"])
             return (
                 0 if m["is_favorited"] else 1,
                 -mtime,
