@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dry_run: true` (default) returns duplicate groups and a folder-pair summary without touching any files
   - `dry_run: false` + `auto_delete: true` moves all non-keeper duplicates to the `_Junk` folder
   - Returns `{folder_pairs, groups}` — `folder_pairs` gives a high-level per-pair summary (`keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`) for sanity-checking before deletion
+  - Keeper preference order: favorited → latest `modified_time` (files renamed/reorganised after capture are more likely keepers) → alphabetical path
 
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)

@@ -2194,7 +2194,7 @@ class CacheManager:
         # ------------------------------------------------------------------
         # 2. Tally folder-pair votes and per-folder stats
         # ------------------------------------------------------------------
-        # pair_stats[pair][folder] = {"count": int, "fav": int}
+        # pair_stats[pair][folder] = {"count": int, "fav": int, "max_mtime": int}
         pair_stats: dict[tuple, dict[str, dict]] = {}
         for members in raw_sets:
             unique_folders = sorted(set(m["folder"] for m in members))
@@ -2203,8 +2203,8 @@ class CacheManager:
             pair = tuple(unique_folders)
             if pair not in pair_stats:
                 pair_stats[pair] = {
-                    unique_folders[0]: {"count": 0, "fav": 0},
-                    unique_folders[1]: {"count": 0, "fav": 0},
+                    unique_folders[0]: {"count": 0, "fav": 0, "max_mtime": 0},
+                    unique_folders[1]: {"count": 0, "fav": 0, "max_mtime": 0},
                 }
             for m in members:
                 f = m["folder"]
@@ -2212,6 +2212,9 @@ class CacheManager:
                     pair_stats[pair][f]["count"] += 1
                     if m["is_favorited"]:
                         pair_stats[pair][f]["fav"] += 1
+                    mtime = m["modified_time"] or 0
+                    if mtime > pair_stats[pair][f]["max_mtime"]:
+                        pair_stats[pair][f]["max_mtime"] = mtime
 
         # ------------------------------------------------------------------
         # 3. Decide keeper folder per pair
@@ -2226,7 +2229,13 @@ class CacheManager:
                 keeper_for_pair[pair] = f0
             elif s1["count"] > s0["count"]:
                 keeper_for_pair[pair] = f1
-            elif s0["fav"] >= s1["fav"]:
+            elif s0["fav"] > s1["fav"]:
+                keeper_for_pair[pair] = f0
+            elif s1["fav"] > s0["fav"]:
+                keeper_for_pair[pair] = f1
+            elif s0["max_mtime"] >= s1["max_mtime"]:
+                # Prefer the folder with the most recently modified file —
+                # files may have been renamed/reorganised after original capture.
                 keeper_for_pair[pair] = f0
             else:
                 keeper_for_pair[pair] = f1
@@ -2235,9 +2244,13 @@ class CacheManager:
         # 4. Build result sets with folder-pair-aware keeper assignment
         # ------------------------------------------------------------------
         def _per_file_sort(m):
+            # Prefer: favorited first, then latest modified_time (negated for ascending sort),
+            # then alphabetical path as final tiebreaker.
+            # Latest modified_time is preferred because files may have been renamed or
+            # reorganised after the original capture (e.g. "recycling schedule.jpg").
             return (
                 0 if m["is_favorited"] else 1,
-                m["modified_time"] if m["modified_time"] is not None else 2**63,
+                -(m["modified_time"] if m["modified_time"] is not None else 0),
                 m["path"],
             )
 
