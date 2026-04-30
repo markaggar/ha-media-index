@@ -1853,6 +1853,11 @@ def _register_services(hass: HomeAssistant):
                                 counter += 1
 
                             await hass.async_add_executor_job(shutil.move, dup_path, str(dest_path))
+                            await cache_manager.record_file_move(
+                                original_path=dup_path,
+                                new_path=str(dest_path),
+                                reason="junk"
+                            )
                             await cache_manager.delete_file(dup_path)
                             deleted += 1
                             _LOGGER.debug("Moved duplicate to junk: %s -> %s", dup_path, dest_path)
