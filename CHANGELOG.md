@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`restore_deleted_files` Service**: Restores files previously deleted via `delete_media` back to their original filesystem locations, then re-indexes them
+  - `delete_media` now records every move to the `move_history` table (reason `"junk"`) so the original path is always known
+  - Optional `file_path` parameter restores a single specific file; omit to restore all pending deletions
+  - Returns `{total_pending, restored, failed, results}` with per-file status (`restored`, `not_found`, `destination_exists`, `error`)
+  - Note: only files deleted after this release are restorable via the service; pre-existing `_Junk` files without history must be restored manually
+
 - **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
   - Requires `index_burst_groups` to have been run first so that `burst_id` values are populated
   - Keeper selection is **folder-pair aware**: the folder contributing more duplicate files across all pairs becomes the keeper folder globally, preventing keepers from being scattered randomly between two folders

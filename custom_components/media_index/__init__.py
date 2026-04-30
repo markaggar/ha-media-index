@@ -53,6 +53,7 @@ from .const import (
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
     SERVICE_RESTORE_EDITED_FILES,
+    SERVICE_RESTORE_DELETED_FILES,
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
     SERVICE_INDEX_BURST_GROUPS,
@@ -211,6 +212,11 @@ SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema(
 SERVICE_RESTORE_EDITED_FILES_SCHEMA = vol.Schema({
     vol.Optional("folder_filter"): cv.string,  # e.g., "_Edit"
     vol.Optional("file_path"): cv.string,  # Restore specific file
+    vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
+}, extra=vol.ALLOW_EXTRA)
+
+SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("file_path"): cv.string,  # Restore specific file from _Junk
     vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -1297,6 +1303,13 @@ def _register_services(hass: HomeAssistant):
                 str(dest_path)
             )
             
+            # Record the move in move_history so it can be restored later
+            await cache_manager.record_file_move(
+                original_path=file_path,
+                new_path=str(dest_path),
+                reason="junk"
+            )
+
             # Remove from database
             await cache_manager.delete_file(file_path)
             
@@ -1590,12 +1603,102 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_restore_deleted_files(call):
+        """Handle restore_deleted_files service call.
+
+        Restores files that were moved to the _Junk folder by delete_media back
+        to their original filesystem locations, using the move_history table.
+        """
+        import shutil
+        import os
+
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        scanner = hass.data[DOMAIN][entry_id]["scanner"]
+
+        specific_file = call.data.get("file_path")
+
+        _LOGGER.info("Restoring deleted files from _Junk (specific: %s)", specific_file)
+
+        try:
+            pending_moves = await cache_manager.get_pending_restores("_Junk")
+
+            if specific_file:
+                pending_moves = [m for m in pending_moves if m["new_path"] == specific_file]
+
+            restored_count = 0
+            failed_count = 0
+            results = []
+
+            for move in pending_moves:
+                move_id = move["id"]
+                original_path = move["original_path"]
+                current_path = move["new_path"]
+
+                try:
+                    if not await hass.async_add_executor_job(os.path.exists, current_path):
+                        _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "not_found",
+                        })
+                        failed_count += 1
+                        continue
+
+                    dest_dir = Path(original_path).parent
+                    if not await hass.async_add_executor_job(dest_dir.exists):
+                        await hass.async_add_executor_job(lambda: dest_dir.mkdir(parents=True, exist_ok=True))
+
+                    if await hass.async_add_executor_job(os.path.exists, original_path):
+                        _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "destination_exists",
+                        })
+                        failed_count += 1
+                        continue
+
+                    await hass.async_add_executor_job(shutil.move, current_path, original_path)
+                    await cache_manager.mark_move_restored(move_id)
+                    await scanner.scan_file(original_path)
+
+                    _LOGGER.info("Restored deleted file: %s -> %s", current_path, original_path)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "restored",
+                    })
+                    restored_count += 1
+
+                except Exception as e:
+                    _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "error",
+                        "error": str(e),
+                    })
+                    failed_count += 1
+
+            return {
+                "total_pending": len(pending_moves),
+                "restored": restored_count,
+                "failed": failed_count,
+                "results": results,
+            }
+
+        except Exception as e:
+            _LOGGER.error("Error in restore_deleted_files service: %s", e)
+            return {"status": "error", "error": str(e)}
+
     async def handle_update_burst_metadata(call):
         """Handle update_burst_metadata service call."""
         entry_id = _get_entry_id_from_call(hass, call)
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
         config = hass.data[DOMAIN][entry_id]["config"]
-        
+
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
         media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
         
@@ -1965,7 +2068,15 @@ def _register_services(hass: HomeAssistant):
         schema=SERVICE_RESTORE_EDITED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
-    
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTORE_DELETED_FILES,
+        handle_restore_deleted_files,
+        schema=SERVICE_RESTORE_DELETED_FILES_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEANUP_DATABASE,

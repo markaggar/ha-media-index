@@ -410,6 +410,21 @@ restore_edited_files:
       selector:
         text:
 
+restore_deleted_files:
+  name: Restore Deleted Files
+  description: Restore files from the junk folder back to their original locations
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
+  fields:
+    file_path:
+      name: File Path
+      description: Optional - restore only this specific file from _Junk. Omit to restore all pending deleted files.
+      example: "/media/photo/_Junk/bad_hair_day.jpg"
+      selector:
+        text:
+
 cleanup_database:
   name: Cleanup Database
   description: Remove database entries for files that no longer exist on the filesystem
