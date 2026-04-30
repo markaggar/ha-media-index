@@ -1837,7 +1837,7 @@ def _register_services(hass: HomeAssistant):
             if not dry_run and auto_delete and sets:
                 base_folder = config.get(CONF_BASE_FOLDER, "/media")
                 junk_folder = Path(base_folder) / "_Junk"
-                await hass.async_add_executor_job(junk_folder.mkdir, True, True)
+                await hass.async_add_executor_job(lambda: junk_folder.mkdir(parents=True, exist_ok=True))
 
                 for grp in sets:
                     for dup in grp["duplicates"]:
