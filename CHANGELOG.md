@@ -55,12 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`find_duplicate_files` Auto-Delete Now Tracked in Move History**: Files moved to `_Junk` by `find_duplicate_files` with `auto_delete: true` were not recorded in `move_history`, so `restore_deleted_files` had no record of them and could not restore them. All auto-deleted duplicates are now recorded with reason `"junk"` before deletion, matching the behaviour of the `delete_media` service
-
-- **`find_duplicate_files` Auto-Delete Crashed on Second Run (`[Errno 17] File exists: '_Junk'`)**: `junk_folder.mkdir` was called via `run_in_executor` with positional args `(True, True)` which map to `(mode, parents)` — leaving `exist_ok` at its default `False`. Any second invocation raised `FileExistsError`. Fixed by calling `junk_folder.mkdir(parents=True, exist_ok=True)`
-
-- **`find_duplicate_files` Crashed with `'>' not supported between instances of 'str' and 'int'`**: The `modified_time` column in `media_files` may be stored as an ISO 8601 string (e.g. `'2019-09-20T18:49:30'`) for files scanned before the integer migration. The keeper-selection tiebreaker introduced a direct numeric comparison that failed on these rows. Fixed with a `_safe_mtime()` helper that parses ISO strings to Unix timestamps and falls back to `0` for unparseable values
-
 - **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
   - Added XMP fallback: after the EXIF 0x4746 check, `img.info['xmp']` is inspected for both attribute form (`xmp:Rating="5"`) and element form (`<xmp:Rating>5</xmp:Rating>`) using a regex — no extra dependencies
   - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
