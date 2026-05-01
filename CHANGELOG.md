@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`restore_deleted_files` Service**: Restores files previously deleted via `delete_media` back to their original filesystem locations, then re-indexes them
-  - `delete_media` now records every move to the `move_history` table (reason `"junk"`) so the original path is always known
-  - Optional `file_path` parameter restores a single specific file; omit to restore all pending deletions
-  - Returns `{total_pending, restored, failed, results}` with per-file status (`restored`, `not_found`, `destination_exists`, `error`)
-  - Note: only files deleted after this release are restorable via the service; pre-existing `_Junk` files without history must be restored manually
+- **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
+  - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)
+  - `get_sync_state` — returns the stored queue and position for a `sync_group`; used by cards on reconnect to resume where the other device left off
+  - A `sync_state` table is created in the database automatically on first load
+  - The `media_index/subscribe_sync` WebSocket command lets non-admin users subscribe to sync events filtered by `sync_group`
 
-- **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
+  - **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
   - Requires `index_burst_groups` to have been run first so that `burst_id` values are populated
   - Keeper selection is **folder-pair aware**: the folder contributing more duplicate files across all pairs becomes the keeper folder globally, preventing keepers from being scattered randomly between two folders
   - Optional `prefer_folder` parameter overrides the automatic majority-vote logic for a specific folder
@@ -24,13 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Returns `{folder_pairs, groups}` — `folder_pairs` gives a high-level per-pair summary (`keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`) for sanity-checking before deletion
   - Keeper preference order: favorited → latest `modified_time` (files renamed/reorganised after capture are more likely keepers) → alphabetical path
 
-- **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
+- **`restore_deleted_files` Service**: Restores files previously deleted via `delete_media` back to their original filesystem locations, then re-indexes them
+  - `delete_media` now records every move to the `move_history` table (reason `"junk"`) so the original path is always known
+  - Optional `file_path` parameter restores a single specific file; omit to restore all pending deletions
+  - Returns `{total_pending, restored, failed, results}` with per-file status (`restored`, `not_found`, `destination_exists`, `error`)
+  - Note: only files deleted after this release are restorable via the service; pre-existing `_Junk` files without history must be restored manually
 
-- **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
-  - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)
-  - `get_sync_state` — returns the stored queue and position for a `sync_group`; used by cards on reconnect to resume where the other device left off
-  - A `sync_state` table is created in the database automatically on first load
-  - The `media_index/subscribe_sync` WebSocket command lets non-admin users subscribe to sync events filtered by `sync_group`
+- **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
 
 ### Fixed
 
