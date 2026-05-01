@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.0] - 2026-04-12
+## [1.7.0] - 2026-04-30
 
 ### Added
 
@@ -14,7 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional `file_path` parameter restores a single specific file; omit to restore all pending deletions
   - Returns `{total_pending, restored, failed, results}` with per-file status (`restored`, `not_found`, `destination_exists`, `error`)
   - Note: only files deleted after this release are restorable via the service; pre-existing `_Junk` files without history must be restored manually
-  - `clear_failed: true` parameter available on both `restore_deleted_files` and `restore_edited_files`: when enabled, any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
 
 - **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
   - Requires `index_burst_groups` to have been run first so that `burst_id` values are populated
@@ -24,6 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dry_run: false` + `auto_delete: true` moves all non-keeper duplicates to the `_Junk` folder
   - Returns `{folder_pairs, groups}` — `folder_pairs` gives a high-level per-pair summary (`keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`) for sanity-checking before deletion
   - Keeper preference order: favorited → latest `modified_time` (files renamed/reorganised after capture are more likely keepers) → alphabetical path
+
+- **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
+
+### Fixed
+
+- **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
+  - Added XMP fallback: after the EXIF 0x4746 check, `img.info['xmp']` is inspected for both attribute form (`xmp:Rating="5"`) and element form (`<xmp:Rating>5</xmp:Rating>`) using a regex — no extra dependencies
+  - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
+  - Covers ratings written by exiftool, Windows Explorer, Lightroom, and other XMP-first tools
+
+- **GPS Coordinates Not Saved After GPS Tagging**: Files whose GPS was added by an external tool (e.g. a donor-based GPS tagger using piexif) were sometimes rescanned but returned `latitude: null` and `longitude: null` in the database
+  - Root cause: piexif writes DMS GPS values as `(numerator, denominator)` rational tuples — e.g. `((35, 1), (42, 1), (4104, 100))` for 35° 42′ 41.04″. Modern desktop Pillow pre-converts these to floats, but the ARM64 Linux build used by Home Assistant may return the raw rational tuples. `_convert_to_degrees()` called `float()` directly on the tuple element, which raised `TypeError` — silently caught, GPS returned `None`
+  - Fixed `_convert_to_degrees()` to handle both forms: if a DMS element is a `(num, denom)` tuple it divides before converting; floats/ints pass through unchanged
+  - Also added a piexif fallback: if Pillow's `get_ifd(0x8825)` returns an empty GPS IFD (another ARM64 quirk), the code re-reads GPS via `piexif.load()` which parses the raw EXIF bytes and always returns rational tuples
+
+- **EXIF Rating Tag Type Coercion**: PIL may return the EXIF 0x4746 SHORT tag as `bytes`, `float`, `tuple`, or `int` depending on how the file was encoded. The previous `isinstance(rating, int)` guard silently dropped non-int values, leaving `rating=None` and actively marking files as not-favorited on every forced rescan
+  - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
+
+- **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
+
+- **Non-Admin WebSocket Subscription for Sync Events**: HA's generic `subscribe_events` WebSocket command requires admin for all custom integration events. Non-admin dashboard users received "Refusing to allow Home Dashboard to subscribe to event media_index.sync_updated"
+  - Registered a custom `media_index/subscribe_sync` WebSocket command via `websocket_api.async_register_command` (no `@require_admin` decorator), accessible to any authenticated user
+  - Filters by `sync_group` server-side so each connection only receives events for its own group
+
+- **Stale HA Sync Event Rejection**: When multiple cards shared a queue, delayed HA bus events (500ms debounce + bus latency) could arrive after a same-window `CustomEvent` had already advanced, bouncing cards back to a stale index
+  - Added `written_at` Unix ms timestamp to every `update_sync_state` service call payload; forwarded through the HA bus event data
+  - Receiving cards reject events older than `_lastAppliedSyncAt` (most recently accepted timestamp)
+
+
+## [1.6.0] - 2026-04-12
+
+### Added
 
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
@@ -54,29 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Post-scan trigger: if both `auto_burst_index` and `burst_index_after_scan` are enabled, a full-library `index_burst_groups` call runs at the end of every scheduled scan
 
 ### Fixed
-
-- **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
-  - Added XMP fallback: after the EXIF 0x4746 check, `img.info['xmp']` is inspected for both attribute form (`xmp:Rating="5"`) and element form (`<xmp:Rating>5</xmp:Rating>`) using a regex — no extra dependencies
-  - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
-  - Covers ratings written by exiftool, Windows Explorer, Lightroom, and other XMP-first tools
-
-- **GPS Coordinates Not Saved After GPS Tagging**: Files whose GPS was added by an external tool (e.g. a donor-based GPS tagger using piexif) were sometimes rescanned but returned `latitude: null` and `longitude: null` in the database
-  - Root cause: piexif writes DMS GPS values as `(numerator, denominator)` rational tuples — e.g. `((35, 1), (42, 1), (4104, 100))` for 35° 42′ 41.04″. Modern desktop Pillow pre-converts these to floats, but the ARM64 Linux build used by Home Assistant may return the raw rational tuples. `_convert_to_degrees()` called `float()` directly on the tuple element, which raised `TypeError` — silently caught, GPS returned `None`
-  - Fixed `_convert_to_degrees()` to handle both forms: if a DMS element is a `(num, denom)` tuple it divides before converting; floats/ints pass through unchanged
-  - Also added a piexif fallback: if Pillow's `get_ifd(0x8825)` returns an empty GPS IFD (another ARM64 quirk), the code re-reads GPS via `piexif.load()` which parses the raw EXIF bytes and always returns rational tuples
-
-- **EXIF Rating Tag Type Coercion**: PIL may return the EXIF 0x4746 SHORT tag as `bytes`, `float`, `tuple`, or `int` depending on how the file was encoded. The previous `isinstance(rating, int)` guard silently dropped non-int values, leaving `rating=None` and actively marking files as not-favorited on every forced rescan
-  - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
-
-- **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
-
-- **Non-Admin WebSocket Subscription for Sync Events**: HA's generic `subscribe_events` WebSocket command requires admin for all custom integration events. Non-admin dashboard users received "Refusing to allow Home Dashboard to subscribe to event media_index.sync_updated"
-  - Registered a custom `media_index/subscribe_sync` WebSocket command via `websocket_api.async_register_command` (no `@require_admin` decorator), accessible to any authenticated user
-  - Filters by `sync_group` server-side so each connection only receives events for its own group
-
-- **Stale HA Sync Event Rejection**: When multiple cards shared a queue, delayed HA bus events (500ms debounce + bus latency) could arrive after a same-window `CustomEvent` had already advanced, bouncing cards back to a stale index
-  - Added `written_at` Unix ms timestamp to every `update_sync_state` service call payload; forwarded through the HA bus event data
-  - Receiving cards reject events older than `_lastAppliedSyncAt` (most recently accepted timestamp)
 
 - **`index_burst_groups` Now Clears Stale Burst Data Before Re-indexing**: Re-running with a narrower time window now correctly removes burst groups from files that no longer qualify
   - Previously, files previously in a group (e.g. with a 15s window) kept their old `burst_count` when re-indexed with a narrower window (e.g. 3s) — causing the metadata header to show the old count while the live burst panel query found fewer photos
