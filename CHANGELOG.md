@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
 
+- **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
+  - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)
+  - `get_sync_state` — returns the stored queue and position for a `sync_group`; used by cards on reconnect to resume where the other device left off
+  - A `sync_state` table is created in the database automatically on first load
+  - The `media_index/subscribe_sync` WebSocket command lets non-admin users subscribe to sync events filtered by `sync_group`
+
 ### Fixed
 
 - **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
@@ -42,14 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
 
 - **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
-
-- **Non-Admin WebSocket Subscription for Sync Events**: HA's generic `subscribe_events` WebSocket command requires admin for all custom integration events. Non-admin dashboard users received "Refusing to allow Home Dashboard to subscribe to event media_index.sync_updated"
-  - Registered a custom `media_index/subscribe_sync` WebSocket command via `websocket_api.async_register_command` (no `@require_admin` decorator), accessible to any authenticated user
-  - Filters by `sync_group` server-side so each connection only receives events for its own group
-
-- **Stale HA Sync Event Rejection**: When multiple cards shared a queue, delayed HA bus events (500ms debounce + bus latency) could arrive after a same-window `CustomEvent` had already advanced, bouncing cards back to a stale index
-  - Added `written_at` Unix ms timestamp to every `update_sync_state` service call payload; forwarded through the HA bus event data
-  - Receiving cards reject events older than `_lastAppliedSyncAt` (most recently accepted timestamp)
 
 
 ## [1.6.0] - 2026-04-12
