@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
 
+- **`NAS_utils/gps_tag.sh` — GPS Backfill Utility**: A standalone Bash script that automatically backfills GPS coordinates into photos and videos that lack them (e.g. DSLR shots), by correlating timestamps against nearby GPS-enabled "donor" files (phone photos taken at the same time)
+  - **Designed to run on a Linux-based NAS server** where the photo library lives — this keeps all file I/O local to the storage device and avoids network transfer overhead. It can optionally run directly on the HA server if the library is small or the files are local, but performance will be poor for large remote libraries
+  - **Supported file types:** JPG/JPEG (EXIF GPS with `GPSLatitudeRef`/`GPSLongitudeRef` for Synology/Windows/Apple compatibility), MP4/MOV (ISO 6709 string in QuickTime `©xyz` user-data atom)
+  - **Requires:** `exiftool` v12+, bash 4+, standard coreutils (`awk`, `sort`, `comm`, `find`). On Synology NAS install via Entware: `opkg install perl-image-exiftool`
+  - **Modes of operation:**
+    - **Auto mode** (`gps_tag.sh FOLDER`) — incremental per-folder runs suited for cron or Synology scheduled tasks; only new files are processed on re-runs via a hidden `.gps_cache` TSV
+    - **Donor mode** (`--donor DONOR_FOLDER TARGET_FOLDER`) — one-shot backfill using a specific phone-camera folder as the GPS source
+    - **Merge caches** (`--merge-caches OUTPUT.tsv --scan DIR ...`) — combines `.gps_cache` files from multiple phone libraries into a single sorted donor TSV with epoch-range header
+    - **DSLR recursive** (`--dslr-recurse MERGED.tsv DSLR_ROOT`) — walks an entire DSLR archive; uses `exiftool -fast2` pre-scan to skip out-of-range folders cheaply before doing full metadata reads
+    - **Fix refs** (`--fix-refs FOLDER`) — adds missing `GPSLatitudeRef`/`GPSLongitudeRef` to files previously tagged with signed-decimal GPS only
+    - **Fix tagged** (`--fix-tagged FOLDER [--ref FILE] [--recurse]`) — applies GPS to files you have keyword-tagged `fixgps` or `fixgps:LAT:LON` in Synology Photos, then removes the keyword
+  - Handles corrupt files automatically (Samsung truncated trailers, Samsung SM-Gxxx corrupt IFDs, panoramas with appended data) using a clean-copy fallback
+  - Synology `@eaDir` thumbnail directories excluded automatically from all folder walks
+  - See `NAS_utils/GPS_TAG.md` for full documentation and workflow examples
+
 ### Fixed
 
 - **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
