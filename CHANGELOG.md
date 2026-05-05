@@ -64,11 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
 
-
-## [1.6.0] - 2026-04-12
-
-### Added
-
 - **`scan_without_libmediainfo` Option**: New configuration option (default: `false`) that allows scanning to proceed even when the `libmediainfo` system library is not installed
   - Enable this if you only index images and do not need video metadata extraction
   - When enabled, scans run normally but video files will be indexed without duration/video-specific metadata
@@ -77,8 +72,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Misleading log messages when libmediainfo is absent**: Downgraded the log level from ERROR to WARNING when `libmediainfo` is not installed. The previous ERROR message incorrectly implied a critical failure even for users with no video files
+- **Misleading log messages when libmediainfo absent**: Downgraded the log level from ERROR to WARNING when `libmediainfo` is not installed. The previous ERROR message incorrectly implied a critical failure even for users with no video files
 - **Startup/scheduled scan blocked for image-only installs**: When `scan_without_libmediainfo` is enabled, scans are no longer blocked by the absence of `libmediainfo`
+
+
+## [1.6.0] - 2026-04-12
+
+### Added
 
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
