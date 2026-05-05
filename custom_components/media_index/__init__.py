@@ -55,11 +55,16 @@ from .const import (
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
     SERVICE_RESTORE_EDITED_FILES,
+    SERVICE_RESTORE_DELETED_FILES,
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
     SERVICE_INDEX_BURST_GROUPS,
+    SERVICE_FIND_DUPLICATE_FILES,
     SERVICE_INSTALL_LIBMEDIAINFO,
     SERVICE_CHECK_FILE_EXISTS,
+    SERVICE_UPDATE_SYNC_STATE,
+    SERVICE_GET_SYNC_STATE,
+    EVENT_SYNC_UPDATED,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -209,6 +214,13 @@ SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema(
 SERVICE_RESTORE_EDITED_FILES_SCHEMA = vol.Schema({
     vol.Optional("folder_filter"): cv.string,  # e.g., "_Edit"
     vol.Optional("file_path"): cv.string,  # Restore specific file
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
+    vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
+}, extra=vol.ALLOW_EXTRA)
+
+SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("file_path"): cv.string,  # Restore specific file from _Junk
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
     vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -1318,6 +1330,13 @@ def _register_services(hass: HomeAssistant):
                 str(dest_path)
             )
             
+            # Record the move in move_history so it can be restored later
+            await cache_manager.record_file_move(
+                original_path=file_path,
+                new_path=str(dest_path),
+                reason="junk"
+            )
+
             # Remove from database
             await cache_manager.delete_file(file_path)
             
@@ -1518,8 +1537,9 @@ def _register_services(hass: HomeAssistant):
         
         folder_filter = call.data.get("folder_filter", "_Edit")
         specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
         
-        _LOGGER.info("Restoring edited files (filter: %s, specific: %s)", folder_filter, specific_file)
+        _LOGGER.info("Restoring edited files (filter: %s, specific: %s, clear_failed: %s)", folder_filter, specific_file, clear_failed)
         
         try:
             # Get pending restores from move_history
@@ -1542,6 +1562,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if file still exists at new location
                     if not await hass.async_add_executor_job(os.path.exists, current_path):
                         _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1558,6 +1581,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if destination already exists
                     if await hass.async_add_executor_job(os.path.exists, original_path):
                         _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1589,6 +1615,9 @@ def _register_services(hass: HomeAssistant):
                     
                 except Exception as e:
                     _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
                     results.append({
                         "original_path": original_path,
                         "current_path": current_path,
@@ -1611,12 +1640,112 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_restore_deleted_files(call):
+        """Handle restore_deleted_files service call.
+
+        Restores files that were moved to the _Junk folder by delete_media back
+        to their original filesystem locations, using the move_history table.
+        """
+        import shutil
+        import os
+
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        scanner = hass.data[DOMAIN][entry_id]["scanner"]
+
+        specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
+
+        _LOGGER.info("Restoring deleted files from _Junk (specific: %s, clear_failed: %s)", specific_file, clear_failed)
+
+        try:
+            pending_moves = await cache_manager.get_pending_restores("_Junk")
+
+            if specific_file:
+                pending_moves = [m for m in pending_moves if m["new_path"] == specific_file]
+
+            restored_count = 0
+            failed_count = 0
+            results = []
+
+            for move in pending_moves:
+                move_id = move["id"]
+                original_path = move["original_path"]
+                current_path = move["new_path"]
+
+                try:
+                    if not await hass.async_add_executor_job(os.path.exists, current_path):
+                        _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "not_found",
+                        })
+                        failed_count += 1
+                        continue
+
+                    dest_dir = Path(original_path).parent
+                    if not await hass.async_add_executor_job(dest_dir.exists):
+                        await hass.async_add_executor_job(lambda: dest_dir.mkdir(parents=True, exist_ok=True))
+
+                    if await hass.async_add_executor_job(os.path.exists, original_path):
+                        _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "destination_exists",
+                        })
+                        failed_count += 1
+                        continue
+
+                    await hass.async_add_executor_job(shutil.move, current_path, original_path)
+                    await cache_manager.mark_move_restored(move_id)
+                    await scanner.scan_file(original_path)
+
+                    _LOGGER.info("Restored deleted file: %s -> %s", current_path, original_path)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "restored",
+                    })
+                    restored_count += 1
+
+                except Exception as e:
+                    _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "error",
+                        "error": str(e),
+                    })
+                    failed_count += 1
+
+            return {
+                "total_pending": len(pending_moves),
+                "restored": restored_count,
+                "failed": failed_count,
+                "results": results,
+            }
+
+        except Exception as e:
+            _LOGGER.error("Error in restore_deleted_files service: %s", e)
+            return {"status": "error", "error": str(e)}
+
     async def handle_update_burst_metadata(call):
         """Handle update_burst_metadata service call."""
         entry_id = _get_entry_id_from_call(hass, call)
         cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
         config = hass.data[DOMAIN][entry_id]["config"]
-        
+
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
         media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
         
@@ -1713,6 +1842,89 @@ def _register_services(hass: HomeAssistant):
                 "status": "error",
                 "error": str(e),
             }
+
+    async def handle_find_duplicate_files(call):
+        """Handle find_duplicate_files service call.
+
+        Finds files within burst groups that share identical file_size, date_taken,
+        width, and height — indicating filesystem-level duplicates (e.g. uploaded twice).
+        Keeper selection is folder-pair aware: the folder contributing more files to
+        duplicate pairs is kept globally; non-keepers come from the other folder.
+        With dry_run=True (default) returns the groups without touching anything.
+        With dry_run=False and auto_delete=True, moves all non-keepers to _Junk.
+        """
+        import shutil
+
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        config = hass.data[DOMAIN][entry_id]["config"]
+
+        folder = call.data.get("folder")
+        prefer_folder = call.data.get("prefer_folder")
+        dry_run = call.data.get("dry_run", True)
+        auto_delete = call.data.get("auto_delete", False)
+
+        _LOGGER.info(
+            "find_duplicate_files: folder=%s, prefer_folder=%s, dry_run=%s, auto_delete=%s",
+            folder or "all", prefer_folder, dry_run, auto_delete,
+        )
+
+        try:
+            result = await cache_manager.find_duplicate_files(
+                folder=folder, prefer_folder=prefer_folder
+            )
+            sets = result["sets"]
+            folder_pairs = result["folder_pairs"]
+
+            duplicate_sets = len(sets)
+            total_duplicates = sum(len(s["duplicates"]) for s in sets)
+            deleted = 0
+            delete_errors = 0
+
+            if not dry_run and auto_delete and sets:
+                base_folder = config.get(CONF_BASE_FOLDER, "/media")
+                junk_folder = Path(base_folder) / "_Junk"
+                await hass.async_add_executor_job(lambda: junk_folder.mkdir(parents=True, exist_ok=True))
+
+                for grp in sets:
+                    for dup in grp["duplicates"]:
+                        dup_path = dup["path"]
+                        try:
+                            file_name = Path(dup_path).name
+                            dest_path = junk_folder / file_name
+                            counter = 1
+                            while await hass.async_add_executor_job(dest_path.exists):
+                                stem = Path(dup_path).stem
+                                suffix = Path(dup_path).suffix
+                                dest_path = junk_folder / f"{stem}_{counter}{suffix}"
+                                counter += 1
+
+                            await hass.async_add_executor_job(shutil.move, dup_path, str(dest_path))
+                            await cache_manager.record_file_move(
+                                original_path=dup_path,
+                                new_path=str(dest_path),
+                                reason="junk"
+                            )
+                            await cache_manager.delete_file(dup_path)
+                            deleted += 1
+                            _LOGGER.debug("Moved duplicate to junk: %s -> %s", dup_path, dest_path)
+                        except Exception as del_err:
+                            _LOGGER.error("Failed to delete duplicate %s: %s", dup_path, del_err)
+                            delete_errors += 1
+
+            return {
+                "status": "success",
+                "dry_run": dry_run,
+                "duplicate_sets": duplicate_sets,
+                "total_duplicates": total_duplicates,
+                "deleted": deleted,
+                "delete_errors": delete_errors,
+                "folder_pairs": folder_pairs,
+                "groups": sets,
+            }
+        except Exception as e:
+            _LOGGER.error("Error in find_duplicate_files service: %s", e)
+            return {"status": "error", "error": str(e)}
 
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
@@ -1917,7 +2129,15 @@ def _register_services(hass: HomeAssistant):
         schema=SERVICE_RESTORE_EDITED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
-    
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTORE_DELETED_FILES,
+        handle_restore_deleted_files,
+        schema=SERVICE_RESTORE_DELETED_FILES_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEANUP_DATABASE,
@@ -1952,6 +2172,116 @@ def _register_services(hass: HomeAssistant):
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_FIND_DUPLICATE_FILES,
+        handle_find_duplicate_files,
+        schema=vol.Schema({
+            vol.Optional("folder"): cv.string,
+            vol.Optional("prefer_folder"): cv.string,
+            vol.Optional("dry_run", default=True): cv.boolean,
+            vol.Optional("auto_delete", default=False): cv.boolean,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    # --- Sync state services (cross-device queue sharing) ---
+
+    async def handle_update_sync_state(call):
+        """Write sync state for a shared queue group and fire a sync event."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        queue = call.data["queue"]
+        current_index = call.data["current_index"]
+
+        await cache_manager.upsert_sync_state(sync_group, queue, current_index)
+
+        # Fire event on the HA bus so all subscribed cards/followers receive it immediately.
+        # Services are callable by any authenticated user; the integration fires the event
+        # as the system so non-admin users can participate in sync sessions.
+        hass.bus.async_fire(
+            EVENT_SYNC_UPDATED,
+            {
+                "sync_group": sync_group,
+                "queue": queue,
+                "current_index": current_index,
+                "source_card_id": call.data.get("source_card_id", ""),
+                "is_paused": call.data.get("is_paused"),
+                "pause_intent": call.data.get("pause_intent", False),
+                "current_metadata": call.data.get("current_metadata"),
+                "written_at": call.data.get("written_at", 0),
+            },
+        )
+        _LOGGER.debug("Sync state updated for group '%s', index %d", sync_group, current_index)
+        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(queue)}
+
+    async def handle_get_sync_state(call):
+        """Return the current sync state for a shared queue group."""
+        entry_id = _get_entry_id_from_call(hass, call)
+        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        state = await cache_manager.get_sync_state(sync_group)
+        if state is None:
+            return {"sync_group": sync_group, "found": False, "queue": [], "current_index": 0}
+        return {**state, "found": True}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_SYNC_STATE,
+        handle_update_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+            vol.Required("queue"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Required("current_index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_SYNC_STATE,
+        handle_get_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    # ── WebSocket command: subscribe to sync events for a group ─────────────────
+    # Non-admin dashboard users cannot use the generic subscribe_events WebSocket
+    # command for custom integration events. We register our own command so that
+    # any authenticated user (admin or not) can subscribe to sync updates for a
+    # specific group.
+    from homeassistant.components import websocket_api
+
+    @websocket_api.websocket_command({
+        "type": "media_index/subscribe_sync",
+        "sync_group": str,
+    })
+    @websocket_api.async_response
+    async def handle_ws_subscribe_sync(hass, connection, msg):
+        """Stream sync-state updates for one shared-queue group to this connection."""
+        from homeassistant.core import callback as ha_callback
+
+        sync_group = msg["sync_group"]
+
+        @ha_callback
+        def forward_event(event):
+            if event.data.get("sync_group") != sync_group:
+                return
+            connection.send_message(
+                websocket_api.event_message(msg["id"], event.data)
+            )
+
+        unsubscribe = hass.bus.async_listen(EVENT_SYNC_UPDATED, forward_event)
+        connection.subscriptions[msg["id"]] = unsubscribe
+        connection.send_result(msg["id"])
+
+    websocket_api.async_register_command(hass, handle_ws_subscribe_sync)
 
     _LOGGER.info("Media Index services registered")
 

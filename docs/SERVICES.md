@@ -406,6 +406,54 @@ data:
     - media-source://media_source/media/Photo/PhotoLibrary/IMG_1236.jpg
 ```
 
+### `media_index.find_duplicate_files`
+
+**New in v1.6.0** - Find filesystem-level duplicate files within burst groups and optionally move non-keepers to `_Junk`.
+
+Requires `index_burst_groups` to have been run first so `burst_id` values are populated. Matches files by `file_size + date_taken + width + height` — identical values within the same burst group indicate the file was uploaded more than once.
+
+**Keeper selection is folder-pair aware**: rather than picking a keeper per file, the service tallies which folder contributes more duplicate files across all matching pairs and designates that folder as the keeper globally. This ensures all keepers come from one folder and all non-keepers from the other, rather than being scattered randomly.
+
+**Parameters:**
+- `folder` (optional): Limit the search to files under this folder prefix. Omit to search the entire library.
+- `prefer_folder` (optional): Force this folder to be the keeper whenever it appears in a duplicate pair, overriding the automatic majority-vote logic.
+- `dry_run` (optional, default: `true`): Return duplicate groups without moving any files.
+- `auto_delete` (optional, default: `false`): When `dry_run: false`, move all non-keeper duplicates to `_Junk`. Has no effect when `dry_run: true`.
+
+**Returns:**
+- `status`: `"success"` or `"error"`
+- `dry_run`: Whether this was a preview run
+- `duplicate_sets`: Number of distinct duplicate groups found
+- `total_duplicates`: Total non-keeper files identified
+- `deleted`: Files moved to `_Junk` (0 when `dry_run: true`)
+- `delete_errors`: Files that could not be moved
+- `folder_pairs`: High-level summary per folder pair — each entry has `keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`
+- `groups`: Full list of duplicate sets — each has `keeper` and `duplicates` entries with `path`, `folder`, `file_id`, `is_favorited`, `modified_time`
+
+**Workflow:**
+```yaml
+# Step 1: Preview — inspect folder_pairs summary before deleting
+service: media_index.find_duplicate_files
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  dry_run: true
+
+# Step 2: Delete — once satisfied with the preview
+service: media_index.find_duplicate_files
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  dry_run: false
+  auto_delete: true
+
+# Optional: force a specific folder to always be the keeper
+service: media_index.find_duplicate_files
+data:
+  prefer_folder: /media/photo/PhotoLibrary
+  dry_run: true
+```
+
 ## File Management Services
 
 ### `media_index.mark_favorite`
@@ -600,12 +648,15 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 
 ### New Services
 - ✨ **`index_burst_groups`** - Full-library burst indexer; enables SQL-level filtering of non-favorite burst members
+- ✨ **`find_duplicate_files`** - Folder-pair-aware duplicate detection within burst groups; dry-run preview + auto-delete to `_Junk`
 
 ### Enhanced Services
 - 🌟 **`get_random_items`** - Added `auto_select_burst_favorite` parameter; non-favorite burst members are excluded in the database query before results reach the card
 
 ### Bug Fixes
 - 🐛 **`get_burst_photos`** - Iterative flood-fill for consistent group membership regardless of reference photo
+- 🐛 **EXIF/XMP Rating** - XMP:Rating (written by exiftool, Windows Explorer, Lightroom) now read as fallback when EXIF tag 0x4746 is absent; rating tag type coercion handles `bytes`/`float`/`tuple` returns from PIL
+- 🐛 **Non-admin sync subscriptions** - Custom `media_index/subscribe_sync` WebSocket command replaces generic `subscribe_events` (no admin required)
 
 ## v1.5 Enhancements Summary
 
