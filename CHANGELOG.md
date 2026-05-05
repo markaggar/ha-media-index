@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`scan_without_libmediainfo` Option**: New configuration option (default: `false`) that allows scanning to proceed even when the `libmediainfo` system library is not installed
+  - Enable this if you only index images and do not need video metadata extraction
+  - When enabled, scans run normally but video files will be indexed without duration/video-specific metadata
+  - Prevents the misleading "scan SKIPPED" and error messages for image-only installations
+  - Available in both initial setup and options flow
+
+### Fixed
+
+- **Misleading log messages when libmediainfo is absent**: Downgraded the log level from ERROR to WARNING when `libmediainfo` is not installed. The previous ERROR message incorrectly implied a critical failure even for users with no video files
+- **Startup/scheduled scan blocked for image-only installs**: When `scan_without_libmediainfo` is enabled, scans are no longer blocked by the absence of `libmediainfo`
+
 - **`index_burst_groups` Service**: One-shot service that scans the entire library (O(n log n)) and writes `burst_favorites` and `burst_count` to every file in every burst group
   - Groups photos by time proximity (10s window, configurable) and optional GPS sub-clustering (50m tolerance, configurable)
   - Streams rows from the database in 1000-row batches — memory footprint is O(burst_size), not O(library_size); safe for 200K+ libraries

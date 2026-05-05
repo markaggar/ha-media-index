@@ -25,6 +25,7 @@ from .const import (
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_SCAN_WITHOUT_LIBMEDIAINFO,
     CONF_AUTO_BURST_INDEX,
     CONF_BURST_TIME_WINDOW_SECONDS,
     CONF_BURST_LOCATION_TOLERANCE_METERS,
@@ -34,6 +35,7 @@ from .const import (
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO,
     DEFAULT_AUTO_BURST_INDEX,
     DEFAULT_BURST_TIME_WINDOW_SECONDS,
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
@@ -329,14 +331,26 @@ def _setup_scheduled_scan(
     """
     async def _scheduled_scan_callback(now):
         """Run scheduled scan if not already running."""
-        # Block if pymediainfo not available
+        # Block if pymediainfo not available (unless user opted to scan without it)
         if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-            _LOGGER.warning(
-                "⏸️ Scheduled scan SKIPPED [%s]: pymediainfo not available. "
-                "Call 'media_index.install_libmediainfo' to fix.",
+            entry_config = hass.data[DOMAIN][entry.entry_id].get("config", {})
+            scan_without_libmediainfo = entry_config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+            )
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Scheduled scan SKIPPED [%s]: libmediainfo not available and "
+                    "'scan_without_libmediainfo' is disabled. "
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support.",
+                    entry.title or entry.entry_id
+                )
+                return
+            _LOGGER.info(
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled [%s] - "
+                "proceeding with scan (video metadata will not be extracted).",
                 entry.title or entry.entry_id
             )
-            return
         
         # Check if scan already in progress
         if scanner.is_scanning:
@@ -520,13 +534,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             os_module.unlink(test_path)
     except (ImportError, OSError, RuntimeError) as e:
         libmediainfo_error = str(e)
-        _LOGGER.error(
-            "❌ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
+        _LOGGER.warning(
+            "⚠️ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
             "This usually happens after Home Assistant Core upgrades.\n"
             "Error: %s\n"
-            "Automatic scanning is BLOCKED to prevent metadata loss.\n"
-            "To auto-fix: Call 'media_index.install_libmediainfo' service\n"
-            "Or manually SSH into Home Assistant and run: apk add --no-cache libmediainfo",
+            "Automatic scanning is BLOCKED by default to prevent video metadata loss.\n"
+            "To fix: Call 'media_index.install_libmediainfo' service or enable 'auto_install_libmediainfo'.\n"
+            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
             libmediainfo_error
         )
     except Exception as e:
@@ -534,7 +548,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         libmediainfo_error = str(e)
         _LOGGER.warning(
             "⚠️ Unexpected error testing libmediainfo: %s\n"
-            "Assuming library is not available - blocking scans.",
+            "Assuming library is not available - scanning blocked by default.\n"
+            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
             libmediainfo_error
         )
     
@@ -664,13 +679,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
         async def _trigger_startup_scan(_event=None):
             """Trigger scan after Home Assistant has fully started."""
-            # Block if pymediainfo not available
+            # Block if pymediainfo not available (unless user opted to scan without it)
             if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-                _LOGGER.warning(
-                    "⏸️ Startup scan SKIPPED: pymediainfo not available. "
-                    "Call 'media_index.install_libmediainfo' to fix."
+                scan_without_libmediainfo = config.get(
+                    CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
                 )
-                return
+                if not scan_without_libmediainfo:
+                    _LOGGER.warning(
+                        "⏸️ Startup scan SKIPPED: libmediainfo not available and "
+                        "'scan_without_libmediainfo' is disabled. "
+                        "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                        "or call 'media_index.install_libmediainfo' to install video support."
+                    )
+                    return
+                _LOGGER.info(
+                    "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                    "proceeding with scan (video metadata will not be extracted)."
+                )
             
             _LOGGER.info(
                 "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]", 
@@ -1693,14 +1718,23 @@ def _register_services(hass: HomeAssistant):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
         
-        # Block scanning if pymediainfo is not available
+        # Block scanning if pymediainfo is not available (unless user opted to scan without it)
         if not hass.data[DOMAIN][entry_id].get("pymediainfo_available", False):
-            _LOGGER.error(
-                "❌ Scan BLOCKED: pymediainfo/libmediainfo is not available!\n"
-                "Scanning without video metadata support will wipe existing metadata.\n"
-                "Call 'media_index.install_libmediainfo' service to fix and restart Home Assistant."
+            entry_config = hass.data[DOMAIN][entry_id].get("config", {})
+            scan_without_libmediainfo = entry_config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
             )
-            return {"status": "blocked", "reason": "pymediainfo_not_available"}
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Scan BLOCKED: libmediainfo not available and 'scan_without_libmediainfo' is disabled.\n"
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support."
+                )
+                return {"status": "blocked", "reason": "pymediainfo_not_available"}
+            _LOGGER.info(
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                "proceeding with scan (video metadata will not be extracted)."
+            )
         
         scanner = hass.data[DOMAIN][entry_id]["scanner"]
         config = hass.data[DOMAIN][entry_id]["config"]
