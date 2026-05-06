@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.helpers.config_validation as cv
@@ -863,6 +864,23 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     raise ValueError("No Media Index integration instance found")
 
 
+def _get_instance_data(hass: HomeAssistant, call: ServiceCall) -> dict:
+    """Resolve the entry_id from a service call and return its instance data dict.
+
+    Raises HomeAssistantError with a user-friendly message when the target
+    integration instance is disabled or not yet loaded, rather than letting a
+    raw KeyError propagate to the HA WebSocket error log.
+    """
+    entry_id = _get_entry_id_from_call(hass, call)
+    try:
+        return hass.data[DOMAIN][entry_id]
+    except KeyError:
+        raise HomeAssistantError(
+            f"Media Index instance '{entry_id}' is not loaded. "
+            "The integration may be disabled or still starting up."
+        )
+
+
 def _register_services(hass: HomeAssistant):
     """Register all Media Index services.
     
@@ -873,9 +891,9 @@ def _register_services(hass: HomeAssistant):
     # Register services
     async def handle_get_random_items(call):
         """Handle get_random_items service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Debug logging removed to prevent excessive logs during slideshow
         
@@ -934,9 +952,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_ordered_files(call):
         """Handle get_ordered_files service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get cursor parameters and ensure proper types
         after_value = call.data.get("after_value")
@@ -990,9 +1008,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_file_metadata(call):
         """Handle get_file_metadata service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1022,9 +1040,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_related_files(call):
         """Handle get_related_files service call (burst or anniversary mode)."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         mode = call.data.get("mode")
         
@@ -1113,10 +1131,10 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_geocode_file(call):
         """Handle geocode_file service call for progressive geocoding."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
-        geocode_service = hass.data[DOMAIN][entry_id].get("geocode_service")
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
+        geocode_service = instance.get("geocode_service")
         
         if not geocode_service:
             _LOGGER.error("Geocoding service not enabled")
@@ -1188,9 +1206,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_mark_favorite(call):
         """Handle mark_favorite service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1273,9 +1291,9 @@ def _register_services(hass: HomeAssistant):
         """Handle delete_media service call."""
         import shutil
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1357,9 +1375,9 @@ def _register_services(hass: HomeAssistant):
         """Handle mark_for_edit service call."""
         import shutil
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1432,8 +1450,7 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_cleanup_database(call):
         """Handle cleanup_database service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
         
         dry_run = call.data.get("dry_run", True)
         
@@ -1531,9 +1548,9 @@ def _register_services(hass: HomeAssistant):
         import shutil
         import os
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        scanner = hass.data[DOMAIN][entry_id]["scanner"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        scanner = instance["scanner"]
         
         folder_filter = call.data.get("folder_filter", "_Edit")
         specific_file = call.data.get("file_path")
@@ -1649,9 +1666,9 @@ def _register_services(hass: HomeAssistant):
         import shutil
         import os
 
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        scanner = hass.data[DOMAIN][entry_id]["scanner"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        scanner = instance["scanner"]
 
         specific_file = call.data.get("file_path")
         clear_failed = call.data.get("clear_failed", False)
@@ -1742,9 +1759,9 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_update_burst_metadata(call):
         """Handle update_burst_metadata service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
 
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
         media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
@@ -1810,8 +1827,7 @@ def _register_services(hass: HomeAssistant):
         for large collections (200 K+ items) — uses a single sorted query then an
         in-process walk rather than per-file DB round-trips.
         """
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         folder              = call.data.get("folder", None)
         time_window         = call.data.get("time_window_seconds", 10)
@@ -1855,9 +1871,9 @@ def _register_services(hass: HomeAssistant):
         """
         import shutil
 
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
 
         folder = call.data.get("folder")
         prefer_folder = call.data.get("prefer_folder")
@@ -1928,11 +1944,12 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
+        instance = _get_instance_data(hass, call)
+        entry_id = next(k for k, v in hass.data[DOMAIN].items() if v is instance)
         
         # Block scanning if pymediainfo is not available (unless user opted to scan without it)
-        if not hass.data[DOMAIN][entry_id].get("pymediainfo_available", False):
-            entry_config = hass.data[DOMAIN][entry_id].get("config", {})
+        if not instance.get("pymediainfo_available", False):
+            entry_config = instance.get("config", {})
             scan_without_libmediainfo = entry_config.get(
                 CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
             )
@@ -1948,8 +1965,8 @@ def _register_services(hass: HomeAssistant):
                 "proceeding with scan (video metadata will not be extracted)."
             )
         
-        scanner = hass.data[DOMAIN][entry_id]["scanner"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        scanner = instance["scanner"]
+        config = instance["config"]
         
         folder_path = call.data.get("folder_path", config.get(CONF_BASE_FOLDER, "/media"))
         force_rescan = call.data.get("force_rescan", False)
@@ -1961,7 +1978,7 @@ def _register_services(hass: HomeAssistant):
         burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
         burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
         burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = instance["cache_manager"]
 
         async def _scan_and_burst():
             await scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
@@ -1984,8 +2001,8 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_check_file_exists(call):
         """Handle check_file_exists service call - lightweight filesystem check."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -2190,8 +2207,7 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_update_sync_state(call):
         """Write sync state for a shared queue group and fire a sync event."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         sync_group = call.data["sync_group"]
         queue = call.data["queue"]
@@ -2220,8 +2236,7 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_get_sync_state(call):
         """Return the current sync state for a shared queue group."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         sync_group = call.data["sync_group"]
         state = await cache_manager.get_sync_state(sync_group)
