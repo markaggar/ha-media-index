@@ -70,10 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents the misleading "scan SKIPPED" and error messages for image-only installations
   - Available in both initial setup and options flow
 
-### Fixed
-
 - **Misleading log messages when libmediainfo absent**: Downgraded the log level from ERROR to WARNING when `libmediainfo` is not installed. The previous ERROR message incorrectly implied a critical failure even for users with no video files
 - **Startup/scheduled scan blocked for image-only installs**: When `scan_without_libmediainfo` is enabled, scans are no longer blocked by the absence of `libmediainfo`
+
+- **Service calls on disabled instances now return a clean error**: When a dashboard card calls any `media_index` service (e.g. `get_random_items`, `get_sync_state`, `check_file_exists`) targeting an integration instance that is disabled or still starting up, HA previously logged an unhandled `KeyError` traceback under "Unexpected exception". All service handlers now raise `HomeAssistantError` with a descriptive message instead, producing a single clean log line and a proper error response to the calling card
 
 
 ## [1.6.0] - 2026-04-12
