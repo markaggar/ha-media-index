@@ -408,7 +408,7 @@ data:
 
 ### `media_index.find_duplicate_files`
 
-**New in v1.6.0** - Find filesystem-level duplicate files within burst groups and optionally move non-keepers to `_Junk`.
+**New in v1.7.0** - Find filesystem-level duplicate files within burst groups and optionally move non-keepers to `_Junk`.
 
 Requires `index_burst_groups` to have been run first so `burst_id` values are populated. Matches files by `file_size + date_taken + width + height` — identical values within the same burst group indicate the file was uploaded more than once.
 

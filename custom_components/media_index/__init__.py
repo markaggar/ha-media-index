@@ -1944,8 +1944,8 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
+        entry_id = _get_entry_id_from_call(hass, call)
         instance = _get_instance_data(hass, call)
-        entry_id = next(k for k, v in hass.data[DOMAIN].items() if v is instance)
         
         # Block scanning if pymediainfo is not available (unless user opted to scan without it)
         if not instance.get("pymediainfo_available", False):
@@ -2213,16 +2213,18 @@ def _register_services(hass: HomeAssistant):
         queue = call.data["queue"]
         current_index = call.data["current_index"]
 
-        await cache_manager.upsert_sync_state(sync_group, queue, current_index)
+        trimmed_queue = queue[-20:] if len(queue) > 20 else queue
+        await cache_manager.upsert_sync_state(sync_group, trimmed_queue, current_index)
 
         # Fire event on the HA bus so all subscribed cards/followers receive it immediately.
         # Services are callable by any authenticated user; the integration fires the event
         # as the system so non-admin users can participate in sync sessions.
+        # Use the same trimmed queue so event payload matches what get_sync_state returns.
         hass.bus.async_fire(
             EVENT_SYNC_UPDATED,
             {
                 "sync_group": sync_group,
-                "queue": queue,
+                "queue": trimmed_queue,
                 "current_index": current_index,
                 "source_card_id": call.data.get("source_card_id", ""),
                 "is_paused": call.data.get("is_paused"),
@@ -2232,7 +2234,7 @@ def _register_services(hass: HomeAssistant):
             },
         )
         _LOGGER.debug("Sync state updated for group '%s', index %d", sync_group, current_index)
-        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(queue)}
+        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(trimmed_queue)}
 
     async def handle_get_sync_state(call):
         """Return the current sync state for a shared queue group."""
@@ -2251,7 +2253,7 @@ def _register_services(hass: HomeAssistant):
         schema=vol.Schema({
             vol.Required("sync_group"): cv.string,
             vol.Required("queue"): vol.All(cv.ensure_list, [cv.string]),
-            vol.Required("current_index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Required("current_index"): vol.All(int, vol.Range(min=0)),
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.OPTIONAL,
     )

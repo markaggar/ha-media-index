@@ -2114,11 +2114,11 @@ class CacheManager:
           3. If ``prefer_folder`` is supplied that folder always wins any pair it
              belongs to.
           4. Within each set the keeper is the member in the keeper folder that is
-             most favorited / earliest modified_time / first alphabetically.  All
+             most favorited / latest modified_time / first alphabetically.  All
              members in the other folder become duplicates.
           5. For sets where all members share the same folder (or span three or more
              folders) the classic per-file priority is used:
-             favorited → earliest modified_time → alphabetical path.
+             favorited → latest modified_time → alphabetical path.
 
         Args:
             folder:        Optional folder prefix to restrict the search.
