@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.helpers.config_validation as cv
@@ -25,6 +26,7 @@ from .const import (
     CONF_GEOCODE_ENABLED,
     CONF_GEOCODE_NATIVE_LANGUAGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_SCAN_WITHOUT_LIBMEDIAINFO,
     CONF_AUTO_BURST_INDEX,
     CONF_BURST_TIME_WINDOW_SECONDS,
     CONF_BURST_LOCATION_TOLERANCE_METERS,
@@ -34,6 +36,7 @@ from .const import (
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO,
     DEFAULT_AUTO_BURST_INDEX,
     DEFAULT_BURST_TIME_WINDOW_SECONDS,
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
@@ -53,11 +56,16 @@ from .const import (
     SERVICE_SCAN_FOLDER,
     SERVICE_MARK_FOR_EDIT,
     SERVICE_RESTORE_EDITED_FILES,
+    SERVICE_RESTORE_DELETED_FILES,
     SERVICE_CLEANUP_DATABASE,
     SERVICE_UPDATE_BURST_METADATA,
     SERVICE_INDEX_BURST_GROUPS,
+    SERVICE_FIND_DUPLICATE_FILES,
     SERVICE_INSTALL_LIBMEDIAINFO,
     SERVICE_CHECK_FILE_EXISTS,
+    SERVICE_UPDATE_SYNC_STATE,
+    SERVICE_GET_SYNC_STATE,
+    EVENT_SYNC_UPDATED,
 )
 from .cache_manager import CacheManager
 from .scanner import MediaScanner
@@ -207,6 +215,13 @@ SERVICE_MARK_FOR_EDIT_SCHEMA = vol.Schema(
 SERVICE_RESTORE_EDITED_FILES_SCHEMA = vol.Schema({
     vol.Optional("folder_filter"): cv.string,  # e.g., "_Edit"
     vol.Optional("file_path"): cv.string,  # Restore specific file
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
+    vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
+}, extra=vol.ALLOW_EXTRA)
+
+SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
+    vol.Optional("file_path"): cv.string,  # Restore specific file from _Junk
+    vol.Optional("clear_failed", default=False): cv.boolean,  # Remove failed records from pending queue
     vol.Optional("entity_id"): cv.entity_ids,  # Target entity (from UI)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -329,14 +344,26 @@ def _setup_scheduled_scan(
     """
     async def _scheduled_scan_callback(now):
         """Run scheduled scan if not already running."""
-        # Block if pymediainfo not available
+        # Block if pymediainfo not available (unless user opted to scan without it)
         if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-            _LOGGER.warning(
-                "⏸️ Scheduled scan SKIPPED [%s]: pymediainfo not available. "
-                "Call 'media_index.install_libmediainfo' to fix.",
+            entry_config = hass.data[DOMAIN][entry.entry_id].get("config", {})
+            scan_without_libmediainfo = entry_config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+            )
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Scheduled scan SKIPPED [%s]: libmediainfo not available and "
+                    "'scan_without_libmediainfo' is disabled. "
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support.",
+                    entry.title or entry.entry_id
+                )
+                return
+            _LOGGER.info(
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled [%s] - "
+                "proceeding with scan (video metadata will not be extracted).",
                 entry.title or entry.entry_id
             )
-            return
         
         # Check if scan already in progress
         if scanner.is_scanning:
@@ -520,13 +547,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             os_module.unlink(test_path)
     except (ImportError, OSError, RuntimeError) as e:
         libmediainfo_error = str(e)
-        _LOGGER.error(
-            "❌ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
+        _LOGGER.warning(
+            "⚠️ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
             "This usually happens after Home Assistant Core upgrades.\n"
             "Error: %s\n"
-            "Automatic scanning is BLOCKED to prevent metadata loss.\n"
-            "To auto-fix: Call 'media_index.install_libmediainfo' service\n"
-            "Or manually SSH into Home Assistant and run: apk add --no-cache libmediainfo",
+            "Automatic scanning is BLOCKED by default to prevent video metadata loss.\n"
+            "To fix: Call 'media_index.install_libmediainfo' service or enable 'auto_install_libmediainfo'.\n"
+            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
             libmediainfo_error
         )
     except Exception as e:
@@ -534,7 +561,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         libmediainfo_error = str(e)
         _LOGGER.warning(
             "⚠️ Unexpected error testing libmediainfo: %s\n"
-            "Assuming library is not available - blocking scans.",
+            "Assuming library is not available - scanning blocked by default.\n"
+            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
             libmediainfo_error
         )
     
@@ -664,13 +692,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
         async def _trigger_startup_scan(_event=None):
             """Trigger scan after Home Assistant has fully started."""
-            # Block if pymediainfo not available
+            # Block if pymediainfo not available (unless user opted to scan without it)
             if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-                _LOGGER.warning(
-                    "⏸️ Startup scan SKIPPED: pymediainfo not available. "
-                    "Call 'media_index.install_libmediainfo' to fix."
+                scan_without_libmediainfo = config.get(
+                    CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
                 )
-                return
+                if not scan_without_libmediainfo:
+                    _LOGGER.warning(
+                        "⏸️ Startup scan SKIPPED: libmediainfo not available and "
+                        "'scan_without_libmediainfo' is disabled. "
+                        "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                        "or call 'media_index.install_libmediainfo' to install video support."
+                    )
+                    return
+                _LOGGER.info(
+                    "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                    "proceeding with scan (video metadata will not be extracted)."
+                )
             
             _LOGGER.info(
                 "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]", 
@@ -826,6 +864,23 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     raise ValueError("No Media Index integration instance found")
 
 
+def _get_instance_data(hass: HomeAssistant, call: ServiceCall) -> dict:
+    """Resolve the entry_id from a service call and return its instance data dict.
+
+    Raises HomeAssistantError with a user-friendly message when the target
+    integration instance is disabled or not yet loaded, rather than letting a
+    raw KeyError propagate to the HA WebSocket error log.
+    """
+    entry_id = _get_entry_id_from_call(hass, call)
+    try:
+        return hass.data[DOMAIN][entry_id]
+    except KeyError:
+        raise HomeAssistantError(
+            f"Media Index instance '{entry_id}' is not loaded. "
+            "The integration may be disabled or still starting up."
+        )
+
+
 def _register_services(hass: HomeAssistant):
     """Register all Media Index services.
     
@@ -836,9 +891,9 @@ def _register_services(hass: HomeAssistant):
     # Register services
     async def handle_get_random_items(call):
         """Handle get_random_items service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Debug logging removed to prevent excessive logs during slideshow
         
@@ -897,9 +952,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_ordered_files(call):
         """Handle get_ordered_files service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get cursor parameters and ensure proper types
         after_value = call.data.get("after_value")
@@ -953,9 +1008,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_file_metadata(call):
         """Handle get_file_metadata service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -985,9 +1040,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_get_related_files(call):
         """Handle get_related_files service call (burst or anniversary mode)."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         mode = call.data.get("mode")
         
@@ -1076,10 +1131,10 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_geocode_file(call):
         """Handle geocode_file service call for progressive geocoding."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
-        geocode_service = hass.data[DOMAIN][entry_id].get("geocode_service")
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
+        geocode_service = instance.get("geocode_service")
         
         if not geocode_service:
             _LOGGER.error("Geocoding service not enabled")
@@ -1151,9 +1206,9 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_mark_favorite(call):
         """Handle mark_favorite service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1236,9 +1291,9 @@ def _register_services(hass: HomeAssistant):
         """Handle delete_media service call."""
         import shutil
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1293,6 +1348,13 @@ def _register_services(hass: HomeAssistant):
                 str(dest_path)
             )
             
+            # Record the move in move_history so it can be restored later
+            await cache_manager.record_file_move(
+                original_path=file_path,
+                new_path=str(dest_path),
+                reason="junk"
+            )
+
             # Remove from database
             await cache_manager.delete_file(file_path)
             
@@ -1313,9 +1375,9 @@ def _register_services(hass: HomeAssistant):
         """Handle mark_for_edit service call."""
         import shutil
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1388,8 +1450,7 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_cleanup_database(call):
         """Handle cleanup_database service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
         
         dry_run = call.data.get("dry_run", True)
         
@@ -1487,14 +1548,15 @@ def _register_services(hass: HomeAssistant):
         import shutil
         import os
         
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        scanner = hass.data[DOMAIN][entry_id]["scanner"]
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        scanner = instance["scanner"]
         
         folder_filter = call.data.get("folder_filter", "_Edit")
         specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
         
-        _LOGGER.info("Restoring edited files (filter: %s, specific: %s)", folder_filter, specific_file)
+        _LOGGER.info("Restoring edited files (filter: %s, specific: %s, clear_failed: %s)", folder_filter, specific_file, clear_failed)
         
         try:
             # Get pending restores from move_history
@@ -1517,6 +1579,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if file still exists at new location
                     if not await hass.async_add_executor_job(os.path.exists, current_path):
                         _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1533,6 +1598,9 @@ def _register_services(hass: HomeAssistant):
                     # Check if destination already exists
                     if await hass.async_add_executor_job(os.path.exists, original_path):
                         _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
                         results.append({
                             "original_path": original_path,
                             "current_path": current_path,
@@ -1564,6 +1632,9 @@ def _register_services(hass: HomeAssistant):
                     
                 except Exception as e:
                     _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
                     results.append({
                         "original_path": original_path,
                         "current_path": current_path,
@@ -1586,12 +1657,112 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e)
             }
     
+    async def handle_restore_deleted_files(call):
+        """Handle restore_deleted_files service call.
+
+        Restores files that were moved to the _Junk folder by delete_media back
+        to their original filesystem locations, using the move_history table.
+        """
+        import shutil
+        import os
+
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        scanner = instance["scanner"]
+
+        specific_file = call.data.get("file_path")
+        clear_failed = call.data.get("clear_failed", False)
+
+        _LOGGER.info("Restoring deleted files from _Junk (specific: %s, clear_failed: %s)", specific_file, clear_failed)
+
+        try:
+            pending_moves = await cache_manager.get_pending_restores("_Junk")
+
+            if specific_file:
+                pending_moves = [m for m in pending_moves if m["new_path"] == specific_file]
+
+            restored_count = 0
+            failed_count = 0
+            results = []
+
+            for move in pending_moves:
+                move_id = move["id"]
+                original_path = move["original_path"]
+                current_path = move["new_path"]
+
+                try:
+                    if not await hass.async_add_executor_job(os.path.exists, current_path):
+                        _LOGGER.warning("File not found at %s, skipping restore", current_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "not_found",
+                        })
+                        failed_count += 1
+                        continue
+
+                    dest_dir = Path(original_path).parent
+                    if not await hass.async_add_executor_job(dest_dir.exists):
+                        await hass.async_add_executor_job(lambda: dest_dir.mkdir(parents=True, exist_ok=True))
+
+                    if await hass.async_add_executor_job(os.path.exists, original_path):
+                        _LOGGER.warning("Destination %s already exists, skipping restore", original_path)
+                        if clear_failed:
+                            await cache_manager.mark_move_restored(move_id)
+                            _LOGGER.info("Cleared failed restore record for %s", current_path)
+                        results.append({
+                            "original_path": original_path,
+                            "current_path": current_path,
+                            "status": "destination_exists",
+                        })
+                        failed_count += 1
+                        continue
+
+                    await hass.async_add_executor_job(shutil.move, current_path, original_path)
+                    await cache_manager.mark_move_restored(move_id)
+                    await scanner.scan_file(original_path)
+
+                    _LOGGER.info("Restored deleted file: %s -> %s", current_path, original_path)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "restored",
+                    })
+                    restored_count += 1
+
+                except Exception as e:
+                    _LOGGER.error("Error restoring %s: %s", current_path, e)
+                    if clear_failed:
+                        await cache_manager.mark_move_restored(move_id)
+                        _LOGGER.info("Cleared failed restore record for %s", current_path)
+                    results.append({
+                        "original_path": original_path,
+                        "current_path": current_path,
+                        "status": "error",
+                        "error": str(e),
+                    })
+                    failed_count += 1
+
+            return {
+                "total_pending": len(pending_moves),
+                "restored": restored_count,
+                "failed": failed_count,
+                "results": results,
+            }
+
+        except Exception as e:
+            _LOGGER.error("Error in restore_deleted_files service: %s", e)
+            return {"status": "error", "error": str(e)}
+
     async def handle_update_burst_metadata(call):
         """Handle update_burst_metadata service call."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
-        config = hass.data[DOMAIN][entry_id]["config"]
-        
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
+
         base_folder = config.get(CONF_BASE_FOLDER, "/media")
         media_source_prefix = config.get(CONF_MEDIA_SOURCE_URI, "")
         
@@ -1656,8 +1827,7 @@ def _register_services(hass: HomeAssistant):
         for large collections (200 K+ items) — uses a single sorted query then an
         in-process walk rather than per-file DB round-trips.
         """
-        entry_id = _get_entry_id_from_call(hass, call)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         folder              = call.data.get("folder", None)
         time_window         = call.data.get("time_window_seconds", 10)
@@ -1689,21 +1859,114 @@ def _register_services(hass: HomeAssistant):
                 "error": str(e),
             }
 
+    async def handle_find_duplicate_files(call):
+        """Handle find_duplicate_files service call.
+
+        Finds files within burst groups that share identical file_size, date_taken,
+        width, and height — indicating filesystem-level duplicates (e.g. uploaded twice).
+        Keeper selection is folder-pair aware: the folder contributing more files to
+        duplicate pairs is kept globally; non-keepers come from the other folder.
+        With dry_run=True (default) returns the groups without touching anything.
+        With dry_run=False and auto_delete=True, moves all non-keepers to _Junk.
+        """
+        import shutil
+
+        instance = _get_instance_data(hass, call)
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
+
+        folder = call.data.get("folder")
+        prefer_folder = call.data.get("prefer_folder")
+        dry_run = call.data.get("dry_run", True)
+        auto_delete = call.data.get("auto_delete", False)
+
+        _LOGGER.info(
+            "find_duplicate_files: folder=%s, prefer_folder=%s, dry_run=%s, auto_delete=%s",
+            folder or "all", prefer_folder, dry_run, auto_delete,
+        )
+
+        try:
+            result = await cache_manager.find_duplicate_files(
+                folder=folder, prefer_folder=prefer_folder
+            )
+            sets = result["sets"]
+            folder_pairs = result["folder_pairs"]
+
+            duplicate_sets = len(sets)
+            total_duplicates = sum(len(s["duplicates"]) for s in sets)
+            deleted = 0
+            delete_errors = 0
+
+            if not dry_run and auto_delete and sets:
+                base_folder = config.get(CONF_BASE_FOLDER, "/media")
+                junk_folder = Path(base_folder) / "_Junk"
+                await hass.async_add_executor_job(lambda: junk_folder.mkdir(parents=True, exist_ok=True))
+
+                for grp in sets:
+                    for dup in grp["duplicates"]:
+                        dup_path = dup["path"]
+                        try:
+                            file_name = Path(dup_path).name
+                            dest_path = junk_folder / file_name
+                            counter = 1
+                            while await hass.async_add_executor_job(dest_path.exists):
+                                stem = Path(dup_path).stem
+                                suffix = Path(dup_path).suffix
+                                dest_path = junk_folder / f"{stem}_{counter}{suffix}"
+                                counter += 1
+
+                            await hass.async_add_executor_job(shutil.move, dup_path, str(dest_path))
+                            await cache_manager.record_file_move(
+                                original_path=dup_path,
+                                new_path=str(dest_path),
+                                reason="junk"
+                            )
+                            await cache_manager.delete_file(dup_path)
+                            deleted += 1
+                            _LOGGER.debug("Moved duplicate to junk: %s -> %s", dup_path, dest_path)
+                        except Exception as del_err:
+                            _LOGGER.error("Failed to delete duplicate %s: %s", dup_path, del_err)
+                            delete_errors += 1
+
+            return {
+                "status": "success",
+                "dry_run": dry_run,
+                "duplicate_sets": duplicate_sets,
+                "total_duplicates": total_duplicates,
+                "deleted": deleted,
+                "delete_errors": delete_errors,
+                "folder_pairs": folder_pairs,
+                "groups": sets,
+            }
+        except Exception as e:
+            _LOGGER.error("Error in find_duplicate_files service: %s", e)
+            return {"status": "error", "error": str(e)}
+
     async def handle_scan_folder(call):
         """Handle scan_folder service call."""
         entry_id = _get_entry_id_from_call(hass, call)
+        instance = _get_instance_data(hass, call)
         
-        # Block scanning if pymediainfo is not available
-        if not hass.data[DOMAIN][entry_id].get("pymediainfo_available", False):
-            _LOGGER.error(
-                "❌ Scan BLOCKED: pymediainfo/libmediainfo is not available!\n"
-                "Scanning without video metadata support will wipe existing metadata.\n"
-                "Call 'media_index.install_libmediainfo' service to fix and restart Home Assistant."
+        # Block scanning if pymediainfo is not available (unless user opted to scan without it)
+        if not instance.get("pymediainfo_available", False):
+            entry_config = instance.get("config", {})
+            scan_without_libmediainfo = entry_config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
             )
-            return {"status": "blocked", "reason": "pymediainfo_not_available"}
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Scan BLOCKED: libmediainfo not available and 'scan_without_libmediainfo' is disabled.\n"
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support."
+                )
+                return {"status": "blocked", "reason": "pymediainfo_not_available"}
+            _LOGGER.info(
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                "proceeding with scan (video metadata will not be extracted)."
+            )
         
-        scanner = hass.data[DOMAIN][entry_id]["scanner"]
-        config = hass.data[DOMAIN][entry_id]["config"]
+        scanner = instance["scanner"]
+        config = instance["config"]
         
         folder_path = call.data.get("folder_path", config.get(CONF_BASE_FOLDER, "/media"))
         force_rescan = call.data.get("force_rescan", False)
@@ -1715,7 +1978,7 @@ def _register_services(hass: HomeAssistant):
         burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
         burst_time_window_seconds = config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
         burst_location_tolerance_meters = config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
-        cache_manager = hass.data[DOMAIN][entry_id]["cache_manager"]
+        cache_manager = instance["cache_manager"]
 
         async def _scan_and_burst():
             await scanner.scan_folder(folder_path, watched_folders, force=force_rescan)
@@ -1738,8 +2001,8 @@ def _register_services(hass: HomeAssistant):
     
     async def handle_check_file_exists(call):
         """Handle check_file_exists service call - lightweight filesystem check."""
-        entry_id = _get_entry_id_from_call(hass, call)
-        config = hass.data[DOMAIN][entry_id]["config"]
+        instance = _get_instance_data(hass, call)
+        config = instance["config"]
         
         # Get file_path from either file_path parameter or media_source_uri
         file_path = call.data.get("file_path")
@@ -1883,7 +2146,15 @@ def _register_services(hass: HomeAssistant):
         schema=SERVICE_RESTORE_EDITED_FILES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
-    
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTORE_DELETED_FILES,
+        handle_restore_deleted_files,
+        schema=SERVICE_RESTORE_DELETED_FILES_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEANUP_DATABASE,
@@ -1918,6 +2189,116 @@ def _register_services(hass: HomeAssistant):
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_FIND_DUPLICATE_FILES,
+        handle_find_duplicate_files,
+        schema=vol.Schema({
+            vol.Optional("folder"): cv.string,
+            vol.Optional("prefer_folder"): cv.string,
+            vol.Optional("dry_run", default=True): cv.boolean,
+            vol.Optional("auto_delete", default=False): cv.boolean,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    # --- Sync state services (cross-device queue sharing) ---
+
+    async def handle_update_sync_state(call):
+        """Write sync state for a shared queue group and fire a sync event."""
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        queue = call.data["queue"]
+        current_index = call.data["current_index"]
+
+        trimmed_queue = queue[-20:] if len(queue) > 20 else queue
+        await cache_manager.upsert_sync_state(sync_group, trimmed_queue, current_index)
+
+        # Fire event on the HA bus so all subscribed cards/followers receive it immediately.
+        # Services are callable by any authenticated user; the integration fires the event
+        # as the system so non-admin users can participate in sync sessions.
+        # Use the same trimmed queue so event payload matches what get_sync_state returns.
+        hass.bus.async_fire(
+            EVENT_SYNC_UPDATED,
+            {
+                "sync_group": sync_group,
+                "queue": trimmed_queue,
+                "current_index": current_index,
+                "source_card_id": call.data.get("source_card_id", ""),
+                "is_paused": call.data.get("is_paused"),
+                "pause_intent": call.data.get("pause_intent", False),
+                "current_metadata": call.data.get("current_metadata"),
+                "written_at": call.data.get("written_at", 0),
+            },
+        )
+        _LOGGER.debug("Sync state updated for group '%s', index %d", sync_group, current_index)
+        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(trimmed_queue)}
+
+    async def handle_get_sync_state(call):
+        """Return the current sync state for a shared queue group."""
+        cache_manager = _get_instance_data(hass, call)["cache_manager"]
+
+        sync_group = call.data["sync_group"]
+        state = await cache_manager.get_sync_state(sync_group)
+        if state is None:
+            return {"sync_group": sync_group, "found": False, "queue": [], "current_index": 0}
+        return {**state, "found": True}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_SYNC_STATE,
+        handle_update_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+            vol.Required("queue"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Required("current_index"): vol.All(int, vol.Range(min=0)),
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_SYNC_STATE,
+        handle_get_sync_state,
+        schema=vol.Schema({
+            vol.Required("sync_group"): cv.string,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    # ── WebSocket command: subscribe to sync events for a group ─────────────────
+    # Non-admin dashboard users cannot use the generic subscribe_events WebSocket
+    # command for custom integration events. We register our own command so that
+    # any authenticated user (admin or not) can subscribe to sync updates for a
+    # specific group.
+    from homeassistant.components import websocket_api
+
+    @websocket_api.websocket_command({
+        "type": "media_index/subscribe_sync",
+        "sync_group": str,
+    })
+    @websocket_api.async_response
+    async def handle_ws_subscribe_sync(hass, connection, msg):
+        """Stream sync-state updates for one shared-queue group to this connection."""
+        from homeassistant.core import callback as ha_callback
+
+        sync_group = msg["sync_group"]
+
+        @ha_callback
+        def forward_event(event):
+            if event.data.get("sync_group") != sync_group:
+                return
+            connection.send_message(
+                websocket_api.event_message(msg["id"], event.data)
+            )
+
+        unsubscribe = hass.bus.async_listen(EVENT_SYNC_UPDATED, forward_event)
+        connection.subscriptions[msg["id"]] = unsubscribe
+        connection.send_result(msg["id"])
+
+    websocket_api.async_register_command(hass, handle_ws_subscribe_sync)
 
     _LOGGER.info("Media Index services registered")
 

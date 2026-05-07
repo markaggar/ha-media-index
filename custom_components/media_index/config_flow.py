@@ -26,6 +26,7 @@ from .const import (
     CONF_BATCH_SIZE,
     CONF_CACHE_MAX_AGE,
     CONF_AUTO_INSTALL_LIBMEDIAINFO,
+    CONF_SCAN_WITHOUT_LIBMEDIAINFO,
     CONF_AUTO_BURST_INDEX,
     CONF_BURST_TIME_WINDOW_SECONDS,
     CONF_BURST_LOCATION_TOLERANCE_METERS,
@@ -43,6 +44,7 @@ from .const import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CACHE_MAX_AGE,
     DEFAULT_AUTO_INSTALL_LIBMEDIAINFO,
+    DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO,
     DEFAULT_AUTO_BURST_INDEX,
     DEFAULT_BURST_TIME_WINDOW_SECONDS,
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
@@ -147,6 +149,9 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_AUTO_INSTALL_LIBMEDIAINFO, default=DEFAULT_AUTO_INSTALL_LIBMEDIAINFO
                     ): bool,
                     vol.Optional(
+                        CONF_SCAN_WITHOUT_LIBMEDIAINFO, default=DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+                    ): bool,
+                    vol.Optional(
                         CONF_BATCH_SIZE, default=DEFAULT_BATCH_SIZE
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
                     vol.Optional(
@@ -241,6 +246,10 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_AUTO_INSTALL_LIBMEDIAINFO,
             self.config_entry.data.get(CONF_AUTO_INSTALL_LIBMEDIAINFO, DEFAULT_AUTO_INSTALL_LIBMEDIAINFO),
         )
+        current_scan_without_libmediainfo = self.config_entry.options.get(
+            CONF_SCAN_WITHOUT_LIBMEDIAINFO,
+            self.config_entry.data.get(CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO),
+        )
         current_scan_on_startup = self.config_entry.options.get(
             CONF_SCAN_ON_STARTUP,
             self.config_entry.data.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP),
@@ -305,6 +314,9 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                     vol.Optional(
                         CONF_AUTO_INSTALL_LIBMEDIAINFO, default=current_auto_install
+                    ): bool,
+                    vol.Optional(
+                        CONF_SCAN_WITHOUT_LIBMEDIAINFO, default=current_scan_without_libmediainfo
                     ): bool,
                     vol.Optional(
                         CONF_SCAN_ON_STARTUP, default=current_scan_on_startup

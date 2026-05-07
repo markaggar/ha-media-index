@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-04-30
+
+### Added
+
+- **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
+  - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)
+  - `get_sync_state` — returns the stored queue and position for a `sync_group`; used by cards on reconnect to resume where the other device left off
+  - A `sync_state` table is created in the database automatically on first load
+  - The `media_index/subscribe_sync` WebSocket command lets non-admin users subscribe to sync events filtered by `sync_group`
+
+  - **`find_duplicate_files` Service**: Detects filesystem-level duplicates (e.g. uploaded twice) within burst groups using `file_size + date_taken + width + height` matching
+  - Requires `index_burst_groups` to have been run first so that `burst_id` values are populated
+  - Keeper selection is **folder-pair aware**: the folder contributing more duplicate files across all pairs becomes the keeper folder globally, preventing keepers from being scattered randomly between two folders
+  - Optional `prefer_folder` parameter overrides the automatic majority-vote logic for a specific folder
+  - `dry_run: true` (default) returns duplicate groups and a folder-pair summary without touching any files
+  - `dry_run: false` + `auto_delete: true` moves all non-keeper duplicates to the `_Junk` folder
+  - Returns `{folder_pairs, groups}` — `folder_pairs` gives a high-level per-pair summary (`keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`) for sanity-checking before deletion
+  - Keeper preference order: favorited → latest `modified_time` (files renamed/reorganised after capture are more likely keepers) → alphabetical path
+
+- **`restore_deleted_files` Service**: Restores files previously deleted via `delete_media` back to their original filesystem locations, then re-indexes them
+  - `delete_media` now records every move to the `move_history` table (reason `"junk"`) so the original path is always known
+  - Optional `file_path` parameter restores a single specific file; omit to restore all pending deletions
+  - Returns `{total_pending, restored, failed, results}` with per-file status (`restored`, `not_found`, `destination_exists`, `error`)
+  - Note: only files deleted after this release are restorable via the service; pre-existing `_Junk` files without history must be restored manually
+
+- **`clear_failed` Parameter on Restore Services**: Both `restore_deleted_files` and `restore_edited_files` now accept `clear_failed: true` — any restore attempt that fails (file not found in `_Junk`/`_Edit`, or destination already occupied) is marked as resolved and removed from the pending queue, preventing permanently-stuck entries from blocking future restore runs
+
+- **`NAS_utils/gps_tag.sh` — GPS Backfill Utility**: A standalone Bash script that automatically backfills GPS coordinates into photos and videos that lack them (e.g. DSLR shots), by correlating timestamps against nearby GPS-enabled "donor" files (phone photos taken at the same time)
+  - **Designed to run on a Linux-based NAS server** where the photo library lives — this keeps all file I/O local to the storage device and avoids network transfer overhead. It can optionally run directly on the HA server if the library is small or the files are local, but performance will be poor for large remote libraries
+  - **Supported file types:** JPG/JPEG (EXIF GPS with `GPSLatitudeRef`/`GPSLongitudeRef` for Synology/Windows/Apple compatibility), MP4/MOV (ISO 6709 string in QuickTime `©xyz` user-data atom)
+  - **Requires:** `exiftool` v12+, bash 4+, standard coreutils (`awk`, `sort`, `comm`, `find`). On Synology NAS install via Entware: `opkg install perl-image-exiftool`
+  - **Modes of operation:**
+    - **Auto mode** (`gps_tag.sh FOLDER`) — incremental per-folder runs suited for cron or Synology scheduled tasks; only new files are processed on re-runs via a hidden `.gps_cache` TSV
+    - **Donor mode** (`--donor DONOR_FOLDER TARGET_FOLDER`) — one-shot backfill using a specific phone-camera folder as the GPS source
+    - **Merge caches** (`--merge-caches OUTPUT.tsv --scan DIR ...`) — combines `.gps_cache` files from multiple phone libraries into a single sorted donor TSV with epoch-range header
+    - **DSLR recursive** (`--dslr-recurse MERGED.tsv DSLR_ROOT`) — walks an entire DSLR archive; uses `exiftool -fast2` pre-scan to skip out-of-range folders cheaply before doing full metadata reads
+    - **Fix refs** (`--fix-refs FOLDER`) — adds missing `GPSLatitudeRef`/`GPSLongitudeRef` to files previously tagged with signed-decimal GPS only
+    - **Fix tagged** (`--fix-tagged FOLDER [--ref FILE] [--recurse]`) — applies GPS to files you have keyword-tagged `fixgps` or `fixgps:LAT:LON` in Synology Photos, then removes the keyword
+  - Handles corrupt files automatically (Samsung truncated trailers, Samsung SM-Gxxx corrupt IFDs, panoramas with appended data) using a clean-copy fallback
+  - Synology `@eaDir` thumbnail directories excluded automatically from all folder walks
+  - See `NAS_utils/GPS_TAG.md` for full documentation and workflow examples
+
+### Fixed
+
+- **XMP:Rating Now Read During Scan**: `exiftool -Rating=5` writes to XMP namespace by default, not the EXIF IFD0 tag 0x4746. PIL's `getexif()` only reads EXIF IFDs, so XMP-only ratings were silently ignored and files appeared unrated in the database
+  - Added XMP fallback: after the EXIF 0x4746 check, `img.info['xmp']` is inspected for both attribute form (`xmp:Rating="5"`) and element form (`<xmp:Rating>5</xmp:Rating>`) using a regex — no extra dependencies
+  - EXIF tag 0x4746 still takes priority when present; XMP is only used when the EXIF tag is absent
+  - Covers ratings written by exiftool, Windows Explorer, Lightroom, and other XMP-first tools
+
+- **GPS Coordinates Not Saved After GPS Tagging**: Files whose GPS was added by an external tool (e.g. a donor-based GPS tagger using piexif) were sometimes rescanned but returned `latitude: null` and `longitude: null` in the database
+  - Root cause: piexif writes DMS GPS values as `(numerator, denominator)` rational tuples — e.g. `((35, 1), (42, 1), (4104, 100))` for 35° 42′ 41.04″. Modern desktop Pillow pre-converts these to floats, but the ARM64 Linux build used by Home Assistant may return the raw rational tuples. `_convert_to_degrees()` called `float()` directly on the tuple element, which raised `TypeError` — silently caught, GPS returned `None`
+  - Fixed `_convert_to_degrees()` to handle both forms: if a DMS element is a `(num, denom)` tuple it divides before converting; floats/ints pass through unchanged
+  - Also added a piexif fallback: if Pillow's `get_ifd(0x8825)` returns an empty GPS IFD (another ARM64 quirk), the code re-reads GPS via `piexif.load()` which parses the raw EXIF bytes and always returns rational tuples
+
+- **EXIF Rating Tag Type Coercion**: PIL may return the EXIF 0x4746 SHORT tag as `bytes`, `float`, `tuple`, or `int` depending on how the file was encoded. The previous `isinstance(rating, int)` guard silently dropped non-int values, leaving `rating=None` and actively marking files as not-favorited on every forced rescan
+  - Now explicitly coerces `bytes` (little-endian SHORT), `tuple` (RATIONAL numerator/denominator), `float`, and `int` before range-checking
+
+- **`scan_file()` Now Accepts `force` Parameter**: The internal `scan_file()` method previously always skipped files whose modification time had not changed, with no way to override. Added `force=False` parameter — when `force=True` the mtime equality check is bypassed, which is necessary when exiftool edits metadata without updating mtime (e.g. with `-preserve`)
+
+- **`scan_without_libmediainfo` Option**: New configuration option (default: `false`) that allows scanning to proceed even when the `libmediainfo` system library is not installed
+  - Enable this if you only index images and do not need video metadata extraction
+  - When enabled, scans run normally but video files will be indexed without duration/video-specific metadata
+  - Prevents the misleading "scan SKIPPED" and error messages for image-only installations
+  - Available in both initial setup and options flow
+
+- **Misleading log messages when libmediainfo absent**: Downgraded the log level from ERROR to WARNING when `libmediainfo` is not installed. The previous ERROR message incorrectly implied a critical failure even for users with no video files
+- **Startup/scheduled scan blocked for image-only installs**: When `scan_without_libmediainfo` is enabled, scans are no longer blocked by the absence of `libmediainfo`
+
+- **Service calls on disabled instances now return a clean error**: When a dashboard card calls any `media_index` service (e.g. `get_random_items`, `get_sync_state`, `check_file_exists`) targeting an integration instance that is disabled or still starting up, HA previously logged an unhandled `KeyError` traceback under "Unexpected exception". All service handlers now raise `HomeAssistantError` with a descriptive message instead, producing a single clean log line and a proper error response to the calling card
+
+
 ## [1.6.0] - 2026-04-12
 
 ### Added
@@ -36,7 +107,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `burst_index_after_scan` (bool, default `false`): Re-index the full library after each scheduled scan completes (useful for libraries managed via scheduled import scripts)
   - Watcher trigger: after each batch of file events is processed, affected parent folders are enqueued for burst indexing subject to the cooldown interval
   - Post-scan trigger: if both `auto_burst_index` and `burst_index_after_scan` are enabled, a full-library `index_burst_groups` call runs at the end of every scheduled scan
-
 
 ### Fixed
 

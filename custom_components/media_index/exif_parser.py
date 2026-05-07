@@ -19,17 +19,28 @@ class ExifParser:
         """Convert GPS coordinates from DMS (degrees, minutes, seconds) to decimal degrees.
         
         Args:
-            value: Tuple of (degrees, minutes, seconds) as Rational numbers
+            value: Tuple of (degrees, minutes, seconds). Each component may be:
+                   - a float/int (already converted by PIL)
+                   - an IFDRational object (supports float() conversion)
+                   - a (numerator, denominator) tuple (raw RATIONAL, e.g. from piexif)
             
         Returns:
             Decimal degrees as float, or None if conversion fails
         """
         try:
             d, m, s = value
-            # Convert Rational to float
-            degrees = float(d)
-            minutes = float(m) / 60.0
-            seconds = float(s) / 3600.0
+
+            def _to_float(v) -> float:
+                """Convert a single DMS component to float regardless of encoding."""
+                if isinstance(v, tuple) and len(v) == 2:
+                    # Raw (numerator, denominator) rational pair from piexif or older Pillow
+                    denom = v[1]
+                    return float(v[0]) / float(denom) if denom else 0.0
+                return float(v)  # float, int, or IFDRational
+
+            degrees = _to_float(d)
+            minutes = _to_float(m) / 60.0
+            seconds = _to_float(s) / 3600.0
             return degrees + minutes + seconds
         except (TypeError, ValueError, ZeroDivisionError) as err:
             _LOGGER.debug("Failed to convert GPS coordinates: %s", err)
@@ -117,6 +128,58 @@ class ExifParser:
             return None
 
     @staticmethod
+    def _read_jpeg_xmp(file_path: str) -> Optional[str]:
+        """Scan JPEG APP1 markers directly to find the XMP packet.
+
+        PIL's img.info['xmp'] is populated from the first XMP APP1, but Lightroom
+        and other tools sometimes use the Adobe Extended XMP format (multiple APP1
+        markers) when metadata exceeds ~64 KB.  In those cases img.info['xmp'] may
+        be empty or contain only the stub packet.  This method reads the JPEG
+        markers directly so we always get the main XMP block regardless of PIL
+        version or extended-XMP packaging.
+        """
+        XMP_MAGIC = b'http://ns.adobe.com/xap/1.0/\x00'
+        MAGIC_LEN = len(XMP_MAGIC)
+        try:
+            with open(file_path, 'rb') as f:
+                if f.read(2) != b'\xff\xd8':  # JPEG SOI
+                    return None
+                while True:
+                    byte = f.read(1)
+                    if not byte or byte != b'\xff':
+                        break
+                    marker_byte = f.read(1)
+                    if not marker_byte:
+                        break
+                    mt = marker_byte[0]
+                    # Standalone markers (no length field): RST0–RST7, SOI, EOI
+                    if mt in (0x01,) or (0xd0 <= mt <= 0xd9):
+                        continue
+                    # SOS: image data follows — stop scanning
+                    if mt == 0xda:
+                        break
+                    # All other markers have a 2-byte big-endian length
+                    lb = f.read(2)
+                    if len(lb) < 2:
+                        break
+                    seg_len = int.from_bytes(lb, 'big') - 2  # bytes after the length field
+                    if seg_len < 0:
+                        break
+                    if mt == 0xe1 and seg_len >= MAGIC_LEN:  # APP1
+                        prefix = f.read(MAGIC_LEN)
+                        if prefix == XMP_MAGIC:
+                            rest = f.read(seg_len - MAGIC_LEN)
+                            return rest.decode('utf-8', errors='replace')
+                        remaining = seg_len - len(prefix)
+                        if remaining > 0:
+                            f.seek(remaining, 1)
+                    else:
+                        f.seek(seg_len, 1)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
     def extract_exif(file_path: str) -> Optional[Dict[str, Any]]:
         """Extract EXIF metadata from an image file.
         
@@ -168,6 +231,28 @@ class ExifParser:
                             gps_info[gps_tag_name] = gps_value
                 except (KeyError, AttributeError) as err:
                     _LOGGER.debug("No GPS IFD in %s: %s", path.name, err)
+
+                # Piexif fallback: PIL's get_ifd() can return an empty dict for GPS on
+                # some Pillow versions (particularly ARM64 Linux builds) even when the
+                # GPS IFD pointer exists in the main IFD.  In that case, fall back to
+                # piexif which reads the raw markers reliably across all platforms.
+                if not gps_info and path.suffix.lower() in {'.jpg', '.jpeg', '.tiff', '.tif'}:
+                    try:
+                        raw = piexif.load(file_path)
+                        for tag_id, raw_val in raw.get('GPS', {}).items():
+                            tag_name = GPSTAGS.get(tag_id, tag_id)
+                            # Piexif returns RATIONAL values as (num, denom) tuples.
+                            # Convert DMS triplets to plain tuple; leave refs as-is.
+                            if isinstance(raw_val, (list, tuple)) and len(raw_val) == 3:
+                                gps_info[tag_name] = tuple(raw_val)
+                            elif isinstance(raw_val, bytes):
+                                gps_info[tag_name] = raw_val.decode('ascii', errors='replace').strip('\x00')
+                            else:
+                                gps_info[tag_name] = raw_val
+                        if gps_info:
+                            _LOGGER.debug("GPS read via piexif fallback for %s", path.name)
+                    except Exception as _pe:
+                        _LOGGER.debug("Piexif GPS fallback failed for %s: %s", path.name, _pe)
                 
                 # Extract Exif sub-IFD (tag 0x8769) - contains camera settings
                 try:
@@ -283,23 +368,88 @@ class ExifParser:
                     result['white_balance'] = wb_modes.get(exif['WhiteBalance'], 'Auto')
                 
                 # Parse XMP:Rating (stored in EXIF Rating tag or XMP metadata)
-                # Check standard Rating tag first (tag 0x4746)
+                # Check standard Rating tag first (tag 0x4746).
+                # PIL may return the value as int, bytes, float, or tuple depending on
+                # how the EXIF block was written (e.g. exiftool writes SHORT, but some
+                # files store it as LONG or RATIONAL), so we coerce before comparing.
                 if 'Rating' in exif:
-                    rating = exif['Rating']
-                    if isinstance(rating, int) and 0 <= rating <= 5:
-                        result['rating'] = rating
-                
-                # Parse image dimensions and orientation
-                # Try ExifImageWidth/Height first (from Exif IFD), then ImageWidth/Height (from main IFD)
-                if 'ExifImageWidth' in exif:
-                    result['width'] = int(exif['ExifImageWidth'])
-                elif 'ImageWidth' in exif:
-                    result['width'] = int(exif['ImageWidth'])
-                
-                if 'ExifImageHeight' in exif:
-                    result['height'] = int(exif['ExifImageHeight'])
-                elif 'ImageHeight' in exif:
-                    result['height'] = int(exif['ImageHeight'])
+                    rating_raw = exif['Rating']
+                    try:
+                        if isinstance(rating_raw, bytes):
+                            # e.g. b'\x05\x00' — little-endian SHORT
+                            rating_int = int.from_bytes(rating_raw[:2], 'little') if len(rating_raw) >= 2 else int(rating_raw[0])
+                        elif isinstance(rating_raw, tuple):
+                            # RATIONAL stored as (numerator, denominator)
+                            rating_int = int(rating_raw[0] / rating_raw[1]) if rating_raw[1] else 0
+                        else:
+                            rating_int = int(rating_raw)
+                        if 1 <= rating_int <= 5:
+                            # Only use EXIF tag when it has a positive star value.
+                            # EXIF=0 means "unrated" in Lightroom/most apps — treat it as
+                            # absent so the XMP fallback (MicrosoftPhoto:RatingPercent, etc.)
+                            # still gets a chance to run.
+                            result['rating'] = rating_int
+                            _LOGGER.debug("Rating tag found: raw=%r → %d", rating_raw, rating_int)
+                    except (ValueError, TypeError, ZeroDivisionError) as _e:
+                        _LOGGER.debug("Could not parse Rating tag value %r: %s", rating_raw, _e)
+
+                # XMP fallback: if no EXIF Rating tag was found, look in the raw XMP
+                # bytes embedded in the file (written by exiftool -Rating=5 which
+                # defaults to XMP:Rating, not EXIF:Rating).  Pillow exposes the raw
+                # XMP block as img.info['xmp'] but may return empty bytes for large
+                # Lightroom files that use Adobe Extended XMP (>64 KB split across
+                # multiple APP1 markers).  _read_jpeg_xmp() scans the file directly
+                # as a reliable fallback.
+                # Also handles MicrosoftPhoto:RatingPercent (written by Windows
+                # Explorer, older Lightroom exports on Windows, etc.).
+                if result['rating'] is None:
+                    try:
+                        xmp_bytes = img.info.get('xmp', b'')
+                        xmp_text = (
+                            xmp_bytes.decode('utf-8', errors='replace')
+                            if isinstance(xmp_bytes, bytes) else xmp_bytes
+                        ) if xmp_bytes else None
+                        if not xmp_text:
+                            # PIL didn't capture the XMP (extended XMP or ordering
+                            # issue); fall back to reading the file directly.
+                            if path.suffix.lower() in {'.jpg', '.jpeg'}:
+                                xmp_text = ExifParser._read_jpeg_xmp(file_path)
+                        if xmp_text:
+                            import re as _re
+                            # Matches both attribute form:  xmp:Rating="5"
+                            # and element form:             <xmp:Rating>5</xmp:Rating>
+                            m = _re.search(r'xmp:Rating[=">]+\s*(\d)', xmp_text, _re.IGNORECASE)
+                            if m:
+                                xmp_rating = int(m.group(1))
+                                if 0 <= xmp_rating <= 5:
+                                    result['rating'] = xmp_rating
+                                    _LOGGER.debug("XMP Rating found: %d for %s", xmp_rating, path.name)
+                            if result['rating'] is None:
+                                # MicrosoftPhoto:RatingPercent fallback (Windows Explorer,
+                                # Lightroom-on-Windows style: 0→0, 1→1, 25→2, 50→3, 75→4, 99→5)
+                                m_pct = _re.search(r'RatingPercent[=">]+\s*(\d+)', xmp_text, _re.IGNORECASE)
+                                if m_pct:
+                                    pct = int(m_pct.group(1))
+                                    for threshold, stars in ((99, 5), (75, 4), (50, 3), (25, 2), (1, 1)):
+                                        if pct >= threshold:
+                                            result['rating'] = stars
+                                            _LOGGER.debug(
+                                                "MicrosoftPhoto RatingPercent %d → %d stars for %s",
+                                                pct, stars, path.name,
+                                            )
+                                            break
+                    except Exception as _xe:
+                        _LOGGER.debug("Could not parse XMP rating for %s: %s", path.name, _xe)
+
+                # Parse image dimensions — use the actual JPEG pixel dimensions
+                # from img.size as the primary source.  ExifImageWidth/Height are
+                # original sensor dimensions that can differ from the stored JPEG
+                # (e.g. Canon R5: sensor is 8192×5464 but the JPEG is 5435×6692
+                # after in-camera crop or Lightroom export), and ExifImageHeight
+                # is sometimes absent even when ExifImageWidth is present.
+                jpeg_w, jpeg_h = img.size
+                result['width'] = jpeg_w if jpeg_w > 0 else None
+                result['height'] = jpeg_h if jpeg_h > 0 else None
                 
                 if 'Orientation' in exif:
                     # EXIF orientation values: 1=normal, 3=180°, 6=90°CW, 8=90°CCW
