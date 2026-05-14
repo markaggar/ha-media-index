@@ -5,9 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`roku_ecp_cast` Service**: Cast images and videos directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app, bypassing browser CORS restrictions by making the ECP call server-side
+  - Generates a short HMAC-signed stream URL that the Roku fetches directly from HA — works around the 255-character URL limit imposed by HA's standard JWT auth tokens
+  - Images are re-encoded through Pillow before being served: standard Huffman/quantization tables fix grey-screen failures on cameras with non-standard JPEG encoding (e.g. Nikon D5100), and images are downscaled to 3840×2160 max for Roku decoder compatibility
+  - `ImageOps.exif_transpose()` physically applies EXIF orientation before serving, so the image dimensions always match what the Roku is told (`w`/`h`) — prevents horizontal stretch on rotated phone photos
+  - Rotation parameters (`r`, `ri`) are never sent to Roku; orientation is already baked into the served JPEG
+  - For 90°/270° EXIF rotations, `w` and `h` are swapped in the ECP call to match the post-transpose pixel dimensions
+  - Parameters: `roku_entity_id` (required), one of `file_id` / `file_path` / `media_source_uri` / `path_contains`, optional `ttl` (URL expiry in seconds, default 3600)
+  - **Requires**: Roku HA integration configured for the target device; [xcast](https://channelstore.roku.com/details/687485) channel installed on the Roku
+
+- **`stop_cast` Service**: Send an ECP `keypress/Home` to a Roku device, clearing the cast image and returning to the Roku home screen
+  - Resolves the Roku host from the HA device/config registry — no IP address configuration needed
+  - Use when stopping a cast session to prevent the last image remaining frozen on the TV
+  - Parameter: `roku_entity_id` (required)
+
+### Fixed
+
+- **`roku_ecp_cast` — stretched/squished rotated photos**: Photos stored in physical landscape orientation with a 90°/270° EXIF rotation tag were served in their raw orientation by Pillow, then the same rotation was applied again via ECP `r`/`ri` parameters, producing a double-rotation and wrong aspect ratio. Fixed by applying `exif_transpose` in the streaming layer and always sending `r=0.0&ri=0.0` to Roku.
+
+---
+
 ## [1.7.0] - 2026-04-30
 
 ### Added
+
+- **Cast-to-TV Services**: Three new services power the card's cast-to-TV feature (requires `show_cast_button: true` in the Media Card config)
+  - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
+  - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
+  - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
+  - All three services are registered via a new `cast.py` module containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
 
 - **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
   - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)

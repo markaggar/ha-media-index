@@ -54,7 +54,15 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Safe dry-run mode** - previews duplicate groups and a folder-pair summary before deleting anything
 - **Auto-delete** - moves all non-keeper duplicates to `_Junk` when confirmed
 
-### 🗑️ File Management
+### � Cast to Roku TV
+- **`roku_ecp_cast` service** — cast the current image or video directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app (used by [Media Card](https://github.com/markaggar/ha-media-card) cast button)
+- **JPEG transcoding** — images are re-encoded with standard JPEG tables via Pillow before being sent to Roku, fixing grey-screen failures on cameras with non-standard JPEG encoding (e.g. Nikon D5100)
+- **EXIF orientation correction** — rotated phone photos are physically transposed before serving so the Roku always receives correctly-oriented pixels at the right aspect ratio, preventing stretch distortion
+- **Short signed stream URLs** — a short HMAC-signed URL is generated per cast; the Roku fetches the image directly from HA, bypassing the 255-character URL length limit of standard HA auth tokens
+- **`stop_cast` service** — sends an ECP `keypress/Home` to clear the image from the TV when a cast session ends
+- **Requirements**: Roku HA integration configured for the target device; [xcast channel](https://channelstore.roku.com/details/687485) installed on the Roku
+
+### �🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
 - **Mark for editing** - moves files to `_Edit` folder
 - **Database cleanup** - automatically removes deleted files from index

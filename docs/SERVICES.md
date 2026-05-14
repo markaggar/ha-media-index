@@ -629,6 +629,98 @@ data:
 }
 ```
 
+## Cast to TV Services
+
+These services power the [Media Card](https://github.com/markaggar/ha-media-card) cast-to-TV feature and can also be called directly from automations or scripts.
+
+### `media_index.roku_ecp_cast`
+
+Cast an image or video directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app (app ID 687485).
+
+**How it works**
+
+The service generates a short HMAC-signed stream URL pointing to HA's built-in streaming endpoint, then POSTs it to the Roku ECP input API (`http://{roku_host}:8060/input/687485?...`) server-side — bypassing browser CORS restrictions. The Roku fetches the image directly from HA.
+
+Before serving, images are transcoded through Pillow:
+- Re-encoded with standard JPEG Huffman/quantization tables (fixes grey screen on cameras like Nikon D5100 with non-standard encoding)
+- Downscaled to 3840×2160 max for Roku hardware JPEG decoder compatibility
+- EXIF orientation applied (`exif_transpose`) so the pixels are always in their correct display orientation — prevents horizontal stretch on rotated phone photos
+
+**Requirements**
+
+1. **Roku HA integration** configured for the target device (Settings → Devices & Services → Roku)
+2. **xcast channel** installed on the Roku from the [Roku Channel Store](https://channelstore.roku.com/details/687485)
+   - xcast acts as a Digital Media Renderer (DMR) that receives content pushed from HA
+   - On first activation (cold start), xcast launches automatically when the ECP command arrives; the card retries ~2.5 s later to ensure receipt once the channel is fully loaded
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+| `file_id` | one of these | Media Index file ID |
+| `file_path` | one of these | Filesystem path to the file |
+| `media_source_uri` | one of these | HA media-source URI |
+| `path_contains` | one of these | Partial path substring to look up |
+| `ttl` | optional | Stream URL expiry in seconds (default: 3600) |
+
+**Returns**
+
+```json
+{
+  "url": "http://10.0.0.62:8123/api/media_index/stream/1234/photo.jpg?t=abc1&exp=...",
+  "file_id": 1234,
+  "roku_host": "10.0.0.15",
+  "ecp_status": 200,
+  "ecp_url_sent": "http://10.0.0.15:8060/input/687485?...",
+  "media_type": "image"
+}
+```
+
+**Example**
+
+```yaml
+service: media_index.roku_ecp_cast
+data:
+  roku_entity_id: media_player.living_room_tv
+  media_source_uri: media-source://media_source/media/photo/Photos/IMG_1234.jpg
+```
+
+---
+
+### `media_index.stop_cast`
+
+Send an ECP `keypress/Home` to a Roku device, clearing the cast image and returning the TV to its home screen.
+
+Use this when stopping a cast session to prevent the last image remaining frozen on the TV. The [Media Card](https://github.com/markaggar/ha-media-card) calls this automatically when the user taps the cast button to stop or navigates away from the card.
+
+Note: This service uses the ECP protocol directly because the Roku's `media_player` entity in HA does not support the generic `media_player.media_stop` action when xcast is active.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+
+**Returns**
+
+```json
+{
+  "roku_host": "10.0.0.15",
+  "ecp_status": 200
+}
+```
+
+**Example**
+
+```yaml
+service: media_index.stop_cast
+data:
+  roku_entity_id: media_player.living_room_tv
+```
+
+---
+
 ## Service Usage with Media Card
 
 The Media Index services integrate seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
