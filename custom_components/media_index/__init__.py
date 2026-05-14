@@ -2255,26 +2255,19 @@ def _register_services(hass: HomeAssistant):
         }
         fmt = _FORMAT_MAP.get(ext, ext.lstrip('.'))
 
-        # stream.py applies ImageOps.exif_transpose() before serving, so the
-        # JPEG bytes are always in their display orientation — no rotation param
-        # is needed.  For 90°/270° shots the pixel dimensions are swapped from
-        # what the DB stores (physical), so send the correct post-transpose w/h.
-        #
-        # If the DB has no dimension metadata (width/height NULL), open the file
-        # with Pillow to get the actual post-transpose dimensions so Roku is
-        # always given accurate w/h and never stretches to fill the display.
-        _SWAP_ORIENTATIONS = {'90_cw', '90_ccw'}
-        ori = orientation or 'normal'
-
-        if not (width and height):
-            # DB missing dimensions — derive from actual file via Pillow
+        # For images, always derive w/h from Pillow using the same pipeline as
+        # stream.py (exif_transpose + thumbnail to 4K max).  DB dimensions are
+        # the *physical* pixel dimensions before EXIF rotation, which can differ
+        # from what gets served — wrong DB metadata or unusual orientation tags
+        # cause Roku to stretch the image.  Pillow is always authoritative.
+        # For video, Pillow can't help; fall back to DB dimensions with the
+        # 90°/270° swap for rotated recordings.
+        if file_type != "video":
             from .stream import get_display_dimensions
             try:
                 pil_w, pil_h = await hass.async_add_executor_job(
                     get_display_dimensions, file_path_actual
                 )
-                # get_display_dimensions already applies exif_transpose + thumbnail,
-                # so the returned size IS the display size — no swap needed.
                 ecp_w, ecp_h = pil_w, pil_h
             except Exception as exc:
                 _LOGGER.warning(
@@ -2283,10 +2276,14 @@ def _register_services(hass: HomeAssistant):
                     file_path_actual, exc,
                 )
                 ecp_w, ecp_h = None, None
-        elif ori in _SWAP_ORIENTATIONS:
-            ecp_w, ecp_h = height, width   # served image has axes swapped
         else:
-            ecp_w, ecp_h = width, height
+            # Video: use DB dimensions, swapping for 90°/270° rotations
+            _SWAP_ORIENTATIONS = {'90_cw', '90_ccw'}
+            ori = orientation or 'normal'
+            if ori in _SWAP_ORIENTATIONS:
+                ecp_w, ecp_h = height, width
+            else:
+                ecp_w, ecp_h = width, height
 
         # Extract HA host/port from stream URL for xcast host param
         parsed_stream = urllib.parse.urlparse(stream_url)
