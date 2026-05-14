@@ -1414,7 +1414,7 @@ class CacheManager:
         
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
-            "date_taken": "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
+            "date_taken": "COALESCE(unixepoch(e.date_taken), MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
             "modified_time": "unixepoch(m.modified_time)",
@@ -1736,7 +1736,25 @@ class CacheManager:
             row = await cursor.fetchone()
         
         return dict(row) if row else None
-    
+
+    async def search_files_by_path(self, path_fragment: str, limit: int = 5) -> list:
+        """Find files whose path contains *path_fragment* (case-insensitive LIKE).
+
+        Args:
+            path_fragment: Substring to search for in the path column.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of file records (dicts) matching the fragment.
+        """
+        pattern = f"%{path_fragment}%"
+        async with self._db.execute(
+            "SELECT * FROM media_files WHERE path LIKE ? LIMIT ?",
+            (pattern, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
     async def get_exif_by_file_id(self, file_id: int) -> dict | None:
         """Get EXIF data for a file by ID.
         
