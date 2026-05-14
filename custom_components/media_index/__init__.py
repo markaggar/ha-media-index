@@ -2259,9 +2259,31 @@ def _register_services(hass: HomeAssistant):
         # JPEG bytes are always in their display orientation — no rotation param
         # is needed.  For 90°/270° shots the pixel dimensions are swapped from
         # what the DB stores (physical), so send the correct post-transpose w/h.
+        #
+        # If the DB has no dimension metadata (width/height NULL), open the file
+        # with Pillow to get the actual post-transpose dimensions so Roku is
+        # always given accurate w/h and never stretches to fill the display.
         _SWAP_ORIENTATIONS = {'90_cw', '90_ccw'}
         ori = orientation or 'normal'
-        if ori in _SWAP_ORIENTATIONS:
+
+        if not (width and height):
+            # DB missing dimensions — derive from actual file via Pillow
+            from .stream import get_display_dimensions
+            try:
+                pil_w, pil_h = await hass.async_add_executor_job(
+                    get_display_dimensions, file_path_actual
+                )
+                # get_display_dimensions already applies exif_transpose + thumbnail,
+                # so the returned size IS the display size — no swap needed.
+                ecp_w, ecp_h = pil_w, pil_h
+            except Exception as exc:
+                _LOGGER.warning(
+                    "roku_ecp_cast: could not read dimensions from %s: %s — "
+                    "sending cast without w/h",
+                    file_path_actual, exc,
+                )
+                ecp_w, ecp_h = None, None
+        elif ori in _SWAP_ORIENTATIONS:
             ecp_w, ecp_h = height, width   # served image has axes swapped
         else:
             ecp_w, ecp_h = width, height

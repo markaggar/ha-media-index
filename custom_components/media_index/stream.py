@@ -70,6 +70,20 @@ def _transcode_jpeg_for_roku(file_path: str) -> bytes:
     return buf.getvalue()
 
 
+def get_display_dimensions(file_path: str) -> tuple[int, int]:
+    """Return (width, height) of *file_path* after applying EXIF orientation.
+
+    Uses the same ``exif_transpose`` + thumbnail pipeline as
+    ``_transcode_jpeg_for_roku`` so the returned dimensions always match what
+    Roku will receive in the served JPEG.  This is a blocking call; use
+    ``run_in_executor`` when calling from an async context.
+    """
+    with Image.open(file_path) as raw:
+        img = ImageOps.exif_transpose(raw)
+    img.thumbnail((_ROKU_MAX_W, _ROKU_MAX_H), Image.LANCZOS)
+    return img.size  # (width, height)
+
+
 def _make_token(secret: bytes, file_id: int, exp: int) -> str:
     """Return a 16-char hex HMAC token for (file_id, exp)."""
     message = f"{file_id}:{exp}".encode()
