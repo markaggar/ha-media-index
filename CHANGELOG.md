@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.8.0] - 2026-05-14
+
 ### Added
 
 - **`roku_ecp_cast` Service**: Cast images and videos directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app, bypassing browser CORS restrictions by making the ECP call server-side
@@ -23,7 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use when stopping a cast session to prevent the last image remaining frozen on the TV
   - Parameter: `roku_entity_id` (required)
 
+- **Cast Session Services** (`mirror_to_cast`, `start_cast_slideshow`, `stop_cast_slideshow`): Three services that power continuous cast sessions
+  - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
+  - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
+  - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
+  - All three services are registered via `cast.py` containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
+
+- **Date Filters for `get_ordered_files`**: Added `date_from`, `date_to`, `timestamp_from`, and `timestamp_to` parameters to the `get_ordered_files` service, matching the filter capability already present in `get_random_items`
+  - `date_from` / `date_to`: accept `YYYY-MM-DD` strings; `date_to` is inclusive (end of day)
+  - `timestamp_from` / `timestamp_to`: accept Unix integer timestamps for precise range queries
+  - Applied to `COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))` so files without EXIF are filtered by filesystem date
+
 ### Fixed
+
+- **`get_ordered_files` DESC Sort Returning Oldest Files First**: Ordered files in `desc` mode were returning 2018 photos before 2026 photos. Root cause: `date_taken` is stored as a Unix integer timestamp, but wrapping it in SQLite's `unixepoch()` treats the integer as a Julian Day Number and produces large negative values (e.g. −78 billion for a 2018 timestamp). Fixed by using `date_taken` directly in the `COALESCE` expression without the redundant `unixepoch()` wrapper.
 
 - **`roku_ecp_cast` — stretched/squished rotated photos**: Photos stored in physical landscape orientation with a 90°/270° EXIF rotation tag were served in their raw orientation by Pillow, then the same rotation was applied again via ECP `r`/`ri` parameters, producing a double-rotation and wrong aspect ratio. Fixed by applying `exif_transpose` in the streaming layer and always sending `r=0.0&ri=0.0` to Roku.
 
@@ -32,12 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.7.0] - 2026-04-30
 
 ### Added
-
-- **Cast-to-TV Services**: Three new services power the card's cast-to-TV feature (requires `show_cast_button: true` in the Media Card config)
-  - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
-  - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
-  - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
-  - All three services are registered via a new `cast.py` module containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
 
 - **Cross-Device Slideshow Sync Services**: Two new services allow multiple Media Cards (e.g. wall display + phone) to share a navigation queue and stay in sync
   - `update_sync_state` — writes the current queue and playback position for a named `sync_group` to the database, then fires a `media_index.sync_updated` HA bus event so all subscribed cards receive it immediately. Callable by any authenticated user (no admin required)
