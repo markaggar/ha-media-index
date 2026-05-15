@@ -2665,7 +2665,7 @@ def _register_services(hass: HomeAssistant):
         handle_roku_ecp_query,
         schema=vol.Schema({
             vol.Required("roku_entity_id"): cv.entity_id,
-        }),
+        }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
 
