@@ -71,6 +71,7 @@ from .const import (
     SERVICE_GET_SYNC_STATE,
     SERVICE_GET_STREAM_URL,
     SERVICE_ROKU_ECP_CAST,
+    SERVICE_ROKU_ECP_QUERY,
     SERVICE_START_CAST_SLIDESHOW,
     SERVICE_STOP_CAST_SLIDESHOW,
     SERVICE_MIRROR_TO_CAST,
@@ -2313,6 +2314,11 @@ def _register_services(hass: HomeAssistant):
             # swapped above (coded 1920x1080 → display 1080x1920).
             if ecp_w and ecp_h:
                 params += f"&w={ecp_w}&h={ecp_h}"
+            # Pass rotation angle so xcast applies the correct orientation.
+            # Portrait recordings store landscape pixels + a rotation tag;
+            # xcast needs an explicit r= to rotate the video to the correct orientation.
+            _VIDEO_ROTATION_MAP = {'90_cw': '90.0', '90_ccw': '270.0', '180': '180.0'}
+            params += f"&r={_VIDEO_ROTATION_MAP.get(ori, '0.0')}"
         else:
             params = f"title={enc_title}&mediaType=image&format={fmt}&url={enc_url}"
             if ecp_w and ecp_h:
@@ -2401,6 +2407,83 @@ def _register_services(hass: HomeAssistant):
 
         _LOGGER.info("stop_cast: keypress/Home → %s (%s) HTTP %s", roku_entity_id, roku_host, status)
         return {"roku_host": roku_host, "ecp_status": status}
+
+    async def handle_roku_ecp_query(call):
+        """Query the current playback state of a Roku device via ECP.
+
+        GETs http://{roku_host}:8060/query/media-player and parses the XML
+        response, returning the player state and position so the card can sync
+        its local clock without relying on the HA media_player entity (which
+        has up to an 8-second polling lag).
+
+        Returns:
+            state:        'play' | 'pause' | 'stop' | 'close' | 'none'
+            position_ms:  current playback position in milliseconds (0 if unknown)
+            duration_ms:  total media duration in milliseconds (0 if unknown)
+            is_live:      true if the stream is live (no duration)
+        """
+        import xml.etree.ElementTree as ET
+        from homeassistant.helpers import entity_registry as er, device_registry as dr
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        roku_entity_id = call.data.get("roku_entity_id", "").strip()
+        if not roku_entity_id:
+            raise HomeAssistantError("'roku_entity_id' is required")
+
+        # Resolve Roku host from device registry (same pattern as roku_ecp_cast)
+        entity_reg = er.async_get(hass)
+        device_reg = dr.async_get(hass)
+        entity_entry = entity_reg.async_get(roku_entity_id)
+        roku_host = None
+        if entity_entry and entity_entry.device_id:
+            device = device_reg.async_get(entity_entry.device_id)
+            if device:
+                for ceid in device.config_entries:
+                    ce = hass.config_entries.async_get_entry(ceid)
+                    if ce and ce.domain == "roku":
+                        roku_host = ce.data.get("host")
+                        break
+
+        if not roku_host:
+            raise HomeAssistantError(
+                f"Cannot determine Roku host for '{roku_entity_id}'. "
+                "Ensure the entity belongs to a configured Roku integration."
+            )
+
+        session = async_get_clientsession(hass)
+        query_url = f"http://{roku_host}:8060/query/media-player"
+        try:
+            async with session.get(query_url, timeout=3) as resp:
+                if resp.status != 200:
+                    raise HomeAssistantError(
+                        f"ECP query/media-player returned HTTP {resp.status}"
+                    )
+                body = await resp.text()
+        except HomeAssistantError:
+            raise
+        except Exception as exc:
+            raise HomeAssistantError(f"Roku ECP query failed: {exc}") from exc
+
+        # Parse XML: <player state="play"><position>5000</position><runtime>30000</runtime>...
+        try:
+            root = ET.fromstring(body)
+            state = root.get("state", "none")
+            position_ms = int(root.findtext("position") or 0)
+            duration_ms = int(root.findtext("runtime") or 0)
+            is_live = (root.findtext("is_live") or "false").lower() == "true"
+        except ET.ParseError as exc:
+            raise HomeAssistantError(f"Failed to parse ECP response: {exc}") from exc
+
+        _LOGGER.debug(
+            "roku_ecp_query: %s (%s) state=%s pos=%dms dur=%dms",
+            roku_entity_id, roku_host, state, position_ms, duration_ms,
+        )
+        return {
+            "state": state,
+            "position_ms": position_ms,
+            "duration_ms": duration_ms,
+            "is_live": is_live,
+        }
 
     # ── Cast services ────────────────────────────────────────────────────────
 
@@ -2574,6 +2657,16 @@ def _register_services(hass: HomeAssistant):
             vol.Required("roku_entity_id"): cv.entity_id,
         }),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ROKU_ECP_QUERY,
+        handle_roku_ecp_query,
+        schema=vol.Schema({
+            vol.Required("roku_entity_id"): cv.entity_id,
+        }),
+        supports_response=SupportsResponse.ONLY,
     )
 
     hass.services.async_register(

@@ -749,6 +749,24 @@ roku_ecp_cast:
           min: 60
           max: 86400
 
+roku_ecp_query:
+  name: Roku ECP Query Media Player
+  description: >
+    Queries the current playback state of a Roku device directly via ECP
+    (http://{roku_host}:8060/query/media-player), bypassing HA's media_player
+    entity which has up to an 8-second polling lag. Returns the player state,
+    current position, and total duration so the card can keep its local video
+    clock in sync with what the Roku is playing.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device to query.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+
 start_cast_slideshow:
   name: Start Cast Slideshow
   description: >
