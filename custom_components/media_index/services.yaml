@@ -767,6 +767,31 @@ roku_ecp_query:
         entity:
           domain: media_player
 
+roku_ecp_keypress:
+  name: Roku ECP Keypress
+  description: >
+    Sends an ECP keypress directly to a Roku device bypassing the HA media_player
+    entity (which has an ~8s polling lag). Use for timing-sensitive actions such
+    as pausing video a few seconds before it ends to prevent xcast returning to
+    its splash screen.
+    Common keypresses: Play (toggle), Pause, Home, Back, Fwd, Rev.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    keyname:
+      name: Key Name
+      description: ECP key name to press. Letters, digits, hyphens, and underscores only.
+      required: true
+      example: "Play"
+      selector:
+        text:
+
 start_cast_slideshow:
   name: Start Cast Slideshow
   description: >

@@ -72,6 +72,7 @@ from .const import (
     SERVICE_GET_STREAM_URL,
     SERVICE_ROKU_ECP_CAST,
     SERVICE_ROKU_ECP_QUERY,
+    SERVICE_ROKU_ECP_KEYPRESS,
     SERVICE_START_CAST_SLIDESHOW,
     SERVICE_STOP_CAST_SLIDESHOW,
     SERVICE_MIRROR_TO_CAST,
@@ -2408,6 +2409,65 @@ def _register_services(hass: HomeAssistant):
         _LOGGER.info("stop_cast: keypress/Home → %s (%s) HTTP %s", roku_entity_id, roku_host, status)
         return {"roku_host": roku_host, "ecp_status": status}
 
+    async def handle_roku_ecp_keypress(call):
+        """Send an arbitrary ECP keypress to a Roku device.
+
+        Use this instead of media_player services for timing-sensitive actions —
+        the HA Roku integration polls the device every ~8 s so HA service calls
+        arrive far too late (e.g. pausing a video 3 s before it ends).
+
+        Common keypresses: Play (toggle play/pause), Pause, Home, Back, Fwd, Rev.
+        """
+        from homeassistant.helpers import entity_registry as er, device_registry as dr
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        from yarl import URL as YarlURL
+        import re as _re
+
+        roku_entity_id = call.data.get("roku_entity_id", "").strip()
+        if not roku_entity_id:
+            raise HomeAssistantError("'roku_entity_id' is required")
+
+        keyname = call.data.get("keyname", "").strip()
+        if not keyname:
+            raise HomeAssistantError("'keyname' is required")
+
+        # Basic allow-list to prevent path traversal in the URL
+        if not _re.match(r'^[A-Za-z0-9_-]+$', keyname):
+            raise HomeAssistantError(
+                f"Invalid keyname '{keyname}'. Must contain only letters, digits, hyphens, or underscores."
+            )
+
+        entity_reg = er.async_get(hass)
+        device_reg = dr.async_get(hass)
+        entity_entry = entity_reg.async_get(roku_entity_id)
+        roku_host = None
+        if entity_entry and entity_entry.device_id:
+            device = device_reg.async_get(entity_entry.device_id)
+            if device:
+                for ceid in device.config_entries:
+                    ce = hass.config_entries.async_get_entry(ceid)
+                    if ce and ce.domain == "roku":
+                        roku_host = ce.data.get("host")
+                        break
+
+        if not roku_host:
+            raise HomeAssistantError(
+                f"Cannot determine Roku host for '{roku_entity_id}'. "
+                "Ensure the entity belongs to a configured Roku integration."
+            )
+
+        ecp_url = YarlURL(f"http://{roku_host}:8060/keypress/{keyname}")
+        session = async_get_clientsession(hass)
+        try:
+            async with session.post(ecp_url, data=b"") as resp:
+                status = resp.status
+        except Exception as exc:
+            _LOGGER.error("roku_ecp_keypress: ECP keypress/%s failed for %s: %s", keyname, roku_entity_id, exc)
+            raise HomeAssistantError(f"Roku ECP keypress failed: {exc}") from exc
+
+        _LOGGER.debug("roku_ecp_keypress: %s → %s (%s) HTTP %s", keyname, roku_entity_id, roku_host, status)
+        return {"roku_host": roku_host, "ecp_status": status}
+
     async def handle_roku_ecp_query(call):
         """Query the current playback state of a Roku device via ECP.
 
@@ -2675,6 +2735,17 @@ def _register_services(hass: HomeAssistant):
             vol.Required("roku_entity_id"): cv.entity_id,
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ROKU_ECP_KEYPRESS,
+        handle_roku_ecp_keypress,
+        schema=vol.Schema({
+            vol.Required("roku_entity_id"): cv.entity_id,
+            vol.Required("keyname"): cv.string,
+        }, extra=vol.ALLOW_EXTRA),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
