@@ -2465,11 +2465,19 @@ def _register_services(hass: HomeAssistant):
             raise HomeAssistantError(f"Roku ECP query failed: {exc}") from exc
 
         # Parse XML: <player state="play"><position>5000</position><runtime>30000</runtime>...
+        # Note: Roku may return values with a unit suffix, e.g. "47 ms" — strip non-digits.
+        def _parse_ms(text):
+            if not text:
+                return 0
+            import re as _re
+            m = _re.match(r'(\d+)', text.strip())
+            return int(m.group(1)) if m else 0
+
         try:
             root = ET.fromstring(body)
             state = root.get("state", "none")
-            position_ms = int(root.findtext("position") or 0)
-            duration_ms = int(root.findtext("runtime") or 0)
+            position_ms = _parse_ms(root.findtext("position"))
+            duration_ms = _parse_ms(root.findtext("runtime"))
             is_live = (root.findtext("is_live") or "false").lower() == "true"
         except ET.ParseError as exc:
             raise HomeAssistantError(f"Failed to parse ECP response: {exc}") from exc
