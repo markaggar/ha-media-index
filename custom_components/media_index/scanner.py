@@ -253,11 +253,12 @@ class MediaScanner:
                             else:
                                 exif_data = VideoMetadataParser.extract_metadata(metadata['path'])
                             
-                            # Add video dimensions/duration to metadata for media_files table
+                            # Add video dimensions/duration/orientation to metadata for media_files table
                             if exif_data:
                                 metadata['width'] = exif_data.get('width')
                                 metadata['height'] = exif_data.get('height')
                                 metadata['duration'] = exif_data.get('duration')
+                                metadata['orientation'] = exif_data.get('orientation')
                             
                             # CRITICAL: If extraction failed but file exists, preserve existing metadata
                             if not exif_data and existing_file:
@@ -461,6 +462,13 @@ class MediaScanner:
                     if existing_exif and existing_exif.get('date_taken'):
                         _LOGGER.warning("Video metadata extraction failed but preserving existing data: %s", file_path)
                         return True  # Keep existing metadata, don't overwrite with empty/fallback data
+
+                # Add video dimensions/duration/orientation to metadata for media_files table
+                if exif_data:
+                    metadata['width'] = exif_data.get('width')
+                    metadata['height'] = exif_data.get('height')
+                    metadata['duration'] = exif_data.get('duration')
+                    metadata['orientation'] = exif_data.get('orientation')
             
             # Add to database
             file_id = await self.cache.add_file(metadata)

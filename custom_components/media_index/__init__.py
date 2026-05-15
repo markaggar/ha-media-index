@@ -2308,6 +2308,11 @@ def _register_services(hass: HomeAssistant):
                 f"title={enc_title}&mediaType=video&format={fmt}"
                 f"&url={enc_url}&host={ha_host}&port={ha_port}"
             )
+            # Pass display dimensions so xcast/Roku know the correct aspect ratio.
+            # For portrait videos (orientation 90_cw/90_ccw) ecp_w/ecp_h are already
+            # swapped above (coded 1920x1080 → display 1080x1920).
+            if ecp_w and ecp_h:
+                params += f"&w={ecp_w}&h={ecp_h}"
         else:
             params = f"title={enc_title}&mediaType=image&format={fmt}&url={enc_url}"
             if ecp_w and ecp_h:

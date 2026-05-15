@@ -127,6 +127,21 @@ class VideoMetadataParser:
                             if track.duration:
                                 # Duration is in milliseconds, convert to seconds
                                 result['duration'] = round(track.duration / 1000.0, 2)
+                            # Extract rotation for portrait video detection (e.g. iPhone MOV/MP4).
+                            # pymediainfo reports coded-frame rotation in degrees; map to our
+                            # orientation strings so the Roku cast handler can swap w/h correctly.
+                            if hasattr(track, 'rotation') and track.rotation:
+                                try:
+                                    rotation_deg = float(track.rotation)
+                                    if abs(rotation_deg - 90) < 1:
+                                        result['orientation'] = '90_cw'
+                                    elif abs(rotation_deg - 270) < 1:
+                                        result['orientation'] = '90_ccw'
+                                    elif abs(rotation_deg - 180) < 1:
+                                        result['orientation'] = '180'
+                                    # 0° = normal; omit so callers treat absence as normal
+                                except (ValueError, TypeError):
+                                    pass
                             
                 except Exception as e:
                     # ASCII-sanitize exception to prevent Python 3.13+ encoding errors
