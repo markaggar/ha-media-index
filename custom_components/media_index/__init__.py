@@ -123,6 +123,11 @@ SERVICE_GET_ORDERED_FILES_SCHEMA = vol.Schema({
     # Accept any type without coercion - type conversion handled in service handler based on order_by
     vol.Optional("after_value"): vol.Any(int, float, str),
     vol.Optional("after_id"): vol.Coerce(int),  # Secondary cursor for tie-breaking
+    # Date range filtering
+    vol.Optional("date_from"): cv.string,
+    vol.Optional("date_to"): cv.string,
+    vol.Optional("timestamp_from"): vol.Coerce(int),
+    vol.Optional("timestamp_to"): vol.Coerce(int),
 }, extra=vol.ALLOW_EXTRA)
 
 # Note: SERVICE_GET_FILE_METADATA_SCHEMA defined later after _validate_path_or_uri function
@@ -1055,6 +1060,10 @@ def _register_services(hass: HomeAssistant):
             order_direction=call.data.get("order_direction", "desc"),
             after_value=after_value,  # v1.5.10: Cursor-based pagination (properly typed)
             after_id=after_id,  # Secondary cursor for tie-breaking
+            date_from=call.data.get("date_from"),
+            date_to=call.data.get("date_to"),
+            timestamp_from=call.data.get("timestamp_from"),
+            timestamp_to=call.data.get("timestamp_to"),
         )
         
         # Add media_source_uri to each item if configured

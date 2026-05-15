@@ -1359,6 +1359,10 @@ class CacheManager:
         order_direction: str = "desc",
         after_value: str | int | float | None = None,
         after_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        timestamp_from: int | None = None,
+        timestamp_to: int | None = None,
     ) -> list[dict]:
         """Get ordered media files with configurable sort field and direction.
         
@@ -1373,6 +1377,10 @@ class CacheManager:
             order_direction: Sort direction - 'asc' or 'desc'
             after_value: Cursor for pagination - return items AFTER this value
             after_id: Secondary cursor (file ID) for tie-breaking when values are equal
+            date_from: Filter by date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            date_to: Filter by date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            timestamp_from: Filter by timestamp >= this value (Unix timestamp in seconds). Takes precedence over date_from.
+            timestamp_to: Filter by timestamp <= this value (Unix timestamp in seconds). Takes precedence over date_to.
             
         Returns:
             List of ordered file records with metadata
@@ -1412,9 +1420,36 @@ class CacheManager:
             query += " AND m.file_type = ?"
             params.append(file_type.lower())
         
+        # Date range filtering
+        if timestamp_from is not None:
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
+            params.append(timestamp_from)
+        elif date_from is not None:
+            try:
+                date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
+                dt = datetime.strptime(date_from_str, "%Y-%m-%d")
+                timestamp = int(dt.timestamp())
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
+                params.append(timestamp)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
+        
+        if timestamp_to is not None:
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
+            params.append(timestamp_to)
+        elif date_to is not None:
+            try:
+                date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                dt = datetime.strptime(date_to_str, "%Y-%m-%d")
+                timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
+                params.append(timestamp)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
+        
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
-            "date_taken": "COALESCE(unixepoch(e.date_taken), MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
+            "date_taken": "COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))",
             "filename": "m.filename",
             "path": "m.folder || '/' || m.filename",
             "modified_time": "unixepoch(m.modified_time)",
