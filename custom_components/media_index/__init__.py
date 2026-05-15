@@ -71,7 +71,6 @@ from .const import (
     SERVICE_GET_SYNC_STATE,
     SERVICE_GET_STREAM_URL,
     SERVICE_ROKU_ECP_CAST,
-    SERVICE_CAST_MEDIA,
     SERVICE_START_CAST_SLIDESHOW,
     SERVICE_STOP_CAST_SLIDESHOW,
     SERVICE_MIRROR_TO_CAST,
@@ -2352,168 +2351,6 @@ def _register_services(hass: HomeAssistant):
             "media_type": file_type,
         }
 
-    async def handle_cast_media(call):
-        """Cast a media file to a media player entity.
-
-        Looks up the file by file_id or path_contains, generates a stream URL,
-        then routes to the appropriate cast method:
-          - Roku entities → ECP POST to Media Assistant (app 782875), video only.
-          - Everything else → media_player.play_media with the stream URL.
-
-        Returns: url, file_id, path, file_type, mime_type, device_type, cast_status.
-        """
-        import urllib.parse
-        from .stream import generate_stream_url
-        from homeassistant.helpers import entity_registry as er, device_registry as dr
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-        # --- Resolve media_index instance and look up file ---
-        instance = _get_instance_data(hass, call)
-        cache_manager = instance["cache_manager"]
-
-        file_id = call.data.get("file_id")
-        path_contains = call.data.get("path_contains")
-        ttl = int(call.data.get("ttl", 3600))
-        media_player_entity_id = call.data.get("media_player_entity_id", "").strip()
-
-        if not media_player_entity_id:
-            raise HomeAssistantError("'media_player_entity_id' is required")
-
-        row = None
-        if file_id is not None:
-            row = await cache_manager.get_file_by_id(int(file_id))
-            if not row:
-                raise HomeAssistantError(f"File with id={file_id} not found in database")
-        elif path_contains:
-            rows = await cache_manager.search_files_by_path(path_contains, limit=1)
-            if not rows:
-                raise HomeAssistantError(f"No file matching '{path_contains}' found")
-            row = rows[0]
-        else:
-            raise HomeAssistantError("Provide either 'file_id' or 'path_contains'")
-
-        fid = row["id"]
-        file_path = row.get("path", "")
-        file_type = row.get("file_type", "")
-        import os as _os
-        ext = _os.path.splitext(file_path)[1].lower()
-        filename_hint = ("video" if file_type == "video" else "photo") + ext if ext else ""
-        mime_type, _ = mimetypes.guess_type(file_path)
-        mime_type = mime_type or ("video/mp4" if file_type == "video" else "image/jpeg")
-
-        stream_url = generate_stream_url(hass, fid, ttl, filename=filename_hint)
-
-        # --- Detect device type ---
-        entity_reg = er.async_get(hass)
-        entity_entry = entity_reg.async_get(media_player_entity_id)
-        is_roku = entity_entry is not None and entity_entry.platform == "roku"
-
-        if is_roku:
-            # For Roku we use xcast (ECP app 687485) which supports both video and images.
-            import os as _os
-            from yarl import URL as YarlURL
-
-            # Get Roku host from device/config entry
-            roku_host = None
-            device_reg = dr.async_get(hass)
-            if entity_entry.device_id:
-                device = device_reg.async_get(entity_entry.device_id)
-                if device:
-                    for config_entry_id in device.config_entries:
-                        config_entry = hass.config_entries.async_get_entry(config_entry_id)
-                        if config_entry and config_entry.domain == "roku":
-                            roku_host = config_entry.data.get("host")
-                            break
-
-            if not roku_host:
-                raise HomeAssistantError(
-                    f"Could not determine Roku host for entity '{media_player_entity_id}'"
-                )
-
-            # Re-fetch full row to get orientation/width/height
-            full_row = await cache_manager.get_file_by_id(fid)
-            orientation = full_row.get("orientation") if full_row else None
-            width = full_row.get("width") if full_row else None
-            height = full_row.get("height") if full_row else None
-
-            _FORMAT_MAP = {
-                '.jpg': 'jpeg', '.jpeg': 'jpeg', '.png': 'png', '.gif': 'gif',
-                '.webp': 'webp', '.bmp': 'bmp', '.heic': 'heic', '.tiff': 'tiff',
-                '.mp4': 'mp4', '.mov': 'mov', '.avi': 'avi', '.mkv': 'mkv',
-                '.m4v': 'm4v', '.webm': 'webm', '.mpg': 'mpeg', '.mpeg': 'mpeg',
-            }
-            ext_cm = _os.path.splitext(file_path)[1].lower()
-            fmt = _FORMAT_MAP.get(ext_cm, ext_cm.lstrip('.'))
-
-            _ORIENTATION_RADIANS = {
-                'normal':  (0.0,     0.0),
-                '180':     (3.14159, 3.14159),
-                '90_cw':   (1.5708,  1.5708),
-                '90_ccw':  (4.7124,  4.7124),
-            }
-            rotation, ri = _ORIENTATION_RADIANS.get(orientation or 'normal', (0.0, 0.0))
-
-            parsed_stream = urllib.parse.urlparse(stream_url)
-            ha_host = parsed_stream.hostname or "localhost"
-            ha_port = parsed_stream.port or 8123
-
-            enc_url = urllib.parse.quote(stream_url, safe="")
-            enc_title = urllib.parse.quote(_os.path.basename(file_path) or filename_hint, safe="")
-
-            if file_type == "video":
-                params = (
-                    f"title={enc_title}&mediaType=video&format={fmt}"
-                    f"&url={enc_url}&host={ha_host}&port={ha_port}"
-                )
-            else:
-                params = f"title={enc_title}&mediaType=image&format={fmt}&url={enc_url}"
-                if width and height:
-                    params += f"&w={width}&h={height}"
-                params += f"&r={rotation}&ri={ri}"
-
-            ecp_full_url = YarlURL(f"http://{roku_host}:8060/input/687485?{params}", encoded=True)
-            _LOGGER.info("cast_media: Roku xcast → file_id=%s type=%s", fid, file_type)
-
-            session = async_get_clientsession(hass)
-            async with session.post(ecp_full_url, data=b"") as resp:
-                ecp_status = resp.status
-
-            return {
-                "url": stream_url,
-                "file_id": fid,
-                "path": file_path,
-                "file_type": file_type,
-                "mime_type": mime_type,
-                "device_type": "roku",
-                "cast_status": ecp_status,
-            }
-
-        else:
-            # Generic path: media_player.play_media
-            _LOGGER.info(
-                "cast_media: play_media on %s (file_id=%s mime=%s)",
-                media_player_entity_id, fid, mime_type
-            )
-            await hass.services.async_call(
-                "media_player",
-                "play_media",
-                {
-                    "entity_id": media_player_entity_id,
-                    "media_content_id": stream_url,
-                    "media_content_type": mime_type,
-                },
-                blocking=False,
-            )
-            return {
-                "url": stream_url,
-                "file_id": fid,
-                "path": file_path,
-                "file_type": file_type,
-                "mime_type": mime_type,
-                "device_type": "generic",
-                "cast_status": 200,
-            }
-
     async def handle_stop_cast(call):
         """Send an ECP keypress/Home to a Roku device, clearing the cast image.
 
@@ -2718,19 +2555,6 @@ def _register_services(hass: HomeAssistant):
             vol.Optional("file_id"): vol.Coerce(int),
             vol.Optional("file_path"): cv.string,
             vol.Optional("media_source_uri"): cv.string,
-            vol.Optional("path_contains"): cv.string,
-            vol.Optional("ttl", default=3600): vol.All(vol.Coerce(int), vol.Range(min=60, max=86400)),
-        }, extra=vol.ALLOW_EXTRA),
-        supports_response=SupportsResponse.ONLY,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CAST_MEDIA,
-        handle_cast_media,
-        schema=vol.Schema({
-            vol.Required("media_player_entity_id"): cv.entity_id,
-            vol.Optional("file_id"): vol.Coerce(int),
             vol.Optional("path_contains"): cv.string,
             vol.Optional("ttl", default=3600): vol.All(vol.Coerce(int), vol.Range(min=60, max=86400)),
         }, extra=vol.ALLOW_EXTRA),

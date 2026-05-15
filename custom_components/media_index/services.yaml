@@ -749,53 +749,6 @@ roku_ecp_cast:
           min: 60
           max: 86400
 
-cast_media:
-  name: Cast Media
-  description: >
-    Cast a media file to a media player entity using a signed stream URL.
-    Automatically detects the device type:
-    - Roku → uses xcast (ECP app 687485) supporting both video and images with
-      automatic EXIF orientation correction.
-    - All others (LG, DLNA, Chromecast, etc.) → uses media_player.play_media.
-    Returns the stream URL, file info, and cast status.
-  target:
-    entity:
-      integration: media_index
-  fields:
-    media_player_entity_id:
-      name: Media Player
-      description: The media_player entity to cast to (e.g. media_player.lg_webos_tv_uh8500 or media_player.my_roku).
-      required: true
-      example: "media_player.lg_webos_tv_uh8500"
-      selector:
-        entity:
-          domain: media_player
-    file_id:
-      name: File ID
-      description: Exact database file ID. Takes precedence over path_contains if both provided.
-      required: false
-      example: 9675733
-      selector:
-        number:
-          min: 1
-    path_contains:
-      name: Path Contains
-      description: Partial filename or path to search for (first match used).
-      required: false
-      example: "20230806_160109.mp4"
-      selector:
-        text:
-    ttl:
-      name: TTL (seconds)
-      description: How long the stream URL remains valid. Defaults to 3600 (1 hour).
-      required: false
-      default: 3600
-      example: 3600
-      selector:
-        number:
-          min: 60
-          max: 86400
-
 start_cast_slideshow:
   name: Start Cast Slideshow
   description: >

@@ -9,10 +9,6 @@ configurable interval, no card required.
 Current transport: HaMediaPlayerTransport (media_player.play_media).
 Works for LG WebOS and any other HA media_player entity.
 
-# TODO: Future transport extension points
-# When Roku ECP deep-link is solved, add RokuEcpTransport here and route
-# based on entity attributes or an explicit `protocol` service parameter.
-# When AirPlay support is added, same pattern applies.
 """
 import asyncio
 import logging
