@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Portrait video cast to Roku displayed as landscape**: `video_parser.py` now extracts pymediainfo's `track.rotation` field and stores it as `orientation` in the database (e.g. iPhone MOV/MP4 portrait videos stored as `90_cw`). Both scanner paths (batch and single-file) now write `orientation` for videos to the `media_files` table alongside `width`/`height`. The `roku_ecp_cast` handler already swapped `w`/`h` for 90°/270° orientations but never passed them to xcast for video — it now appends `&w={ecp_w}&h={ecp_h}` to the ECP URL when dimensions are available, giving Roku/xcast the correct portrait aspect ratio. Re-scanning affected videos will update the DB.
+- **Portrait video cast to Roku displayed as landscape**: `video_parser.py` now extracts pymediainfo's `track.rotation` field and stores it as `orientation` in the database (e.g. iPhone MOV/MP4 portrait videos stored as `90_cw`). Both scanner paths (batch and single-file) now write `orientation` for videos to the `media_files` table alongside `width`/`height`. The `roku_ecp_cast` handler now appends `&w={ecp_w}&h={ecp_h}` (swapped for 90°/270°) and `&r={degrees}` (90.0/270.0/180.0) to the ECP URL so xcast both sizes and rotates the video to the correct portrait orientation. Re-scanning affected videos will update the DB.
 
 ### Added
 

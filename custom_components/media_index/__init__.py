@@ -73,7 +73,6 @@ from .const import (
     SERVICE_ROKU_ECP_CAST,
     SERVICE_ROKU_ECP_QUERY,
     SERVICE_ROKU_ECP_KEYPRESS,
-    SERVICE_ROKU_ECP_SEEK,
     SERVICE_START_CAST_SLIDESHOW,
     SERVICE_STOP_CAST_SLIDESHOW,
     SERVICE_MIRROR_TO_CAST,
@@ -2199,6 +2198,7 @@ def _register_services(hass: HomeAssistant):
         media_source_uri_param = call.data.get("media_source_uri")
         path_contains = call.data.get("path_contains")
         ttl = int(call.data.get("ttl", 3600))
+        start_position_seconds = call.data.get("start_position_seconds")
 
         # Resolve file row from DB
         row = None
@@ -2321,6 +2321,15 @@ def _register_services(hass: HomeAssistant):
             # xcast needs an explicit r= to rotate the video to the correct orientation.
             _VIDEO_ROTATION_MAP = {'90_cw': '90.0', '90_ccw': '270.0', '180': '180.0'}
             params += f"&r={_VIDEO_ROTATION_MAP.get(ori, '0.0')}"
+            # Seek: tell xcast to start buffering from this position instead of the beginning.
+            # contentPosition is in milliseconds; this is the reliable way to seek for xcast.
+            if start_position_seconds is not None:
+                try:
+                    pos_ms = max(0, int(float(start_position_seconds) * 1000))
+                    params += f"&contentPosition={pos_ms}"
+                    _LOGGER.debug("roku_ecp_cast: seek to %dms via contentPosition", pos_ms)
+                except (TypeError, ValueError):
+                    pass
         else:
             params = f"title={enc_title}&mediaType=image&format={fmt}&url={enc_url}"
             if ecp_w and ecp_h:
@@ -2468,64 +2477,6 @@ def _register_services(hass: HomeAssistant):
 
         _LOGGER.debug("roku_ecp_keypress: %s → %s (%s) HTTP %s", keyname, roku_entity_id, roku_host, status)
         return {"roku_host": roku_host, "ecp_status": status}
-
-    async def handle_roku_ecp_seek(call):
-        """Seek a Roku xcast session to an absolute position via ECP input.
-
-        Sends POST http://{roku_host}:8060/input/<app_id>?cmd_seek&u=<position_ms>
-        to the xcast app (default app_id 687485). Use this to sync the Roku
-        position after a card-side double-tap seek so both screens stay in lockstep.
-        """
-        from homeassistant.helpers import entity_registry as er, device_registry as dr
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-        from yarl import URL as YarlURL
-
-        roku_entity_id = call.data.get("roku_entity_id", "").strip()
-        if not roku_entity_id:
-            raise HomeAssistantError("'roku_entity_id' is required")
-
-        position_seconds = call.data.get("position_seconds")
-        if position_seconds is None:
-            raise HomeAssistantError("'position_seconds' is required")
-        try:
-            position_ms = int(float(position_seconds) * 1000)
-        except (TypeError, ValueError) as exc:
-            raise HomeAssistantError(f"Invalid 'position_seconds' value: {exc}") from exc
-        if position_ms < 0:
-            position_ms = 0
-
-        app_id = int(call.data.get("app_id", 687485))  # xcast default
-
-        entity_reg = er.async_get(hass)
-        device_reg = dr.async_get(hass)
-        entity_entry = entity_reg.async_get(roku_entity_id)
-        roku_host = None
-        if entity_entry and entity_entry.device_id:
-            device = device_reg.async_get(entity_entry.device_id)
-            if device:
-                for ceid in device.config_entries:
-                    ce = hass.config_entries.async_get_entry(ceid)
-                    if ce and ce.domain == "roku":
-                        roku_host = ce.data.get("host")
-                        break
-
-        if not roku_host:
-            raise HomeAssistantError(
-                f"Cannot determine Roku host for '{roku_entity_id}'. "
-                "Ensure the entity belongs to a configured Roku integration."
-            )
-
-        ecp_url = YarlURL(f"http://{roku_host}:8060/input/{app_id}?cmd_seek&u={position_ms}")
-        session = async_get_clientsession(hass)
-        try:
-            async with session.post(ecp_url, data=b"") as resp:
-                status = resp.status
-        except Exception as exc:
-            _LOGGER.error("roku_ecp_seek: seek to %dms failed for %s: %s", position_ms, roku_entity_id, exc)
-            raise HomeAssistantError(f"Roku ECP seek failed: {exc}") from exc
-
-        _LOGGER.debug("roku_ecp_seek: %s → %dms (%s) HTTP %s", roku_entity_id, position_ms, roku_host, status)
-        return {"roku_host": roku_host, "ecp_status": status, "position_ms": position_ms}
 
     async def handle_roku_ecp_query(call):
         """Query the current playback state of a Roku device via ECP.
@@ -2772,6 +2723,7 @@ def _register_services(hass: HomeAssistant):
             vol.Optional("media_source_uri"): cv.string,
             vol.Optional("path_contains"): cv.string,
             vol.Optional("ttl", default=3600): vol.All(vol.Coerce(int), vol.Range(min=60, max=86400)),
+            vol.Optional("start_position_seconds"): vol.Coerce(float),
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.ONLY,
     )
@@ -2803,18 +2755,6 @@ def _register_services(hass: HomeAssistant):
         schema=vol.Schema({
             vol.Required("roku_entity_id"): cv.entity_id,
             vol.Required("keyname"): cv.string,
-        }, extra=vol.ALLOW_EXTRA),
-        supports_response=SupportsResponse.OPTIONAL,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ROKU_ECP_SEEK,
-        handle_roku_ecp_seek,
-        schema=vol.Schema({
-            vol.Required("roku_entity_id"): cv.entity_id,
-            vol.Required("position_seconds"): vol.Coerce(float),
-            vol.Optional("app_id", default=687485): vol.Coerce(int),
         }, extra=vol.ALLOW_EXTRA),
         supports_response=SupportsResponse.OPTIONAL,
     )
