@@ -792,6 +792,43 @@ roku_ecp_keypress:
       selector:
         text:
 
+roku_ecp_seek:
+  name: Roku ECP Seek
+  description: >
+    Seeks the xcast app (or any ECP-input-capable app) on a Roku device to an
+    absolute position. Sends POST /input/<app_id>?cmd_seek&u=<ms>. Use this to
+    keep the Roku in sync after a card-side double-tap seek.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    position_seconds:
+      name: Position (seconds)
+      description: Absolute playback position to seek to, in seconds.
+      required: true
+      example: 45.0
+      selector:
+        number:
+          min: 0
+          max: 86400
+          step: 0.1
+          unit_of_measurement: s
+    app_id:
+      name: App ID
+      description: ECP app ID to send the seek to. Defaults to 687485 (xcast).
+      required: false
+      example: 687485
+      selector:
+        number:
+          min: 1
+          max: 9999999
+          mode: box
+
 start_cast_slideshow:
   name: Start Cast Slideshow
   description: >
