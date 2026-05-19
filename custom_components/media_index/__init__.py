@@ -2899,44 +2899,73 @@ def _register_services(hass: HomeAssistant):
 
     async def handle_update_sync_state(call):
         """Write sync state for a shared queue group and fire a sync event."""
+        import json as _json
         cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         sync_group = call.data["sync_group"]
         queue = call.data["queue"]
         current_index = call.data["current_index"]
 
-        trimmed_queue = queue[-20:] if len(queue) > 20 else queue
-        await cache_manager.upsert_sync_state(sync_group, trimmed_queue, current_index)
+        # Parse session_override and config_fields from JSON strings (sent by the card).
+        raw_session_override = call.data.get("session_override")
+        raw_config_fields = call.data.get("config_fields")
+        try:
+            session_override = _json.loads(raw_session_override) if raw_session_override else None
+        except (ValueError, TypeError):
+            session_override = None
+        try:
+            config_fields = _json.loads(raw_config_fields) if raw_config_fields else None
+        except (ValueError, TypeError):
+            config_fields = None
+
+        # Store and broadcast the full queue so current_index always lines up with the
+        # correct item. A previous 20-item tail-trim (queue[-20:]) caused current_index
+        # to point to a completely different item (e.g. the 2nd-to-last photo instead
+        # of the 2nd photo), making followers show wrong content after a filter change.
+        await cache_manager.upsert_sync_state(
+            sync_group, queue, current_index,
+            session_override=session_override,
+            config_fields=config_fields,
+        )
 
         # Fire event on the HA bus so all subscribed cards/followers receive it immediately.
         # Services are callable by any authenticated user; the integration fires the event
         # as the system so non-admin users can participate in sync sessions.
-        # Use the same trimmed queue so event payload matches what get_sync_state returns.
         hass.bus.async_fire(
             EVENT_SYNC_UPDATED,
             {
                 "sync_group": sync_group,
-                "queue": trimmed_queue,
+                "queue": queue,
                 "current_index": current_index,
                 "source_card_id": call.data.get("source_card_id", ""),
                 "is_paused": call.data.get("is_paused"),
                 "pause_intent": call.data.get("pause_intent", False),
                 "current_metadata": call.data.get("current_metadata"),
                 "written_at": call.data.get("written_at", 0),
+                "session_override": raw_session_override,
+                "config_fields": raw_config_fields,
             },
         )
         _LOGGER.debug("Sync state updated for group '%s', index %d", sync_group, current_index)
-        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(trimmed_queue)}
+        return {"sync_group": sync_group, "current_index": current_index, "queue_size": len(queue)}
 
     async def handle_get_sync_state(call):
         """Return the current sync state for a shared queue group."""
+        import json as _json
         cache_manager = _get_instance_data(hass, call)["cache_manager"]
 
         sync_group = call.data["sync_group"]
         state = await cache_manager.get_sync_state(sync_group)
         if state is None:
             return {"sync_group": sync_group, "found": False, "queue": [], "current_index": 0}
-        return {**state, "found": True}
+        # Re-serialize session_override and config_fields as JSON strings so the card
+        # can parse them the same way it parses HA bus event payloads.
+        return {
+            **state,
+            "found": True,
+            "session_override": _json.dumps(state["session_override"]) if state.get("session_override") is not None else None,
+            "config_fields": _json.dumps(state["config_fields"]) if state.get("config_fields") is not None else None,
+        }
 
     hass.services.async_register(
         DOMAIN,

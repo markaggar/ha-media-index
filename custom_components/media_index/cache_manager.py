@@ -284,6 +284,25 @@ class CacheManager:
         """)
 
         await self._db.commit()
+
+        # Add session_override_json and config_fields_json to sync_state
+        async with self._db.execute("PRAGMA table_info(sync_state)") as cursor:
+            sync_columns = [col[1] for col in await cursor.fetchall()]
+        sync_new_columns = {
+            "session_override_json": "TEXT",
+            "config_fields_json": "TEXT",
+        }
+        sync_allowed_col_names = set(sync_new_columns.keys())
+        sync_allowed_col_types = {"TEXT"}
+        for col_name, col_type in sync_new_columns.items():
+            if col_name not in sync_columns:
+                if col_name not in sync_allowed_col_names or col_type not in sync_allowed_col_types:
+                    _LOGGER.error("Attempted to add invalid sync_state column: %s %s", col_name, col_type)
+                    continue
+                _LOGGER.info("Adding column '%s' to sync_state table", col_name)
+                await self._db.execute(f"ALTER TABLE sync_state ADD COLUMN {col_name} {col_type}")
+
+        await self._db.commit()
         _LOGGER.debug("Database migrations completed")
     
     async def _sanitize_location_names(self) -> None:
@@ -2552,7 +2571,14 @@ class CacheManager:
     # Sync state methods (cross-device queue sharing)
     # ---------------------------------------------------------------------------
 
-    async def upsert_sync_state(self, sync_group: str, queue: list, current_index: int) -> None:
+    async def upsert_sync_state(
+        self,
+        sync_group: str,
+        queue: list,
+        current_index: int,
+        session_override: dict | None = None,
+        config_fields: dict | None = None,
+    ) -> None:
         """Write (or replace) sync state for a named sync group.
 
         Only stores the most recent 20 queue items to keep the payload small.
@@ -2562,14 +2588,23 @@ class CacheManager:
         trimmed = queue[-20:] if len(queue) > 20 else queue
         await self._db.execute(
             """
-            INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at, session_override_json, config_fields_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(sync_group) DO UPDATE SET
                 queue_json = excluded.queue_json,
                 current_index = excluded.current_index,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                session_override_json = excluded.session_override_json,
+                config_fields_json = excluded.config_fields_json
             """,
-            (sync_group, json.dumps(trimmed), current_index, int(time.time())),
+            (
+                sync_group,
+                json.dumps(trimmed),
+                current_index,
+                int(time.time()),
+                json.dumps(session_override) if session_override is not None else None,
+                json.dumps(config_fields) if config_fields is not None else None,
+            ),
         )
         await self._db.commit()
 
@@ -2577,7 +2612,7 @@ class CacheManager:
         """Return sync state for a named sync group, or None if not found."""
         import json
         async with self._db.execute(
-            "SELECT queue_json, current_index, updated_at FROM sync_state WHERE sync_group = ?",
+            "SELECT queue_json, current_index, updated_at, session_override_json, config_fields_json FROM sync_state WHERE sync_group = ?",
             (sync_group,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -2588,5 +2623,7 @@ class CacheManager:
             "queue": json.loads(row[0]),
             "current_index": row[1],
             "updated_at": row[2],
+            "session_override": json.loads(row[3]) if row[3] else None,
+            "config_fields": json.loads(row[4]) if row[4] else None,
         }
 

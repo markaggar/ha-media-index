@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cross-device sync followers show wrong images after a filter change**: `update_sync_state` was broadcasting only the last 20 items of the queue (`queue[-20:]`) while keeping `current_index` relative to the original full queue. For a 146-item result, index 1 pointed to the 2nd-to-last photo (a 2025 image) instead of the 2nd item (Iceland 006.JPG), causing every subsequent sync event to navigate the follower to a completely different image. The trim has been removed; the full queue is now stored and broadcast so `current_index` always lines up with the correct item.
+
 ---
 
 ## [1.8.0] - 2026-05-14
