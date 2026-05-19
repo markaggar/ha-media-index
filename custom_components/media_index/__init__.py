@@ -2940,6 +2940,7 @@ def _register_services(hass: HomeAssistant):
                 "source_card_id": call.data.get("source_card_id", ""),
                 "is_paused": call.data.get("is_paused"),
                 "pause_intent": call.data.get("pause_intent", False),
+                "cast_seek_position": call.data.get("cast_seek_position"),
                 "current_metadata": call.data.get("current_metadata"),
                 "written_at": call.data.get("written_at", 0),
                 "session_override": raw_session_override,
