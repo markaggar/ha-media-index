@@ -584,13 +584,32 @@ encode_file() {
   local STATUS
 
   # =========================================================================
-  # PATH 1: Container remux — F-only on a non-legacy container (e.g. MOV→MP4
-  # with already-compatible codecs).  Stream-copy both tracks; no quality loss.
-  # Not applicable for wmv/avi/mts (those require a full re-encode).
+  # PATH 1: No video re-encode — REASONS has no C (bad video codec) and no R
+  # (rotation fix).  Video stream is always copied; audio is copied or
+  # transcoded to AAC depending on whether an A flag is present or the source
+  # is a legacy container (wmv/avi/mts whose audio is never AAC).
+  #
+  # Covers all combinations that don't need the video touched:
+  #   F only (non-legacy)  → -c:v copy -c:a copy   (pure container remux)
+  #   A only               → -c:v copy -c:a aac     (audio-only fix)
+  #   F+A (non-legacy)     → -c:v copy -c:a aac     (remux + audio recode)
+  #   F (legacy wmv/…)     → -c:v copy -c:a aac     (legacy audio always bad)
   # =========================================================================
-  if [ "$REASONS" = "F" ] && \
-     [ "$INPUT_EXT" != "wmv" ] && [ "$INPUT_EXT" != "avi" ] && [ "$INPUT_EXT" != "mts" ]; then
-    log "  Path: container remux (stream copy — no re-encode)"
+  local _need_recode_video=0
+  case "$REASONS" in *C*) _need_recode_video=1 ;; esac
+  case "$REASONS" in *R*) _need_recode_video=1 ;; esac
+
+  if [ "$_need_recode_video" = "0" ]; then
+    # Decide audio: transcode when A flag set, or when F + legacy container
+    local PATH1_AUDIO_ARG="-c:a copy"
+    local PATH1_AUDIO_DESC="stream copy"
+    case "$REASONS" in
+      *A*) PATH1_AUDIO_ARG="-c:a aac -b:a 128k -ac 2"; PATH1_AUDIO_DESC="transcode→AAC" ;;
+      *F*) case "$INPUT_EXT" in
+             wmv|avi|mts) PATH1_AUDIO_ARG="-c:a aac -b:a 128k -ac 2"; PATH1_AUDIO_DESC="transcode→AAC (legacy)" ;;
+           esac ;;
+    esac
+    log "  Path: stream-copy video, audio ${PATH1_AUDIO_DESC} (no re-encode)"
     docker run --rm \
       --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
       linuxserver/ffmpeg:latest \
@@ -599,7 +618,7 @@ encode_file() {
       -map 0:v:0 -map 0:a:0? \
       -map_metadata 0 \
       -c:v copy \
-      -c:a copy \
+      $PATH1_AUDIO_ARG \
       -metadata:s:v:0 rotate=0 \
       -movflags +faststart \
       "$COUT" \
@@ -607,30 +626,10 @@ encode_file() {
     STATUS=$?
 
   # =========================================================================
-  # PATH 2: Audio-only fix — A-only on an MP4 or MOV.
-  # Stream-copy the video track to avoid any quality loss; transcode audio only.
-  # =========================================================================
-  elif [ "$REASONS" = "A" ]; then
-    log "  Path: audio-only fix (stream-copy video, transcode audio to AAC)"
-    docker run --rm \
-      --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
-      linuxserver/ffmpeg:latest \
-      -hide_banner -loglevel warning \
-      -i "$CIN" \
-      -map 0:v:0 -map 0:a:0? \
-      -map_metadata 0 \
-      -c:v copy \
-      -c:a aac -b:a 128k -ac 2 \
-      -movflags +faststart \
-      "$COUT" \
-      2>&1 | tee -a "$LOG_FILE"
-    STATUS=$?
-
-  # =========================================================================
-  # PATH 3: Full QSV hardware re-encode.
-  # Used for: rotation fixes, video/audio codec normalization, WMV/AVI/MTS
-  # conversion, or any combination thereof.  Probes and preserves colour
-  # metadata (HDR/HLG primaries, TRC, range) through the transcode.
+  # PATH 2: Full QSV hardware re-encode.
+  # Used when REASONS contains C (bad video codec) or R (rotation fix),
+  # possibly combined with A (bad audio) or F (format/container conversion).
+  # Probes and preserves colour metadata (HDR/HLG primaries, TRC, range).
   # =========================================================================
   else
     log "  Path: QSV hardware re-encode ($VIDEO_CODEC_OUT)"
@@ -638,15 +637,11 @@ encode_file() {
     log "  Docker out : $COUT"
 
     # Determine audio handling:
-    #   A flag:               audio codec was explicitly detected as bad → transcode
-    #   F flag + wmv/avi/mts: legacy container audio is never AAC → transcode
-    #   otherwise:            copy audio (preserves quality for already-AAC tracks)
+    #   A flag:    audio codec was explicitly detected as bad → transcode
+    #   otherwise: copy audio (preserves quality for already-AAC tracks)
     local AUDIO_ARG="-c:a copy"
     case "$REASONS" in
       *A*) AUDIO_ARG="-c:a aac -b:a 128k -ac 2" ;;
-      *F*) case "$INPUT_EXT" in
-             wmv|avi|mts) AUDIO_ARG="-c:a aac -b:a 128k -ac 2" ;;
-           esac ;;
     esac
 
     # Probe colour-space metadata and pixel depth.
