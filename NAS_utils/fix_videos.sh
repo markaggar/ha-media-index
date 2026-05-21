@@ -394,18 +394,19 @@ find_candidates_in_dir() {
   fi
 
   # Batch exiftool read: rotation tag, dimensions, video codec, audio codec.
-  # -T          : tab-separated output, no header
-  # -n          : numeric values (rotation in degrees, pixel dimensions)
-  # -Rotation   : tkhd track-header rotation tag (0, 90, 180, 270)
-  # -ImageWidth : encoded pixel width  (BEFORE any display rotation is applied)
-  # -ImageHeight: encoded pixel height
-  # -VideoCodecID: container-level video codec ID (avc1, hvc1, hev1, mp4v, ...)
-  # -AudioCodecID: container-level audio codec ID (mp4a, .mp3, sowt, WMA, ...)
+  # -T            : tab-separated output, no header
+  # -n            : numeric values (rotation in degrees, pixel dimensions)
+  # -Rotation     : tkhd track-header rotation tag (0, 90, 180, 270)
+  # -ImageWidth   : encoded pixel width  (BEFORE any display rotation is applied)
+  # -ImageHeight  : encoded pixel height
+  # -CompressorID : video codec FourCC from the sample description box
+  #                 (avc1, hvc1, hev1, mp4v, ...) — more reliable than VideoCodecID
+  # -AudioFormat  : audio codec FourCC (mp4a, .mp3, sowt, WMA, ...)
   #
   # NOTE: -SourceFile returns "-" in -T mode, so we use paste to rejoin paths.
   TMP_EXIF="$(mktemp /tmp/fixvids_exif.XXXXXX)"
   "$EXIFTOOL_BIN" -T -n \
-    -Rotation -ImageWidth -ImageHeight -VideoCodecID -AudioCodecID \
+    -Rotation -ImageWidth -ImageHeight -CompressorID -AudioFormat \
     -@ "$TMP_LIST" 2>/dev/null > "$TMP_EXIF"
 
   # awk filter: determine what fix(es) each file needs.
@@ -453,11 +454,14 @@ find_candidates_in_dir() {
       # R: misoriented portrait (landscape bitstream + rotation tag)
       if (do_rotation && (rot == 90 || rot == 270) && w > h) reasons = reasons "R"
 
-      # C: video codec is not browser-safe (not H.264 or HEVC)
-      if (do_codecs && vid != "avc1" && vid != "hvc1" && vid != "hev1") reasons = reasons "C"
+      # C: video codec is not browser-safe (not H.264 or HEVC).
+      # Treat absent ("-") or empty values as unknown — do not flag as bad.
+      if (do_codecs && vid != "" && vid != "-" && \
+          vid != "avc1" && vid != "hvc1" && vid != "hev1") reasons = reasons "C"
 
-      # A: audio codec is not AAC
-      if (do_codecs && aud != "mp4a") reasons = reasons "A"
+      # A: audio codec is not AAC.
+      # Treat absent ("-") or empty values as unknown — do not flag as bad.
+      if (do_codecs && aud != "" && aud != "-" && aud != "mp4a") reasons = reasons "A"
 
       if (reasons != "") print reasons "\t" path
     }
