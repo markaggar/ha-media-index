@@ -2581,11 +2581,13 @@ class CacheManager:
     ) -> None:
         """Write (or replace) sync state for a named sync group.
 
-        Only stores the most recent 20 queue items to keep the payload small.
+        Stores the full queue so current_index always lines up with the correct item.
+        A previous 20-item tail-trim (queue[-20:]) caused current_index to point to
+        a completely different item after queue extension via lookahead navigation,
+        making same-device view-switching restore the wrong image.
         """
         import json
         import time
-        trimmed = queue[-20:] if len(queue) > 20 else queue
         await self._db.execute(
             """
             INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at, session_override_json, config_fields_json)
@@ -2599,7 +2601,7 @@ class CacheManager:
             """,
             (
                 sync_group,
-                json.dumps(trimmed),
+                json.dumps(queue),
                 current_index,
                 int(time.time()),
                 json.dumps(session_override) if session_override is not None else None,
