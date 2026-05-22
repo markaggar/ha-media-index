@@ -742,13 +742,13 @@ encode_file() {
     fi
     if [ "${SRC_PIX#yuvj}" != "$SRC_PIX" ] || [ "$COL_RANGE" = "pc" ]; then
       if [ -n "$VF_PARTS" ]; then
-        VF_PARTS="${VF_PARTS},scale=in_range=full:out_range=full"
+        VF_PARTS="${VF_PARTS},scale=w=iw:h=ih:in_range=full:out_range=limited"
       else
-        VF_PARTS="scale=in_range=full:out_range=full"
+        VF_PARTS="scale=w=iw:h=ih:in_range=full:out_range=limited"
       fi
       # Ensure nv12 output for QSV when hevc_qsv 8-bit has no explicit pix_fmt.
       [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
-      log "  Full-range source (${SRC_PIX}) — adding scale=in_range/out_range=full"
+      log "  Full-range source (${SRC_PIX}) — adding scale full→limited range conversion"
     fi
     # Append an explicit format= filter so hevc_qsv receives correctly-typed
     # frames.  When -vf is user-specified, ffmpeg does NOT auto-insert the
@@ -791,6 +791,7 @@ encode_file() {
       --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
       linuxserver/ffmpeg:latest \
       -hide_banner -loglevel warning -stats_period 10 \
+      -fflags +genpts \
       -i "$CIN" \
       -map 0:v:0 -map 0:a:0? \
       -map_metadata 0 \
