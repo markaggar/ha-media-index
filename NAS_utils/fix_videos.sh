@@ -720,11 +720,14 @@ encode_file() {
       TAG_FLAG="-tag:v hvc1"
     fi
 
+    # ffprobe reports "unknown"/"unspecified" when a field is not tagged — these
+    # are NOT valid ffmpeg -color_* option values and cause header-write failure.
+    # Only pass colour metadata when the value is a concrete, named constant.
     local CF_P="" CF_T="" CF_S="" CF_R=""
-    [ -n "$COL_PRIMARIES" ] && CF_P="-color_primaries $COL_PRIMARIES"
-    [ -n "$COL_TRC" ]       && CF_T="-color_trc $COL_TRC"
-    [ -n "$COL_SPACE" ]     && CF_S="-colorspace $COL_SPACE"
-    [ -n "$COL_RANGE" ]     && CF_R="-color_range $COL_RANGE"
+    case "$COL_PRIMARIES" in ""|unknown|unspecified) ;; *) CF_P="-color_primaries $COL_PRIMARIES" ;; esac
+    case "$COL_TRC"       in ""|unknown|unspecified) ;; *) CF_T="-color_trc $COL_TRC"             ;; esac
+    case "$COL_SPACE"     in ""|unknown|unspecified) ;; *) CF_S="-colorspace $COL_SPACE"           ;; esac
+    case "$COL_RANGE"     in ""|unknown|unspecified) ;; *) CF_R="-color_range $COL_RANGE"          ;; esac
 
     # Build the video filter chain.
     # Always prepend an fps filter so hevc_qsv receives a declared constant
