@@ -688,6 +688,21 @@ encode_file() {
     [ -n "$COL_SPACE" ]     && CF_S="-colorspace $COL_SPACE"
     [ -n "$COL_RANGE" ]     && CF_R="-color_range $COL_RANGE"
 
+    # Full-range source (yuvj420p or color_range=pc): tell swscaler explicitly
+    # that the input is full range so it doesn't silently clip to limited range
+    # during the yuvjXXXp → nv12 conversion.  The scale filter carries range
+    # metadata through; -color_range pc tags the output container.
+    # 10-bit HDR/HLG content is never full range, so this branch won't fire for
+    # p010le sources.
+    local VF_FLAG=""
+    if [ "${SRC_PIX#yuvj}" != "$SRC_PIX" ] || [ "$COL_RANGE" = "pc" ]; then
+      VF_FLAG="-vf scale=in_range=full:out_range=full"
+      # hevc_qsv may not have set PIX_FMT_FLAG for 8-bit content; nv12 is
+      # required to give QSV a well-defined surface format after the scale step.
+      [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
+      log "  Full-range source (${SRC_PIX}) — adding scale=in_range/out_range=full"
+    fi
+
     # Source-matched VBR bitrate targeting.
     # Same probing logic as fix_video_rotation.sh.
     local SRC_BPS TARGET_K MAXRATE_K BUFSIZE_K
@@ -725,6 +740,7 @@ encode_file() {
         -b:v "$TARGET_K" -maxrate "$MAXRATE_K" -bufsize "$BUFSIZE_K" \
         -look_ahead 0 \
       $PIX_FMT_FLAG \
+      $VF_FLAG \
       $CF_P $CF_T $CF_S $CF_R \
       $TAG_FLAG \
       $AUDIO_ARG \
