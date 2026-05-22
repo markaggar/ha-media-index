@@ -741,14 +741,12 @@ encode_file() {
       VF_PARTS="fps=${SRC_FPS_RAW}"
     fi
     if [ "${SRC_PIX#yuvj}" != "$SRC_PIX" ] || [ "$COL_RANGE" = "pc" ]; then
-      if [ -n "$VF_PARTS" ]; then
-        VF_PARTS="${VF_PARTS},scale=w=iw:h=ih:in_range=full:out_range=limited"
-      else
-        VF_PARTS="scale=w=iw:h=ih:in_range=full:out_range=limited"
-      fi
-      # Ensure nv12 output for QSV when hevc_qsv 8-bit has no explicit pix_fmt.
+      # Full-range source (yuvj420p / color_range=pc): the scale filter is
+      # unreliable in some ffmpeg builds with yuvj420p input and causes
+      # "No filtered frames".  libswscale inside format=nv12 already does the
+      # full→limited range conversion automatically, so no explicit scale is needed.
       [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
-      log "  Full-range source (${SRC_PIX}) — adding scale full→limited range conversion"
+      log "  Full-range source (${SRC_PIX}) — nv12 format conversion handles range"
     fi
     # Append an explicit format= filter so hevc_qsv receives correctly-typed
     # frames.  When -vf is user-specified, ffmpeg does NOT auto-insert the
