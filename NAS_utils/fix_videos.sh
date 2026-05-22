@@ -658,7 +658,7 @@ encode_file() {
         --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
         linuxserver/ffmpeg:latest \
         -v quiet -select_streams v:0 \
-          -show_entries stream=color_primaries,color_trc,color_space,color_range,pix_fmt,bit_rate \
+          -show_entries stream=color_primaries,color_trc,color_space,color_range,pix_fmt,bit_rate,avg_frame_rate \
           -of default=noprint_wrappers=1 \
         "$CIN" 2>/dev/null )"
 
@@ -674,7 +674,8 @@ encode_file() {
     COL_SPACE="$(printf '%s\n'     "$COL_META" | grep '^color_space='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     COL_RANGE="$(printf '%s\n'     "$COL_META" | grep '^color_range='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     SRC_PIX="$(printf '%s\n'       "$COL_META" | grep '^pix_fmt='         | cut -d= -f2 | tr -cd 'a-zA-Z0-9_')"
-    log "  Source: pix=${SRC_PIX:-?} primaries=${COL_PRIMARIES:-?} trc=${COL_TRC:-?} space=${COL_SPACE:-?} range=${COL_RANGE:-?}"
+    SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^avg_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
+    log "  Source: pix=${SRC_PIX:-?} fps=${SRC_FPS_RAW:-?} primaries=${COL_PRIMARIES:-?} trc=${COL_TRC:-?} space=${COL_SPACE:-?} range=${COL_RANGE:-?}"
 
     # Codec-specific pixel format and stream tag
     local PIX_FMT_FLAG="" TAG_FLAG=""
@@ -694,20 +695,28 @@ encode_file() {
     [ -n "$COL_SPACE" ]     && CF_S="-colorspace $COL_SPACE"
     [ -n "$COL_RANGE" ]     && CF_R="-color_range $COL_RANGE"
 
-    # Full-range source (yuvj420p or color_range=pc): tell swscaler explicitly
-    # that the input is full range so it doesn't silently clip to limited range
-    # during the yuvjXXXp → nv12 conversion.  The scale filter carries range
-    # metadata through; -color_range pc tags the output container.
-    # 10-bit HDR/HLG content is never full range, so this branch won't fire for
-    # p010le sources.
+    # Build the video filter chain.
+    # Always prepend an fps filter so hevc_qsv receives a declared constant
+    # frame rate — WMV/AVI and other sources with untagged or variable timing
+    # cause 'Current frame rate is unsupported' without it.
+    # Also add scale=in_range/out_range=full for full-range (yuvj/pc) sources
+    # to prevent swscaler from silently clipping to limited range → nv12.
     local VF_FLAG=""
+    local VF_PARTS=""
+    if [ -n "$SRC_FPS_RAW" ] && [ "$SRC_FPS_RAW" != "0/0" ] && [ "$SRC_FPS_RAW" != "0" ]; then
+      VF_PARTS="fps=${SRC_FPS_RAW}"
+    fi
     if [ "${SRC_PIX#yuvj}" != "$SRC_PIX" ] || [ "$COL_RANGE" = "pc" ]; then
-      VF_FLAG="-vf scale=in_range=full:out_range=full"
-      # hevc_qsv may not have set PIX_FMT_FLAG for 8-bit content; nv12 is
-      # required to give QSV a well-defined surface format after the scale step.
+      if [ -n "$VF_PARTS" ]; then
+        VF_PARTS="${VF_PARTS},scale=in_range=full:out_range=full"
+      else
+        VF_PARTS="scale=in_range=full:out_range=full"
+      fi
+      # Ensure nv12 output for QSV when hevc_qsv 8-bit has no explicit pix_fmt.
       [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
       log "  Full-range source (${SRC_PIX}) — adding scale=in_range/out_range=full"
     fi
+    [ -n "$VF_PARTS" ] && VF_FLAG="-vf $VF_PARTS"
 
     # Source-matched VBR bitrate targeting.
     # Same probing logic as fix_video_rotation.sh.
@@ -750,7 +759,7 @@ encode_file() {
       $CF_P $CF_T $CF_S $CF_R \
       $TAG_FLAG \
       $AUDIO_ARG \
-      -vsync cfr \
+      -fps_mode cfr \
       -metadata:s:v:0 rotate=0 \
       -max_muxing_queue_size 9999 \
       -movflags +faststart \
