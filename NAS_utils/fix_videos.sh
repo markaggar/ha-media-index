@@ -625,7 +625,7 @@ encode_file() {
       -movflags +faststart \
       "$COUT" \
       2>&1 | tee -a "$LOG_FILE"
-    STATUS=$?
+    STATUS=${PIPESTATUS[0]}
 
   # =========================================================================
   # PATH 2: Full QSV hardware re-encode.
@@ -750,16 +750,23 @@ encode_file() {
       $CF_P $CF_T $CF_S $CF_R \
       $TAG_FLAG \
       $AUDIO_ARG \
+      -vsync cfr \
       -metadata:s:v:0 rotate=0 \
       -max_muxing_queue_size 9999 \
       -movflags +faststart \
       "$COUT" \
       2>&1 | tee -a "$LOG_FILE"
-    STATUS=$?
+    STATUS=${PIPESTATUS[0]}
   fi
 
   # ---- Post-encode: preserve original, install output, restore metadata ----
   if [ "$STATUS" -eq 0 ] && [ -f "$TMP" ]; then
+    # Guard against ffmpeg exiting 0 but writing nothing (empty output).
+    if [ ! -s "$TMP" ]; then
+      log "ERROR: ffmpeg produced an empty output file for '$(basename "$INPUT")' — aborting"
+      rm -f "$TMP"
+      return 1
+    fi
     # Preserve the original before the corrected file takes its place.
     if ! preserve_original "$INPUT"; then
       log "ERROR: Could not preserve '$INPUT' — aborting, deleting .tmp"
