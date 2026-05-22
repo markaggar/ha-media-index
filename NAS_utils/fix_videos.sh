@@ -826,11 +826,14 @@ encode_file() {
       2>&1 | tee -a "$LOG_FILE"
     STATUS=${PIPESTATUS[0]}
 
-    # Software HEVC fallback: QSV can fail on certain inputs (e.g. WMV with
+    # Software H.264 fallback: QSV can fail on certain inputs (e.g. WMV with
     # broken timestamps or unusual pixel formats) even when the hardware is
-    # available.  Retry with libx265 before giving up entirely.
+    # available.  Retry with libx264 (H.264) before giving up entirely.
+    # libx264 is used instead of libx265 because the MP4 muxer requires an
+    # explicit codec-tag override for HEVC that is unreliable across ffmpeg
+    # builds, whereas H.264 has no such issue.
     if [ "$STATUS" -ne 0 ] && [ "$VIDEO_CODEC_OUT" = "hevc_qsv" ]; then
-      log "  QSV encode failed (exit $STATUS) — retrying with software encoder (libx265)"
+      log "  QSV encode failed (exit $STATUS) — retrying with software encoder (libx264/H.264)"
       rm -f "$TMP"
       docker run --rm \
         --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
@@ -841,11 +844,9 @@ encode_file() {
         -i "$CIN" \
         -map 0:v:0 -map 0:a:0? \
         -map_metadata 0 \
-        -c:v libx265 \
+        -c:v libx264 \
           -crf 23 \
           -preset medium \
-          -x265-params "log-level=warning" \
-          -tag:v hvc1 \
         ${VF_FLAG//nv12/yuv420p} \
         $CF_P $CF_T $CF_S $CF_R \
         $AUDIO_ARG \
