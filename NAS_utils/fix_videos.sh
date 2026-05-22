@@ -750,7 +750,16 @@ encode_file() {
       [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
       log "  Full-range source (${SRC_PIX}) — adding scale=in_range/out_range=full"
     fi
-    [ -n "$VF_PARTS" ] && VF_FLAG="-vf $VF_PARTS"
+    # Append an explicit format= filter so hevc_qsv receives correctly-typed
+    # frames.  When -vf is user-specified, ffmpeg does NOT auto-insert the
+    # format conversion it would otherwise add; hevc_qsv fails silently if it
+    # gets yuvj420p/yuv420p instead of nv12 (or p010le for 10-bit).
+    local ENCODE_FMT="nv12"
+    [ "$PIX_FMT_FLAG" = "-pix_fmt p010le" ] && ENCODE_FMT="p010le"
+    if [ -n "$VF_PARTS" ]; then
+      VF_PARTS="${VF_PARTS},format=${ENCODE_FMT}"
+      VF_FLAG="-vf $VF_PARTS"
+    fi
 
     # Source-matched VBR bitrate targeting.
     # Same probing logic as fix_video_rotation.sh.
