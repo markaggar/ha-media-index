@@ -674,7 +674,7 @@ encode_file() {
     COL_SPACE="$(printf '%s\n'     "$COL_META" | grep '^color_space='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     COL_RANGE="$(printf '%s\n'     "$COL_META" | grep '^color_range='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     SRC_PIX="$(printf '%s\n'       "$COL_META" | grep '^pix_fmt='         | cut -d= -f2 | tr -cd 'a-zA-Z0-9_')"
-    local SRC_FPS_RAW
+    local SRC_FPS_RAW FPS_IS_INFERRED=0
     SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^avg_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
     # avg_frame_rate is 0/0 in WMV/ASF — fall back to r_frame_rate
     if [ -z "$SRC_FPS_RAW" ] || [ "$SRC_FPS_RAW" = "0/0" ] || [ "$SRC_FPS_RAW" = "0" ]; then
@@ -697,7 +697,12 @@ encode_file() {
       [ -n "$_exif_fps" ] && [ "$_exif_fps" != "0" ] && SRC_FPS_RAW="$_exif_fps"
     fi
     # Final fallback: infer from colorspace (bt470bg = PAL = 25fps, else 29.97fps)
+    # FPS_IS_INFERRED=1 means the frame rate was guessed, not read from container
+    # metadata.  In that case we use -r as an INPUT option (not the fps filter)
+    # because the fps filter needs valid PTS/DTS from the container — WMV files
+    # with broken timestamps cause the fps filter to emit zero frames.
     if [ -z "$SRC_FPS_RAW" ]; then
+      FPS_IS_INFERRED=1
       if [ "$COL_SPACE" = "bt470bg" ] || [ "$COL_PRIMARIES" = "bt470bg" ]; then
         SRC_FPS_RAW="25/1"
         log "  FPS unknown — bt470bg detected, defaulting to 25fps (PAL)"
@@ -735,9 +740,16 @@ encode_file() {
     # cause 'Current frame rate is unsupported' without it.
     # Also add scale=in_range/out_range=full for full-range (yuvj/pc) sources
     # to prevent swscaler from silently clipping to limited range → nv12.
+    # When fps is inferred (broken container timestamps) use -r as an INPUT
+    # option so ffmpeg generates proper PTS before any filtering.  The fps filter
+    # requires valid input PTS and silently drops all frames when they are absent.
+    local INPUT_RATE_FLAG=""
+    [ "$FPS_IS_INFERRED" = "1" ] && [ -n "$SRC_FPS_RAW" ] && INPUT_RATE_FLAG="-r ${SRC_FPS_RAW}"
+
     local VF_FLAG=""
     local VF_PARTS=""
-    if [ -n "$SRC_FPS_RAW" ] && [ "$SRC_FPS_RAW" != "0/0" ] && [ "$SRC_FPS_RAW" != "0" ]; then
+    if [ -n "$SRC_FPS_RAW" ] && [ "$SRC_FPS_RAW" != "0/0" ] && [ "$SRC_FPS_RAW" != "0" ] \
+       && [ "$FPS_IS_INFERRED" = "0" ]; then
       VF_PARTS="fps=${SRC_FPS_RAW}"
     fi
     if [ "${SRC_PIX#yuvj}" != "$SRC_PIX" ] || [ "$COL_RANGE" = "pc" ]; then
@@ -783,13 +795,14 @@ encode_file() {
       log "  Bitrate: source unknown → fallback ${TARGET_K}"
     fi
 
-    log "  CMD: codec=${VIDEO_CODEC_OUT} vf=${VF_FLAG:-<none>} tag=${TAG_FLAG:-<none>} pix=${PIX_FMT_FLAG:-<none>}"
+    log "  CMD: codec=${VIDEO_CODEC_OUT} input_rate=${INPUT_RATE_FLAG:-<none>} vf=${VF_FLAG:-<none>} tag=${TAG_FLAG:-<none>} pix=${PIX_FMT_FLAG:-<none>}"
     docker run --rm \
       --device /dev/dri:/dev/dri \
       --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
       linuxserver/ffmpeg:latest \
       -hide_banner -loglevel warning -stats_period 10 \
       -fflags +genpts \
+      $INPUT_RATE_FLAG \
       -i "$CIN" \
       -map 0:v:0 -map 0:a:0? \
       -map_metadata 0 \
