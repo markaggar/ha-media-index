@@ -674,10 +674,37 @@ encode_file() {
     COL_SPACE="$(printf '%s\n'     "$COL_META" | grep '^color_space='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     COL_RANGE="$(printf '%s\n'     "$COL_META" | grep '^color_range='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     SRC_PIX="$(printf '%s\n'       "$COL_META" | grep '^pix_fmt='         | cut -d= -f2 | tr -cd 'a-zA-Z0-9_')"
+    local SRC_FPS_RAW
     SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^avg_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
-    # avg_frame_rate is 0/0 in WMV/ASF — fall back to r_frame_rate (always tagged)
+    # avg_frame_rate is 0/0 in WMV/ASF — fall back to r_frame_rate
     if [ -z "$SRC_FPS_RAW" ] || [ "$SRC_FPS_RAW" = "0/0" ] || [ "$SRC_FPS_RAW" = "0" ]; then
       SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^r_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
+    fi
+    # Sanity-check: WMV/ASF r_frame_rate is often the codec timebase (e.g. 90000/1),
+    # not the real frame rate.  Discard any value representing >300 fps.
+    local _fps_n _fps_d
+    _fps_n="${SRC_FPS_RAW%%/*}"
+    _fps_d="${SRC_FPS_RAW##*/}"
+    if [ -n "$_fps_d" ] && [ "$_fps_d" != "$SRC_FPS_RAW" ] && [ "$_fps_d" -gt 0 ] 2>/dev/null \
+       && [ "$(( _fps_n > 300 * _fps_d ))" = "1" ]; then
+      SRC_FPS_RAW=""
+    fi
+    # Exiftool fallback: VideoFrameRate is present in WMV/AVI container metadata
+    # even when ffprobe stream entries don't yield a usable value.
+    if [ -z "$SRC_FPS_RAW" ]; then
+      local _exif_fps
+      _exif_fps="$(exiftool -T -n -VideoFrameRate "$INPUT" 2>/dev/null | tr -cd '0-9.')"
+      [ -n "$_exif_fps" ] && [ "$_exif_fps" != "0" ] && SRC_FPS_RAW="$_exif_fps"
+    fi
+    # Final fallback: infer from colorspace (bt470bg = PAL = 25fps, else 29.97fps)
+    if [ -z "$SRC_FPS_RAW" ]; then
+      if [ "$COL_SPACE" = "bt470bg" ] || [ "$COL_PRIMARIES" = "bt470bg" ]; then
+        SRC_FPS_RAW="25/1"
+        log "  FPS unknown — bt470bg detected, defaulting to 25fps (PAL)"
+      else
+        SRC_FPS_RAW="30000/1001"
+        log "  FPS unknown — defaulting to 29.97fps (NTSC)"
+      fi
     fi
     log "  Source: pix=${SRC_PIX:-?} fps=${SRC_FPS_RAW:-?} primaries=${COL_PRIMARIES:-?} trc=${COL_TRC:-?} space=${COL_SPACE:-?} range=${COL_RANGE:-?}"
 
