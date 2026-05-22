@@ -785,6 +785,7 @@ encode_file() {
       log "  Bitrate: source unknown → fallback ${TARGET_K}"
     fi
 
+    log "  CMD: codec=${VIDEO_CODEC_OUT} vf=${VF_FLAG:-<none>} tag=${TAG_FLAG:-<none>} pix=${PIX_FMT_FLAG:-<none>}"
     docker run --rm \
       --device /dev/dri:/dev/dri \
       --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
