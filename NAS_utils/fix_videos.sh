@@ -728,11 +728,13 @@ encode_file() {
     # ffprobe reports "unknown"/"unspecified" when a field is not tagged — these
     # are NOT valid ffmpeg -color_* option values and cause header-write failure.
     # Only pass colour metadata when the value is a concrete, named constant.
+    # Also exclude 'pc' (full-range) from color_range: passing -color_range pc
+    # causes the MP4 muxer to fail to locate the HEVC stream tag on some builds.
     local CF_P="" CF_T="" CF_S="" CF_R=""
     case "$COL_PRIMARIES" in ""|unknown|unspecified) ;; *) CF_P="-color_primaries $COL_PRIMARIES" ;; esac
     case "$COL_TRC"       in ""|unknown|unspecified) ;; *) CF_T="-color_trc $COL_TRC"             ;; esac
     case "$COL_SPACE"     in ""|unknown|unspecified) ;; *) CF_S="-colorspace $COL_SPACE"           ;; esac
-    case "$COL_RANGE"     in ""|unknown|unspecified) ;; *) CF_R="-color_range $COL_RANGE"          ;; esac
+    case "$COL_RANGE"     in ""|unknown|unspecified|pc|jpeg|full) ;; *) CF_R="-color_range $COL_RANGE" ;; esac
 
     # Build the video filter chain.
     # Always prepend an fps filter so hevc_qsv receives a declared constant
@@ -757,19 +759,20 @@ encode_file() {
       # unreliable in some ffmpeg builds with yuvj420p input and causes
       # "No filtered frames".  libswscale inside format=nv12 already does the
       # full→limited range conversion automatically, so no explicit scale is needed.
-      [ -z "$PIX_FMT_FLAG" ] && PIX_FMT_FLAG="-pix_fmt nv12"
-      log "  Full-range source (${SRC_PIX}) — nv12 format conversion handles range"
+      log "  Full-range source (${SRC_PIX}) — VF chain handles format conversion"
     fi
-    # Append an explicit format= filter so hevc_qsv receives correctly-typed
-    # frames.  When -vf is user-specified, ffmpeg does NOT auto-insert the
-    # format conversion it would otherwise add; hevc_qsv fails silently if it
-    # gets yuvj420p/yuv420p instead of nv12 (or p010le for 10-bit).
+    # ALWAYS build a VF chain ending with format=ENCODE_FMT.  hevc_qsv encodes
+    # fail to write the MP4 HEVC stream tag when frames bypass the filter graph
+    # (direct auto-swscale path), so we force everything through lavfi even if
+    # the only filter needed is the pixel-format conversion.
     local ENCODE_FMT="nv12"
     [ "$PIX_FMT_FLAG" = "-pix_fmt p010le" ] && ENCODE_FMT="p010le"
     if [ -n "$VF_PARTS" ]; then
       VF_PARTS="${VF_PARTS},format=${ENCODE_FMT}"
-      VF_FLAG="-vf $VF_PARTS"
+    else
+      VF_PARTS="format=${ENCODE_FMT}"
     fi
+    VF_FLAG="-vf $VF_PARTS"
 
     # Source-matched VBR bitrate targeting.
     # Same probing logic as fix_video_rotation.sh.
@@ -843,7 +846,7 @@ encode_file() {
           -preset medium \
           -x265-params "log-level=warning" \
           -tag:v hvc1 \
-        $VF_FLAG \
+        ${VF_FLAG//nv12/yuv420p} \
         $CF_P $CF_T $CF_S $CF_R \
         $AUDIO_ARG \
         -fps_mode cfr \
