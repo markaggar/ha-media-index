@@ -593,21 +593,23 @@ encode_file() {
   #   F only (non-legacy)  → -c:v copy -c:a copy   (pure container remux)
   #   A only               → -c:v copy -c:a aac     (audio-only fix)
   #   F+A (non-legacy)     → -c:v copy -c:a aac     (remux + audio recode)
-  #   F (legacy wmv/…)     → -c:v copy -c:a aac     (legacy audio always bad)
+  # Legacy containers (wmv/avi/mts) always go to PATH 2 — video codec is
+  # unknown and may not be browser-safe (e.g. mp4v/DivX/WMV3).  PATH 1 must
+  # not stream-copy video from them.
   # =========================================================================
   local _need_recode_video=0
   case "$REASONS" in *C*) _need_recode_video=1 ;; esac
   case "$REASONS" in *R*) _need_recode_video=1 ;; esac
+  case "$INPUT_EXT" in wmv|avi|mts) _need_recode_video=1 ;; esac
 
   if [ "$_need_recode_video" = "0" ]; then
-    # Decide audio: transcode when A flag set, or when F + legacy container
+    # Decide audio: transcode when A flag set (bad audio codec detected);
+    # otherwise copy (already-AAC tracks on MP4/MOV — no quality loss).
+    # Legacy containers never reach this path (forced to PATH 2 above).
     local PATH1_AUDIO_ARG="-c:a copy"
     local PATH1_AUDIO_DESC="stream copy"
     case "$REASONS" in
       *A*) PATH1_AUDIO_ARG="-c:a aac -b:a 128k -ac 2"; PATH1_AUDIO_DESC="transcode→AAC" ;;
-      *F*) case "$INPUT_EXT" in
-             wmv|avi|mts) PATH1_AUDIO_ARG="-c:a aac -b:a 128k -ac 2"; PATH1_AUDIO_DESC="transcode→AAC (legacy)" ;;
-           esac ;;
     esac
     log "  Path: stream-copy video, audio ${PATH1_AUDIO_DESC} (no re-encode)"
     docker run --rm \
@@ -637,11 +639,15 @@ encode_file() {
     log "  Docker out : $COUT"
 
     # Determine audio handling:
-    #   A flag:    audio codec was explicitly detected as bad → transcode
-    #   otherwise: copy audio (preserves quality for already-AAC tracks)
+    #   A flag:               audio codec was explicitly detected as bad → transcode
+    #   F flag + wmv/avi/mts: legacy container audio is never AAC → transcode
+    #   otherwise:            copy audio (preserves quality for already-AAC tracks)
     local AUDIO_ARG="-c:a copy"
     case "$REASONS" in
       *A*) AUDIO_ARG="-c:a aac -b:a 128k -ac 2" ;;
+      *F*) case "$INPUT_EXT" in
+             wmv|avi|mts) AUDIO_ARG="-c:a aac -b:a 128k -ac 2" ;;
+           esac ;;
     esac
 
     # Probe colour-space metadata and pixel depth.
