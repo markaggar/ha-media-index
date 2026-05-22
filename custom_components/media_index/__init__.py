@@ -85,7 +85,7 @@ from .watcher import MediaWatcher
 from .exif_parser import ExifParser
 from .video_parser import VideoMetadataParser
 from .geocoding import GeocodeService
-from .cast import CastSessionManager, HaMediaPlayerTransport, run_cast_slideshow, run_mirror_cast
+from .cast_manager import CastSessionManager, HaMediaPlayerTransport, run_cast_slideshow, run_mirror_cast
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -650,12 +650,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("✅ Auto-install successful: %s", result["message"])
                 # Re-test library availability after installation
                 try:
-                    # Clear Python's import cache and reload the module to pick up the newly installed library
+                    # Clear Python's import cache and reload the module to pick up the newly installed library.
+                    # importlib.reload does blocking filesystem I/O (listdir, read_text), so run it in an
+                    # executor thread to avoid blocking the event loop.
                     import sys
                     import importlib
-                    if 'pymediainfo' in sys.modules:
-                        importlib.reload(sys.modules['pymediainfo'])
-                    from pymediainfo import MediaInfo  # noqa: F401
+
+                    def _reload_and_verify():
+                        if 'pymediainfo' in sys.modules:
+                            importlib.reload(sys.modules['pymediainfo'])
+                        from pymediainfo import MediaInfo  # noqa: F401
+
+                    await hass.async_add_executor_job(_reload_and_verify)
                     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
                     _LOGGER.info("✅ libmediainfo verified working after installation (import successful)")
                 except Exception as e:
