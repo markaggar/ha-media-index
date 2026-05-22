@@ -658,7 +658,7 @@ encode_file() {
         --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
         linuxserver/ffmpeg:latest \
         -v quiet -select_streams v:0 \
-          -show_entries stream=color_primaries,color_trc,color_space,color_range,pix_fmt,bit_rate,avg_frame_rate \
+          -show_entries stream=color_primaries,color_trc,color_space,color_range,pix_fmt,bit_rate,avg_frame_rate,r_frame_rate \
           -of default=noprint_wrappers=1 \
         "$CIN" 2>/dev/null )"
 
@@ -675,6 +675,10 @@ encode_file() {
     COL_RANGE="$(printf '%s\n'     "$COL_META" | grep '^color_range='     | cut -d= -f2 | tr -cd 'a-zA-Z0-9_-')"
     SRC_PIX="$(printf '%s\n'       "$COL_META" | grep '^pix_fmt='         | cut -d= -f2 | tr -cd 'a-zA-Z0-9_')"
     SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^avg_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
+    # avg_frame_rate is 0/0 in WMV/ASF — fall back to r_frame_rate (always tagged)
+    if [ -z "$SRC_FPS_RAW" ] || [ "$SRC_FPS_RAW" = "0/0" ] || [ "$SRC_FPS_RAW" = "0" ]; then
+      SRC_FPS_RAW="$(printf '%s\n' "$COL_META" | grep '^r_frame_rate=' | cut -d= -f2 | tr -cd '0-9/')"
+    fi
     log "  Source: pix=${SRC_PIX:-?} fps=${SRC_FPS_RAW:-?} primaries=${COL_PRIMARIES:-?} trc=${COL_TRC:-?} space=${COL_SPACE:-?} range=${COL_RANGE:-?}"
 
     # Codec-specific pixel format and stream tag
