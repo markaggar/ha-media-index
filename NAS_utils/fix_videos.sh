@@ -822,6 +822,38 @@ encode_file() {
       "$COUT" \
       2>&1 | tee -a "$LOG_FILE"
     STATUS=${PIPESTATUS[0]}
+
+    # Software HEVC fallback: QSV can fail on certain inputs (e.g. WMV with
+    # broken timestamps or unusual pixel formats) even when the hardware is
+    # available.  Retry with libx265 before giving up entirely.
+    if [ "$STATUS" -ne 0 ] && [ "$VIDEO_CODEC_OUT" = "hevc_qsv" ]; then
+      log "  QSV encode failed (exit $STATUS) — retrying with software encoder (libx265)"
+      rm -f "$TMP"
+      docker run --rm \
+        --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
+        linuxserver/ffmpeg:latest \
+        -hide_banner -loglevel warning -stats_period 10 \
+        -fflags +genpts \
+        $INPUT_RATE_FLAG \
+        -i "$CIN" \
+        -map 0:v:0 -map 0:a:0? \
+        -map_metadata 0 \
+        -c:v libx265 \
+          -crf 23 \
+          -preset medium \
+          -x265-params "log-level=warning" \
+          -tag:v hvc1 \
+        $VF_FLAG \
+        $CF_P $CF_T $CF_S $CF_R \
+        $AUDIO_ARG \
+        -fps_mode cfr \
+        -metadata:s:v:0 rotate=0 \
+        -max_muxing_queue_size 9999 \
+        -movflags +faststart \
+        "$COUT" \
+        2>&1 | tee -a "$LOG_FILE"
+      STATUS=${PIPESTATUS[0]}
+    fi
   fi
 
   # ---- Post-encode: preserve original, install output, restore metadata ----
