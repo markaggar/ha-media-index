@@ -85,7 +85,7 @@ from .watcher import MediaWatcher
 from .exif_parser import ExifParser
 from .video_parser import VideoMetadataParser
 from .geocoding import GeocodeService
-from .cast_manager import CastSessionManager, HaMediaPlayerTransport, run_cast_slideshow, run_mirror_cast
+from .cast_manager import CastSessionManager, HaMediaPlayerTransport, RokuEcpTransport, _get_roku_host, run_cast_slideshow, run_mirror_cast
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -244,7 +244,7 @@ SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_START_CAST_SLIDESHOW_SCHEMA = vol.Schema({
-    vol.Required("entity_id"): cv.string,
+    vol.Required("media_player_entity_id"): cv.string,
     vol.Optional("interval", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
     vol.Optional("video_overlap", default=2): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
     vol.Optional("sync_group"): cv.string,
@@ -262,14 +262,14 @@ SERVICE_START_CAST_SLIDESHOW_SCHEMA = vol.Schema({
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_MIRROR_TO_CAST_SCHEMA = vol.Schema({
-    vol.Required("entity_id"): cv.string,
+    vol.Required("media_player_entity_id"): cv.string,
     vol.Required("sync_group"): cv.string,
     vol.Optional("pre_end_pause", default=True): cv.boolean,
     vol.Optional("video_overlap", default=2): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
 }, extra=vol.ALLOW_EXTRA)
 
 SERVICE_STOP_CAST_SLIDESHOW_SCHEMA = vol.Schema({
-    vol.Optional("entity_id"): cv.string,
+    vol.Optional("media_player_entity_id"): cv.string,
 }, extra=vol.ALLOW_EXTRA)
 
 
@@ -2580,7 +2580,7 @@ def _register_services(hass: HomeAssistant):
         if session_manager is None:
             raise HomeAssistantError("Cast session manager not initialised")
 
-        target_entity_id = call.data["entity_id"]
+        target_entity_id = call.data["media_player_entity_id"]
         interval = call.data.get("interval", 10)
         video_overlap = call.data.get("video_overlap", 2)
         sync_group = call.data.get("sync_group")
@@ -2628,7 +2628,16 @@ def _register_services(hass: HomeAssistant):
                             item.setdefault("media_source_uri", "")
                 return items
 
-        transport = HaMediaPlayerTransport()
+        # Auto-select transport: Roku ECP for Roku devices, media_player for others
+        roku_host = _get_roku_host(hass, target_entity_id)
+        if roku_host:
+            transport = RokuEcpTransport(hass, roku_host)
+            _LOGGER.info(
+                "start_cast_slideshow: Roku ECP transport selected for %s (host=%s)",
+                target_entity_id, roku_host,
+            )
+        else:
+            transport = HaMediaPlayerTransport()
         coro = run_cast_slideshow(
             hass=hass,
             cache_manager=_CacheManagerProxy(),
@@ -2652,12 +2661,23 @@ def _register_services(hass: HomeAssistant):
         if session_manager is None:
             raise HomeAssistantError("Cast session manager not initialised")
 
-        target_entity_id = call.data["entity_id"]
+        cache_manager = instance["cache_manager"]
+        config = instance["config"]
+        target_entity_id = call.data["media_player_entity_id"]
         sync_group = call.data["sync_group"]
         pre_end_pause = call.data.get("pre_end_pause", True)
         video_overlap = call.data.get("video_overlap", 2)
 
-        transport = HaMediaPlayerTransport()
+        # Auto-select transport: Roku ECP for Roku devices, media_player for others
+        roku_host = _get_roku_host(hass, target_entity_id)
+        if roku_host:
+            transport = RokuEcpTransport(hass, roku_host)
+            _LOGGER.info(
+                "mirror_to_cast: Roku ECP transport selected for %s (host=%s)",
+                target_entity_id, roku_host,
+            )
+        else:
+            transport = HaMediaPlayerTransport()
         coro = run_mirror_cast(
             hass=hass,
             entity_id=target_entity_id,
@@ -2665,6 +2685,9 @@ def _register_services(hass: HomeAssistant):
             sync_group=sync_group,
             pre_end_pause=pre_end_pause,
             video_overlap=video_overlap,
+            cache_manager=cache_manager if roku_host else None,
+            media_source_prefix=config.get(CONF_MEDIA_SOURCE_URI, "") if roku_host else "",
+            base_folder=config.get(CONF_BASE_FOLDER, "") if roku_host else "",
         )
         session_manager.start(target_entity_id, hass, coro)
         _LOGGER.info(
@@ -2684,7 +2707,7 @@ def _register_services(hass: HomeAssistant):
             _LOGGER.warning("stop_cast_slideshow: no cast session manager found")
             return
 
-        target_entity_id = call.data.get("entity_id")
+        target_entity_id = call.data.get("media_player_entity_id")
         session_manager.stop(target_entity_id)
 
     # Register all services

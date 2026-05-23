@@ -816,11 +816,11 @@ start_cast_slideshow:
     entity:
       integration: media_index
   fields:
-    entity_id:
+    media_player_entity_id:
       name: Media Player
-      description: The media_player entity to cast to.
+      description: The media_player entity to cast to. For Roku devices, ECP is used automatically for better orientation and format handling.
       required: true
-      example: "media_player.lg_webos_tv_uh8500"
+      example: "media_player.roku_tv"
       selector:
         entity:
           domain: media_player
@@ -948,13 +948,13 @@ stop_cast_slideshow:
     entity:
       integration: media_index
   fields:
-    entity_id:
+    media_player_entity_id:
       name: Media Player
       description: >
         The media_player entity whose cast session should be stopped. Omit to
         stop all active sessions.
       required: false
-      example: "media_player.lg_webos_tv_uh8500"
+      example: "media_player.roku_tv"
       selector:
         entity:
           domain: media_player
@@ -970,11 +970,11 @@ mirror_to_cast:
     entity:
       integration: media_index
   fields:
-    entity_id:
+    media_player_entity_id:
       name: Media Player
-      description: The media_player entity to mirror to.
+      description: The media_player entity to mirror to. For Roku devices, ECP is used automatically for better orientation and format handling.
       required: true
-      example: "media_player.lg_webos_tv_uh8500"
+      example: "media_player.roku_tv"
       selector:
         entity:
           domain: media_player
