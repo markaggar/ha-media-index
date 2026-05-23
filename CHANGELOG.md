@@ -5,19 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- **Cross-device sync followers show wrong images after a filter change**: `update_sync_state` was broadcasting only the last 20 items of the queue (`queue[-20:]`) while keeping `current_index` relative to the original full queue. For a 146-item result, index 1 pointed to the 2nd-to-last photo (a 2025 image) instead of the 2nd item (Iceland 006.JPG), causing every subsequent sync event to navigate the follower to a completely different image. The trim has been removed; the full queue is now stored and broadcast so `current_index` always lines up with the correct item.
-
----
-
-## [1.8.0] - 2026-05-14
-
-### Fixed
-
-- **Portrait video cast to Roku displayed as landscape**: `video_parser.py` now extracts pymediainfo's `track.rotation` field and stores it as `orientation` in the database (e.g. iPhone MOV/MP4 portrait videos stored as `90_cw`). Both scanner paths (batch and single-file) now write `orientation` for videos to the `media_files` table alongside `width`/`height`. The `roku_ecp_cast` handler now appends `&w={ecp_w}&h={ecp_h}` (swapped for 90°/270°) and `&r={degrees}` (90.0/270.0/180.0) to the ECP URL so xcast both sizes and rotates the video to the correct portrait orientation. Re-scanning affected videos will update the DB.
+## [1.8.0] - 2026-05-22
 
 ### Added
 
@@ -39,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
   - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
   - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
-  - All three services are registered via `cast.py` containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
+  - All three services are registered via `cast_manager.py` containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
 
 - **Date Filters for `get_ordered_files`**: Added `date_from`, `date_to`, `timestamp_from`, and `timestamp_to` parameters to the `get_ordered_files` service, matching the filter capability already present in `get_random_items`
   - `date_from` / `date_to`: accept `YYYY-MM-DD` strings; `date_to` is inclusive (end of day)
@@ -50,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`get_ordered_files` DESC Sort Returning Oldest Files First**: Ordered files in `desc` mode were returning 2018 photos before 2026 photos. Root cause: `date_taken` is stored as a Unix integer timestamp, but wrapping it in SQLite's `unixepoch()` treats the integer as a Julian Day Number and produces large negative values (e.g. −78 billion for a 2018 timestamp). Fixed by using `date_taken` directly in the `COALESCE` expression without the redundant `unixepoch()` wrapper.
 
-- **`roku_ecp_cast` — stretched/squished rotated photos**: Photos stored in physical landscape orientation with a 90°/270° EXIF rotation tag were served in their raw orientation by Pillow, then the same rotation was applied again via ECP `r`/`ri` parameters, producing a double-rotation and wrong aspect ratio. Fixed by applying `exif_transpose` in the streaming layer and always sending `r=0.0&ri=0.0` to Roku.
+- **Cross-device sync followers show wrong images after a filter change**: `update_sync_state` was broadcasting only the last 20 items of the queue (`queue[-20:]`) while keeping `current_index` relative to the original full queue. For a 146-item result, index 1 pointed to the 2nd-to-last photo (a 2025 image) instead of the 2nd item (Iceland 006.JPG), causing every subsequent sync event to navigate the follower to a completely different image. The trim has been removed; the full queue is now stored and broadcast so `current_index` always lines up with the correct item.
 
 ---
 
