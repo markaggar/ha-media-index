@@ -58,7 +58,7 @@ class CastSessionManager:
         """Cancel any prior session for *target* and start a new one."""
         existing = self._sessions.get(target)
         if existing and not existing.done():
-            _LOGGER.debug("Cancelling existing cast session for %s", target)
+            _LOGGER.info("Cast session for %s already active — cancelling before starting new one", target)
             existing.cancel()
         task = hass.async_create_task(coro, name=f"media_index_cast_{target}")
         self._sessions[target] = task
@@ -126,9 +126,30 @@ class RokuEcpTransport:
     support. Falls back to the resolved HTTP URL when no DB item is available.
     """
 
+    _XCAST_APP_NAME = "XCast Receiver"
+    _XCAST_LAUNCH_TIMEOUT = 10.0  # seconds to wait for xcast to start
+    _XCAST_READY_PAUSE = 0.3      # brief pause after xcast reports ready
+
     def __init__(self, hass, roku_host: str) -> None:
         self._hass = hass
         self._roku_host = roku_host
+
+    def _is_xcast_active(self, hass, entity_id: str) -> bool:
+        """Return True if the Roku entity currently has xcast in the foreground."""
+        state = hass.states.get(entity_id)
+        return bool(state and state.attributes.get("app_name") == self._XCAST_APP_NAME)
+
+    async def _wait_for_xcast(self, hass, entity_id: str) -> bool:
+        """Poll HA entity state until xcast is in the foreground or timeout.
+
+        Returns True if xcast became active within the timeout window.
+        """
+        deadline = hass.loop.time() + self._XCAST_LAUNCH_TIMEOUT
+        while hass.loop.time() < deadline:
+            if self._is_xcast_active(hass, entity_id):
+                return True
+            await asyncio.sleep(0.5)
+        return False
 
     async def push(self, hass, entity_id: str, media_url: str, file_type: str, item: dict | None = None) -> None:
         """Send one media item to the Roku via xcast ECP.
@@ -137,6 +158,11 @@ class RokuEcpTransport:
         HMAC-signed stream URL is generated and correct orientation/dimension
         params are applied. Otherwise falls back to *media_url* with minimal
         metadata.
+
+        If xcast is not already running on the Roku, the first push will launch
+        it.  We then wait for the entity's app_name to become "XCast Receiver"
+        and resend the push so the media is actually displayed once xcast has
+        fully initialised.
         """
         import os as _os
         import urllib.parse
@@ -144,6 +170,12 @@ class RokuEcpTransport:
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         roku_host = self._roku_host
+
+        # DB item's file_type is authoritative; the card's sync-event metadata
+        # does not currently propagate file_type, so caller may pass "image" for
+        # a video.  Override here as a safety net.
+        if item is not None and item.get("file_type"):
+            file_type = item["file_type"]
 
         if item is not None and item.get("id"):
             # Full DB row available — generate a HMAC-signed stream URL
@@ -209,7 +241,20 @@ class RokuEcpTransport:
             params += "&r=0.0&ri=0.0"  # rotation already baked in by exif_transpose
 
         ecp_url = YarlURL(f"http://{roku_host}:8060/input/687485?{params}", encoded=True)
-        _LOGGER.debug("Roku ECP push → %s (%s): %s", roku_host, file_type, title)
+        _LOGGER.info(
+            "Roku ECP push → %s  type=%s  file_id=%s  title=%s",
+            roku_host,
+            file_type,
+            item.get("id") if item else "n/a",
+            title,
+        )
+
+        # Capture whether xcast was already in the foreground BEFORE we push.
+        # If it wasn't, the push will launch xcast, but xcast needs a few
+        # seconds to initialise before it can display media.  We wait for the
+        # HA entity's app_name to reach "XCast Receiver" and then resend so
+        # the first item is actually shown.
+        xcast_was_active = self._is_xcast_active(hass, entity_id)
 
         session = async_get_clientsession(hass)
         try:
@@ -222,8 +267,40 @@ class RokuEcpTransport:
                     _LOGGER.warning(
                         "Roku ECP push: HTTP %s for '%s': %s", resp.status, title, body
                     )
+                else:
+                    _LOGGER.info("Roku ECP push: sent %s → HTTP 200 OK", ecp_url)
         except Exception as e:  # noqa: BLE001
             _LOGGER.error("Roku ECP push failed for %s: %s", roku_host, e)
+            return
+
+        if not xcast_was_active:
+            _LOGGER.info(
+                "Roku ECP: xcast was not running on %s — waiting for it to initialise",
+                entity_id,
+            )
+            started = await self._wait_for_xcast(hass, entity_id)
+            if started:
+                # Brief pause to let xcast fully render its input pipeline.
+                await asyncio.sleep(self._XCAST_READY_PAUSE)
+                _LOGGER.info(
+                    "Roku ECP: xcast ready on %s — resending media push", entity_id
+                )
+                try:
+                    async with session.post(ecp_url, data=b"") as resp2:
+                        _LOGGER.info(
+                            "Roku ECP resend → HTTP %s for '%s'", resp2.status, title
+                        )
+                except Exception as e:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Roku ECP resend failed for %s: %s", roku_host, e
+                    )
+            else:
+                _LOGGER.warning(
+                    "Roku ECP: xcast did not start within %.0fs on %s — "
+                    "first item may not display",
+                    self._XCAST_LAUNCH_TIMEOUT,
+                    entity_id,
+                )
 
 
 async def _resolve_media_url(hass, media_content_id: str) -> str:
@@ -428,6 +505,18 @@ async def run_mirror_cast(
                     db_item = await cache_manager.get_file_by_path(file_path)
             except Exception as _db_err:  # noqa: BLE001
                 _LOGGER.debug("Mirror cast: DB lookup failed for %s: %s", media_uri, _db_err)
+
+        # The card's metadata objects don't include file_type, so current_metadata
+        # rarely carries it.  Prefer the DB-authoritative value when available;
+        # fall back to extension-based detection so videos aren't mis-typed as images.
+        if db_item and db_item.get("file_type"):
+            file_type = db_item["file_type"]
+        elif file_type == "image":
+            import os as _os_ft
+            _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv", ".webm", ".mts", ".m2ts"}
+            _uri_ext = _os_ft.path.splitext(media_uri.lower())[1]
+            if _uri_ext in _VIDEO_EXTS:
+                file_type = "video"
 
         await transport.push(hass, entity_id, url, file_type, item=db_item)
         _LOGGER.debug("Mirror cast → %s: sent %s", entity_id, media_uri)

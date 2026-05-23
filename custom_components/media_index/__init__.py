@@ -246,7 +246,7 @@ SERVICE_RESTORE_DELETED_FILES_SCHEMA = vol.Schema({
 SERVICE_START_CAST_SLIDESHOW_SCHEMA = vol.Schema({
     vol.Required("media_player_entity_id"): cv.string,
     vol.Optional("interval", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
-    vol.Optional("video_overlap", default=2): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
+    vol.Optional("video_overlap", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
     vol.Optional("sync_group"): cv.string,
     vol.Optional("also_write_sync", default=False): cv.boolean,
     vol.Optional("folder"): cv.string,
@@ -2199,6 +2199,16 @@ def _register_services(hass: HomeAssistant):
         if not roku_entity_id:
             raise HomeAssistantError("'roku_entity_id' is required")
 
+        # If a mirror or slideshow session is running for this entity, stop it so
+        # it doesn't overwrite what the card is about to push.
+        session_manager = instance.get("cast_session_manager")
+        if session_manager and session_manager.is_active(roku_entity_id):
+            _LOGGER.info(
+                "roku_ecp_cast: stopping active cast session for %s (card is taking over)",
+                roku_entity_id,
+            )
+            session_manager.stop(roku_entity_id)
+
         file_id = call.data.get("file_id")
         file_path_param = call.data.get("file_path")
         media_source_uri_param = call.data.get("media_source_uri")
@@ -2582,7 +2592,7 @@ def _register_services(hass: HomeAssistant):
 
         target_entity_id = call.data["media_player_entity_id"]
         interval = call.data.get("interval", 10)
-        video_overlap = call.data.get("video_overlap", 2)
+        video_overlap = call.data.get("video_overlap", 0)
         sync_group = call.data.get("sync_group")
         also_write_sync = call.data.get("also_write_sync", False)
 
@@ -2649,6 +2659,16 @@ def _register_services(hass: HomeAssistant):
             sync_group=sync_group,
             also_write_sync=also_write_sync,
         )
+        # Stop any existing session for this target before starting the new one.
+        # session_manager.start() also does this, but being explicit here gives
+        # a clear INFO log and ensures the old task is cancelled before we create
+        # the new coroutine context.
+        if session_manager.is_active(target_entity_id):
+            _LOGGER.info(
+                "start_cast_slideshow: stopping existing session for %s before starting new one",
+                target_entity_id,
+            )
+            session_manager.stop(target_entity_id)
         session_manager.start(target_entity_id, hass, coro)
         _LOGGER.info(
             "start_cast_slideshow: started for %s (interval=%ds)", target_entity_id, interval
@@ -2667,6 +2687,14 @@ def _register_services(hass: HomeAssistant):
         sync_group = call.data["sync_group"]
         pre_end_pause = call.data.get("pre_end_pause", True)
         video_overlap = call.data.get("video_overlap", 2)
+
+        # Stop any existing session for this target before mirroring.
+        if session_manager.is_active(target_entity_id):
+            _LOGGER.info(
+                "mirror_to_cast: stopping existing session for %s before starting mirror",
+                target_entity_id,
+            )
+            session_manager.stop(target_entity_id)
 
         # Auto-select transport: Roku ECP for Roku devices, media_player for others
         roku_host = _get_roku_host(hass, target_entity_id)
@@ -2695,20 +2723,56 @@ def _register_services(hass: HomeAssistant):
         )
 
     async def handle_stop_cast_slideshow(call):
-        """Stop one or all cast sessions."""
-        # Find first registered instance to get the session manager
-        domain_data = hass.data.get(DOMAIN, {})
-        session_manager = None
-        for entry_data in domain_data.values():
-            if isinstance(entry_data, dict) and "cast_session_manager" in entry_data:
-                session_manager = entry_data["cast_session_manager"]
-                break
-        if session_manager is None:
-            _LOGGER.warning("stop_cast_slideshow: no cast session manager found")
-            return
+        """Stop one or all cast sessions, and dismiss xcast on Roku devices."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        from yarl import URL as YarlURL
 
+        domain_data = hass.data.get(DOMAIN, {})
         target_entity_id = call.data.get("media_player_entity_id")
-        session_manager.stop(target_entity_id)
+
+        # Search ALL instances for the matching active session (not just the first),
+        # so this works regardless of which media_index instance started the slideshow.
+        stopped = False
+        for entry_data in domain_data.values():
+            if not isinstance(entry_data, dict):
+                continue
+            session_manager = entry_data.get("cast_session_manager")
+            if session_manager is None:
+                continue
+            if target_entity_id:
+                if session_manager.is_active(target_entity_id):
+                    session_manager.stop(target_entity_id)
+                    stopped = True
+                    break
+            else:
+                session_manager.stop_all()
+                stopped = True
+
+        if not stopped:
+            _LOGGER.warning(
+                "stop_cast_slideshow: no active cast session found for %s",
+                target_entity_id or "any",
+            )
+
+        # For Roku targets, send a Home keypress to dismiss xcast from the TV.
+        # Cancelling the HA task only stops new pushes — the Roku's xcast app
+        # keeps playing the last item until we explicitly navigate away.
+        if target_entity_id:
+            roku_host = _get_roku_host(hass, target_entity_id)
+            if roku_host:
+                ecp_url = YarlURL(f"http://{roku_host}:8060/keypress/Home")
+                session = async_get_clientsession(hass)
+                try:
+                    async with session.post(ecp_url, data=b"") as resp:
+                        _LOGGER.info(
+                            "stop_cast_slideshow: Home keypress → %s (%s) HTTP %s",
+                            target_entity_id, roku_host, resp.status,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "stop_cast_slideshow: Home keypress failed for %s: %s",
+                        target_entity_id, exc,
+                    )
 
     # Register all services
     hass.services.async_register(

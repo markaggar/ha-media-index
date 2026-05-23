@@ -158,6 +158,36 @@ get_ordered_files:
               value: "desc"
             - label: "Ascending (Oldest/A-Z First)"
               value: "asc"
+    date_from:
+      name: Date From
+      description: Include only files taken on or after this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    date_to:
+      name: Date To
+      description: Include only files taken on or before this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    after_value:
+      name: After Value (cursor)
+      description: >
+        Compound cursor for stable pagination. Pass the `next_cursor.after_value`
+        from the previous response to fetch the next page. Must be used together
+        with `after_id`.
+      required: false
+      selector:
+        text:
+    after_id:
+      name: After ID (cursor)
+      description: >
+        Compound cursor tie-breaker. Pass the `next_cursor.after_id` from the
+        previous response. Must be used together with `after_value`.
+      required: false
+      selector:
+        number:
+          min: 1
 
 get_file_metadata:
   name: Get File Metadata
@@ -805,6 +835,23 @@ roku_ecp_keypress:
       selector:
         text:
 
+stop_cast:
+  name: Stop Cast (Roku)
+  description: >
+    Send a Home keypress to a Roku device via ECP, dismissing the xcast app
+    and clearing the cast image from the screen. Use this to stop a single
+    direct cast pushed by roku_ecp_cast. To stop a mirror or slideshow session
+    use stop_cast_slideshow instead.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device to stop.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+
 start_cast_slideshow:
   name: Start Cast Slideshow
   description: >
@@ -840,9 +887,10 @@ start_cast_slideshow:
       name: Video Overlap (seconds)
       description: >
         Start loading the next item this many seconds before the current video
-        would naturally end. Ignored for images.
+        would naturally end. Ignored for images. Set to 1-2 if you see a brief
+        black screen between videos.
       required: false
-      default: 2
+      default: 0
       selector:
         number:
           min: 0
@@ -944,9 +992,6 @@ stop_cast_slideshow:
   description: >
     Stop a cast slideshow or mirror session. If entity_id is omitted, all
     active cast sessions are stopped.
-  target:
-    entity:
-      integration: media_index
   fields:
     media_player_entity_id:
       name: Media Player

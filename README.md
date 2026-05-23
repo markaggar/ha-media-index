@@ -54,12 +54,18 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Safe dry-run mode** - previews duplicate groups and a folder-pair summary before deleting anything
 - **Auto-delete** - moves all non-keeper duplicates to `_Junk` when confirmed
 
-### � Cast to Roku TV
+### 📺 Cast to Roku TV
+
+> **🎬 Works without Media Card** — the cast slideshow services (`start_cast_slideshow` / `stop_cast_slideshow`) are the first Media Index services that run a fully autonomous slideshow without needing any Lovelace card or browser session.
+
+- **`start_cast_slideshow` service** — start an unattended random slideshow directly on a Roku TV. Supports all the same filters as `get_random_items` (folder, date range, favorites, anniversary mode). For Roku devices, ECP is used automatically for correct orientation and native format support. Detects when xcast finishes initialising and resends the first item so it always displays correctly.
+- **`stop_cast_slideshow` service** — stops the slideshow and sends `keypress/Home` to dismiss xcast from the TV screen
+- **`mirror_to_cast` service** — mirrors a Media Card's navigation to the TV in real-time (card leads, TV follows)
 - **`roku_ecp_cast` service** — cast the current image or video directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app (used by [Media Card](https://github.com/markaggar/ha-media-card) cast button)
 - **JPEG transcoding** — images are re-encoded with standard JPEG tables via Pillow before being sent to Roku, fixing grey-screen failures on cameras with non-standard JPEG encoding (e.g. Nikon D5100)
 - **EXIF orientation correction** — rotated phone photos are physically transposed before serving so the Roku always receives correctly-oriented pixels at the right aspect ratio, preventing stretch distortion
 - **Short signed stream URLs** — a short HMAC-signed URL is generated per cast; the Roku fetches the image directly from HA, bypassing the 255-character URL length limit of standard HA auth tokens
-- **`stop_cast` service** — sends an ECP `keypress/Home` to clear the image from the TV when a cast session ends
+- **`stop_cast` service** — sends an ECP `keypress/Home` to clear the image from the TV when a single direct cast ends
 - **Requirements**: Roku HA integration configured for the target device; [xcast channel](https://channelstore.roku.com/details/687485) installed on the Roku
 
 ### �🗑️ File Management
@@ -76,6 +82,16 @@ Media Index is designed to work seamlessly with [Media Card](https://github.com/
 - **Rich metadata display** - Shows location names, ratings, and EXIF data
 - **Interactive controls** - Favorite, delete, and mark for editing directly from the card
 - **Background updates** - New photos appear automatically without restart
+
+## Using Without Media Card
+
+The cast slideshow services work entirely standalone — no Lovelace card or browser needed:
+
+- **`start_cast_slideshow`** — start a random photo/video slideshow on a Roku TV from an automation or script
+- **`stop_cast_slideshow`** — stop the slideshow and clear the TV screen
+- **`mirror_to_cast`** — mirror whatever a Media Card is currently showing to the TV in real-time
+
+These can be triggered from HA automations (e.g. turn on the TV slideshow at a set time), scripts, or the Developer Tools Actions panel directly.
 
 ## Installation
 
