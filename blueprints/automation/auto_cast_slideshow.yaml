@@ -157,6 +157,18 @@ blueprint:
           unit_of_measurement: days
           mode: box
 
+    sync_group:
+      name: Sync Group
+      description: >
+        Name used to link this slideshow with a Media Card so the card can
+        follow along. Leave blank to auto-generate from the media player entity
+        ID (e.g. media_player.office_tv → autocast_office_tv). If you set a
+        custom value here, enter the same value in the Media Card's
+        "Sync Group" configuration field.
+      default: ""
+      selector:
+        text:
+
 # Capture all inputs as template variables so they can be used in
 # Jinja2 templates (including conditional service data construction).
 variables:
@@ -174,6 +186,7 @@ variables:
   _anniversary_month: !input anniversary_month
   _anniversary_day: !input anniversary_day
   _anniversary_window_days: !input anniversary_window_days
+  _sync_group: !input sync_group
 
 triggers:
   - trigger: state
@@ -232,9 +245,10 @@ actions:
           # unset optional parameters (file_type, folder, date_*, anniversary_*).
           - variables:
               _service_data: >
+                {%- set _sg = _sync_group if (_sync_group | default('')) not in ['', none] else 'autocast_' + media_player_id | replace('media_player.', '') -%}
                 {%- set d = {
                   'media_player_entity_id': media_player_id,
-                  'sync_group': 'autocast_' + media_player_id | replace('media_player.', ''),
+                  'sync_group': _sg,
                   'interval': _interval,
                   'video_overlap': _video_overlap,
                   'also_write_sync': _also_write_sync,
