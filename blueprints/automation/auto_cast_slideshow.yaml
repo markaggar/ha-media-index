@@ -1,0 +1,147 @@
+blueprint:
+  name: Auto-start Cast Slideshow on TV
+  description: >
+    Uses Media Index to automatically start a cast slideshow when a TV is on
+    the home screen, and stops it when another app takes over or the TV turns off.
+    One automation instance per TV — create multiple automations for multiple TVs.
+  domain: automation
+  input:
+    media_player:
+      name: Media Player
+      description: The TV or cast-capable media player to control.
+      selector:
+        entity:
+          domain: media_player
+    media_index_sensor:
+      name: Media Index Sensor
+      description: The media_index sensor entity to use as the slideshow source.
+      selector:
+        entity:
+          integration: media_index
+    interval:
+      name: Slideshow Interval
+      description: How long each item is displayed (seconds).
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+    file_type:
+      name: File Type
+      description: Type of media to include in the slideshow.
+      default: video
+      selector:
+        select:
+          options:
+            - image
+            - video
+            - both
+    favorites_only:
+      name: Favorites Only
+      description: Only show files marked as favorites.
+      default: true
+      selector:
+        boolean:
+    recursive:
+      name: Recursive
+      description: Include files in sub-folders of the media index source.
+      default: true
+      selector:
+        boolean:
+    video_overlap:
+      name: Video Overlap
+      description: Seconds of overlap between videos (advanced).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: seconds
+          mode: box
+
+variables:
+  media_player_id: !input media_player
+
+triggers:
+  - trigger: state
+    entity_id: !input media_player
+    to: "on"
+    for:
+      seconds: 30
+    id: Start Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_name
+    to: Home
+    for:
+      seconds: 30
+    id: Start Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    to: "off"
+    for:
+      seconds: 0
+    id: Stop Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_name
+    from: XCast Receiver
+    for:
+      seconds: 0
+    id: Stop Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_name
+    from: Home
+    for:
+      seconds: 0
+    id: Stop Cast
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - Start Cast
+          - condition: state
+            entity_id: !input media_player
+            attribute: app_name
+            state: Home
+        sequence:
+          - action: media_index.start_cast_slideshow
+            target:
+              entity_id: !input media_index_sensor
+            data:
+              interval: !input interval
+              also_write_sync: true
+              recursive: !input recursive
+              favorites_only: !input favorites_only
+              media_player_entity_id: !input media_player
+              sync_group: "{{ 'autocast_' + media_player_id | replace('media_player.', '') }}"
+              file_type: !input file_type
+              video_overlap: !input video_overlap
+
+      - conditions:
+          - condition: trigger
+            id:
+              - Stop Cast
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input media_player
+                attribute: app_name
+                state: XCast Receiver
+        sequence:
+          - action: media_index.stop_cast_slideshow
+            data:
+              media_player_entity_id: !input media_player
+
+mode: single
