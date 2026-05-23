@@ -910,9 +910,9 @@ class CacheManager:
             
             if folder:
                 if recursive:
-                    # Recursive: match folder and all subfolders
-                    new_files_query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                    params.append(f"{folder}%")
+                    # Recursive: match folder and all subfolders (exact OR subpath)
+                    new_files_query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                    params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
                 else:
                     # Non-recursive: exact folder match only
                     new_files_query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1086,9 +1086,9 @@ class CacheManager:
             if folder:
                 # Use case-insensitive matching for folder paths (handles /media/Photo vs /media/photo)
                 if recursive:
-                    # Recursive: match folder and all subfolders
-                    query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                    params.append(f"{folder}%")
+                    # Recursive: match folder and all subfolders (exact OR subpath)
+                    query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                    params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
                 else:
                     # Non-recursive: exact folder match only
                     query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1269,9 +1269,9 @@ class CacheManager:
         
         if folder:
             if recursive:
-                # Recursive: match folder and all subfolders
-                query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                params.append(f"{folder}%")
+                # Recursive: match folder and all subfolders (exact OR subpath)
+                query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             else:
                 # Non-recursive: exact folder match only
                 query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1427,9 +1427,9 @@ class CacheManager:
         
         if folder:
             if recursive:
-                # Include subfolders
-                query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                params.append(f"{folder}%")
+                # Include subfolders (exact OR subpath)
+                query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             else:
                 # Exact folder match only
                 query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1977,8 +1977,8 @@ class CacheManager:
             )
             clear_params: list = []
             if folder:
-                clear_where += "  AND m.folder LIKE ?"
-                clear_params.append(folder.rstrip("/") + "%")
+                clear_where += "  AND (m.folder = ? OR m.folder LIKE ?)"
+                clear_params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             clear_where += ")"
             await self._db.execute(
                 f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL, burst_id = NULL {clear_where}",
@@ -1993,8 +1993,8 @@ class CacheManager:
         where_clause = "WHERE e.date_taken IS NOT NULL"
         params: list = []
         if folder:
-            where_clause += " AND m.folder LIKE ?"
-            params.append(folder.rstrip("/") + "%")
+            where_clause += " AND (m.folder = ? OR m.folder LIKE ?)"
+            params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
         if not overwrite_existing:
             where_clause += " AND (e.burst_count IS NULL OR e.burst_count = 0)"
 
@@ -2228,8 +2228,8 @@ class CacheManager:
         where = "WHERE e.burst_id IS NOT NULL AND m.file_size IS NOT NULL AND e.date_taken IS NOT NULL"
         params: list = []
         if folder:
-            where += " AND m.folder LIKE ?"
-            params.append(folder.rstrip("/") + "%")
+            where += " AND (m.folder = ? OR m.folder LIKE ?)"
+            params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
 
         query = f"""
             SELECT
