@@ -617,7 +617,7 @@ encode_file() {
       linuxserver/ffmpeg:latest \
       -hide_banner -loglevel warning \
       -i "$CIN" \
-      -map 0:v:0 -map 0:a:0? \
+      -map 0:V:0 -map 0:a:0? \
       -map_metadata 0 \
       -c:v copy \
       $PATH1_AUDIO_ARG \
@@ -657,7 +657,7 @@ encode_file() {
     COL_META="$( docker run --rm --entrypoint ffprobe \
         --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
         linuxserver/ffmpeg:latest \
-        -v quiet -select_streams v:0 \
+        -v quiet -select_streams V:0 \
           -show_entries stream=color_primaries,color_trc,color_space,color_range,pix_fmt,bit_rate,avg_frame_rate,r_frame_rate \
           -of default=noprint_wrappers=1 \
         "$CIN" 2>/dev/null )"
@@ -798,7 +798,7 @@ encode_file() {
       log "  Bitrate: source unknown → fallback ${TARGET_K}"
     fi
 
-    log "  CMD: codec=${VIDEO_CODEC_OUT} input_rate=${INPUT_RATE_FLAG:-<none>} vf=${VF_FLAG:-<none>} tag=${TAG_FLAG:-<none>} pix=${PIX_FMT_FLAG:-<none>}"
+    log "  CMD: src=${HOST_BASE} dst=${CONTAINER_BASE} codec=${VIDEO_CODEC_OUT} -b:v ${TARGET_K} -maxrate ${MAXRATE_K} -bufsize ${BUFSIZE_K} input_rate=${INPUT_RATE_FLAG:-<none>} vf=${VF_FLAG:-<none>} CF_P=${CF_P:-<none>} CF_T=${CF_T:-<none>} CF_S=${CF_S:-<none>} CF_R=${CF_R:-<none>} tag=${TAG_FLAG:-<none>} pix=${PIX_FMT_FLAG:-<none>} AUDIO=${AUDIO_ARG:-<none>}"
     docker run --rm \
       --device /dev/dri:/dev/dri \
       --mount type=bind,src="$HOST_BASE",dst="$CONTAINER_BASE" \
@@ -807,7 +807,7 @@ encode_file() {
       -fflags +genpts \
       $INPUT_RATE_FLAG \
       -i "$CIN" \
-      -map 0:v:0 -map 0:a:0? \
+      -map 0:V:0 -map 0:a:0? \
       -map_metadata 0 \
       -c:v "$VIDEO_CODEC_OUT" \
         -bf 0 \
@@ -842,7 +842,7 @@ encode_file() {
         -fflags +genpts \
         $INPUT_RATE_FLAG \
         -i "$CIN" \
-        -map 0:v:0 -map 0:a:0? \
+        -map 0:V:0 -map 0:a:0? \
         -map_metadata 0 \
         -c:v libx264 \
           -crf 23 \
