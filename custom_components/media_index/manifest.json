@@ -1,7 +1,7 @@
 {
   "domain": "media_index",
   "name": "Media Index",
-  "after_dependencies": [],
+  "after_dependencies": ["http"],
   "codeowners": ["@markaggar"],
   "config_flow": true,
   "dependencies": [],
