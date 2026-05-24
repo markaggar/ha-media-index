@@ -155,10 +155,10 @@ class MediaIndexStreamView(HomeAssistantView):
         except ValueError:
             return web.Response(status=400, text="Invalid exp parameter")
 
-        _LOGGER.info("Stream request: file_id=%s filename=%s from %s", file_id, filename, request.remote)
+        _LOGGER.debug("Stream request: file_id=%s filename=%s from %s", file_id, filename, request.remote)
 
         if time.time() > exp:
-            _LOGGER.info("Stream request rejected: token expired (exp=%s)", exp_str)
+            _LOGGER.warning("Stream request rejected: token expired (exp=%s)", exp_str)
             return web.Response(status=403, text="Token expired")
 
         secret: bytes = hass.data.get(f"{DOMAIN}.stream_secret", b"")

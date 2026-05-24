@@ -1,7 +1,5 @@
 """Media Index integration for Home Assistant."""
 import asyncio
-import hashlib
-import hmac
 import logging
 import mimetypes
 import os

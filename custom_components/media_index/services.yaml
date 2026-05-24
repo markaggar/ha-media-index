@@ -170,6 +170,22 @@ get_ordered_files:
       required: false
       selector:
         text:
+    timestamp_from:
+      name: Timestamp From
+      description: Include only files taken on or after this Unix timestamp (integer seconds).
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    timestamp_to:
+      name: Timestamp To
+      description: Include only files taken on or before this Unix timestamp (integer seconds).
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
     after_value:
       name: After Value (cursor)
       description: >

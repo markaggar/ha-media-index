@@ -1803,7 +1803,7 @@ class CacheManager:
         """
         pattern = f"%{path_fragment}%"
         async with self._db.execute(
-            "SELECT * FROM media_files WHERE path LIKE ? LIMIT ?",
+            "SELECT * FROM media_files WHERE path LIKE ? COLLATE NOCASE LIMIT ?",
             (pattern, limit),
         ) as cursor:
             rows = await cursor.fetchall()
