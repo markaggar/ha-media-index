@@ -204,7 +204,8 @@ Add `--recurse` to walk all subfolders of `FOLDER` instead of just its root leve
 You set these keywords in **Synology Photos** (or any IPTC/XMP keyword editor):
 
 | Keyword | Coordinates source |
-|---------|--------------------|| `fixgps` | From `--ref REF_FILE` — a photo that already has the correct GPS location |
+|---------|--------------------|
+| `fixgps` | From `--ref REF_FILE` — a photo that already has the correct GPS location |
 | `fixgps:47.6205:-122.3493` | Embedded in the tag itself (colon-separated decimal coordinates) |
 
 Both forms can coexist in the same folder: files tagged `fixgps:LAT:LON` use the embedded coords; files tagged `fixgps` use the `--ref` file's coords.
