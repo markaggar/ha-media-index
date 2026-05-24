@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
   - All three services are registered via `cast_manager.py` containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
 
+- **Blueprint: Auto-start Cast Slideshow on TV** (`blueprints/automation/auto_cast_slideshow.yaml`): Ready-to-use HA automation blueprint that starts a cast slideshow when a Roku TV returns to the Home screen, and stops it when another app launches or the TV turns off
+  - All `start_cast_slideshow` parameters exposed as blueprint inputs (interval, file type, favorites, date filters, anniversary mode, sync group, etc.)
+  - Sync group auto-generated from the media player entity ID with optional override — tells you the value to enter in a paired Media Card
+  - One blueprint instance per TV; create multiple automations for multiple TVs
+
+- **`fix_videos.sh` NAS Utility** (`NAS_utils/fix_videos.sh`): Bash script that normalises video files in a single Docker QSV hardware-encode pass — fixes misoriented portrait videos (EXIF rotation 90°/270°), converts legacy formats (WMV/AVI/MTS/MOV) to MP4, and re-encodes browser-incompatible codecs to HEVC or H.264. Supersedes the earlier `fix_video_rotation.sh`. See `NAS_utils/FIX_VIDEOS.md` for full documentation.
+
 - **Date Filters for `get_ordered_files`**: Added `date_from`, `date_to`, `timestamp_from`, and `timestamp_to` parameters to the `get_ordered_files` service, matching the filter capability already present in `get_random_items`
   - `date_from` / `date_to`: accept `YYYY-MM-DD` strings; `date_to` is inclusive (end of day)
   - `timestamp_from` / `timestamp_to`: accept Unix integer timestamps for precise range queries

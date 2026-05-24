@@ -98,6 +98,35 @@ The cast slideshow services work entirely standalone — no Lovelace card or bro
 
 These can be triggered from HA automations (e.g. turn on the TV slideshow at a set time), scripts, or the Developer Tools Actions panel directly.
 
+### Blueprint: Auto-start Cast Slideshow on TV
+
+A ready-to-use HA automation blueprint (`blueprints/automation/auto_cast_slideshow.yaml`) starts the cast slideshow automatically when a Roku TV returns to the Home screen and stops it when another app launches or the TV turns off.
+
+- Import via **Settings → Automations → Blueprints → Import Blueprint** using the raw GitHub URL, or copy the file into your HA `config/blueprints/automation/` folder
+- All `start_cast_slideshow` parameters are exposed in the blueprint UI — no manual YAML editing required
+- Sync group is auto-generated from the media player entity ID (e.g. `media_player.office_tv` → `autocast_office_tv`); the blueprint UI displays the value so you can copy it into a paired Media Card
+- Create one automation instance per TV for independent control of multiple TVs
+
+## NAS Utilities
+
+The `NAS_utils/` folder contains standalone Bash scripts for Synology NAS (or any Linux host with Docker and exiftool) to prepare your media library before or alongside indexing.
+
+### `fix_videos.sh`
+
+Normalises video files in a single Docker QSV hardware-encode pass:
+- **Rotation fix** — re-encodes misoriented portrait videos (EXIF rotation 90°/270°) so they display correctly in every player
+- **Format conversion** — converts WMV, AVI, MTS, and MOV files to MP4
+- **Codec normalisation** — re-encodes non-browser-safe video codecs to HEVC (default) or H.264; transcodes non-AAC audio to AAC
+- Incremental scanning with per-folder state files; originals preserved via backup-root or `_hp` rename
+- See [`NAS_utils/FIX_VIDEOS.md`](NAS_utils/FIX_VIDEOS.md) for full documentation
+
+### `gps_tag.sh`
+
+Backfills GPS coordinates into photos and videos that lack them by matching timestamps against nearby GPS-enabled files (e.g. phone photos taken at the same time):
+- Supports auto mode, explicit donor folders, DSLR recursive backfills, and merged multi-phone donor caches
+- Writes GPS to EXIF (JPG) and QuickTime user-data atoms (MP4/MOV)
+- See [`NAS_utils/GPS_TAG.md`](NAS_utils/GPS_TAG.md) for full documentation
+
 ## Installation
 
 ### HACS (Recommended)
