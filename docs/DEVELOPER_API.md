@@ -928,13 +928,13 @@ data:
 
 #### `stop_cast_slideshow`
 
-Stops a specific cast session (or all sessions if `entity_id` is omitted):
+Stops a specific cast session (or all sessions if `media_player_entity_id` is omitted):
 
 ```yaml
 # Stop one session
 service: media_index.stop_cast_slideshow
 data:
-  entity_id: media_player.living_room_tv
+  media_player_entity_id: media_player.living_room_tv
 
 # Stop all sessions
 service: media_index.stop_cast_slideshow
