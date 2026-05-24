@@ -178,7 +178,7 @@ class MediaScanner:
                     _LOGGER.warning("Path does not exist: %s", scan_path)
                     continue
                 
-                _LOGGER.info("Scanning: %s", scan_path)
+                _LOGGER.debug("Scanning: %s", scan_path)
                 
                 # Run blocking directory walk in executor
                 if self.hass:
@@ -431,7 +431,7 @@ class MediaScanner:
                     elif force:
                         _LOGGER.debug("Force re-extraction requested for: %s", file_path)
                     else:
-                        _LOGGER.info("File modification time changed, re-extracting metadata: %s", file_path)
+                        _LOGGER.debug("File modification time changed, re-extracting metadata: %s", file_path)
             
             # Extract EXIF first for images to get width/height/orientation
             exif_data = None

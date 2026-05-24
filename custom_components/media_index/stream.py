@@ -206,7 +206,7 @@ class MediaIndexStreamView(HomeAssistantView):
             _ext = os.path.splitext(file_path)[1].lower()
             mime_type = _MIME_FALLBACK.get(_ext, 'application/octet-stream')
 
-        _LOGGER.info("Streaming file_id=%d path=%s mime=%s", fid, file_path, mime_type)
+        _LOGGER.debug("Streaming file_id=%d path=%s mime=%s", fid, file_path, mime_type)
 
         # For JPEG images: transcode via Pillow to ensure Roku xcast compatibility.
         # This re-encodes with standard Huffman/quantization tables, strips oversized
@@ -219,7 +219,7 @@ class MediaIndexStreamView(HomeAssistantView):
                 clean = await hass.async_add_executor_job(
                     _transcode_jpeg_for_roku, file_path
                 )
-                _LOGGER.info(
+                _LOGGER.debug(
                     "JPEG transcode: %s → %d bytes for file_id=%d",
                     file_path.rsplit('/', 1)[-1], len(clean), fid,
                 )

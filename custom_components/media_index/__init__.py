@@ -926,7 +926,7 @@ def _get_entry_id_from_call(hass: HomeAssistant, call: ServiceCall) -> str:
     # Fallback: use first available entry_id (single-instance compatibility)
     if DOMAIN in hass.data and hass.data[DOMAIN]:
         entry_id = next(iter(hass.data[DOMAIN].keys()))
-        _LOGGER.info("No target specified, using first entry_id: %s", entry_id)
+        _LOGGER.debug("No target specified, using first entry_id: %s", entry_id)
         return entry_id
     
     raise ValueError("No Media Index integration instance found")
@@ -1129,7 +1129,7 @@ def _register_services(hass: HomeAssistant):
             
             try:
                 reference_path = _convert_uri_to_path(media_source_uri, base_folder, media_source_prefix)
-                _LOGGER.info("Converted media_source_uri to path: %s -> %s", media_source_uri, reference_path)
+                _LOGGER.debug("Converted media_source_uri to path: %s -> %s", media_source_uri, reference_path)
             except ValueError as e:
                 _LOGGER.error("Failed to convert URI to path: %s", e)
                 return {"error": str(e), "items": []}
@@ -1176,7 +1176,7 @@ def _register_services(hass: HomeAssistant):
                     location_tolerance_meters=location_tolerance,
                     sort_order=sort_order,
                 )
-            _LOGGER.info("Found %d burst photos for %s", len(items), reference_path)
+            _LOGGER.debug("Found %d burst photos for %s", len(items), reference_path)
             
         elif mode == "anniversary":
             # Anniversary mode - NOT YET IMPLEMENTED
@@ -1341,7 +1341,7 @@ def _register_services(hass: HomeAssistant):
                 _LOGGER.warning("Unsupported file type for rating: %s", file_ext)
             
             if success:
-                _LOGGER.info("✅ Wrote rating=%d to %s", rating, file_path)
+                _LOGGER.debug("Wrote rating=%d to %s", rating, file_path)
             else:
                 _LOGGER.warning("❌ Failed to write rating to %s (database updated=%s)", file_path, db_success)
             
@@ -1553,7 +1553,7 @@ def _register_services(hass: HomeAssistant):
                     if not dry_run:
                         # Remove from database
                         await cache_manager.delete_file(file_path)
-                        _LOGGER.info("Removed stale entry: %s", file_path)
+                        _LOGGER.debug("Removed stale entry: %s", file_path)
                 
                 # Yield control every 10 files
                 if checked % 10 == 0:

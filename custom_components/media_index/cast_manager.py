@@ -295,7 +295,7 @@ class RokuEcpTransport:
             params += "&r=0.0&ri=0.0"  # rotation already baked in by exif_transpose
 
         ecp_url = YarlURL(f"http://{roku_host}:8060/input/687485?{params}", encoded=True)
-        _LOGGER.info(
+        _LOGGER.debug(
             "Roku ECP push → %s  type=%s  file_id=%s  title=%s",
             roku_host,
             file_type,
@@ -321,7 +321,7 @@ class RokuEcpTransport:
                         "Roku ECP push: HTTP %s for '%s': %s", resp.status, title, body
                     )
                 else:
-                    _LOGGER.info("Roku ECP push: sent %s → HTTP 200 OK", ecp_url)
+                    _LOGGER.debug("Roku ECP push: sent %s → HTTP 200 OK", ecp_url)
         except Exception as e:  # noqa: BLE001
             _LOGGER.error("Roku ECP push failed for %s: %s", roku_host, e)
             return
