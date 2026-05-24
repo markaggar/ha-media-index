@@ -73,7 +73,7 @@ The slideshow and mirror services work with **any HA `media_player` entity** (Ch
 - **EXIF orientation correction** — rotated phone photos are physically transposed before serving so the Roku always receives correctly-oriented pixels at the right aspect ratio
 - **Short signed stream URLs** — HMAC-signed URL generated per cast; the Roku fetches the image directly from HA, bypassing the 255-character URL length limit of standard HA auth tokens
 
-### �🗑️ File Management
+### 📁🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
 - **Mark for editing** - moves files to `_Edit` folder
 - **Database cleanup** - automatically removes deleted files from index
