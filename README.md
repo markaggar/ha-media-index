@@ -67,6 +67,7 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Short signed stream URLs** — a short HMAC-signed URL is generated per cast; the Roku fetches the image directly from HA, bypassing the 255-character URL length limit of standard HA auth tokens
 - **`stop_cast` service** — sends an ECP `keypress/Home` to clear the image from the TV when a single direct cast ends
 - **Requirements**: Roku HA integration configured for the target device; [xcast channel](https://channelstore.roku.com/details/687485) installed on the Roku
+- **Automation support** — the sensor's `cast_active` (boolean) and `cast_targets` (list of entity IDs) attributes update immediately when a session starts or stops, so automations can trigger on cast state changes without polling. See the [Sensors](#sensors) section.
 
 ### �🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
@@ -247,18 +248,35 @@ The integration provides additional services for advanced use cases and Media Ca
 
 ## Sensors
 
-The integration creates the following sensors for each configured entry:
+The integration creates one sensor per configured entry. Most people never look at the attributes, but they are useful for automations and dashboards.
 
 ### `sensor.media_index_{entry_name}_total_files`
 
-**State:** Total number of files in database
+**State:** Total number of indexed files (images + videos)
 
 **Attributes:**
-- `scan_status`: Current scan status (idle, scanning, error)
-- `last_scan_time`: Timestamp of last scan
-- `total_folders`: Number of watched folders
-- `geocoded_files`: Number of files with location data
-- `favorited_files`: Number of favorited files
+
+| Attribute | Description |
+|---|---|
+| `scan_status` | Current scan state: `idle`, `scanning`, or `error` |
+| `last_scan_time` | ISO timestamp of the last completed scan |
+| `total_folders` | Number of distinct folders in the index |
+| `total_images` | Number of indexed image files |
+| `total_videos` | Number of indexed video files |
+| `watched_folders` | List of folders being monitored for changes |
+| `media_path` | Base media path for this integration instance |
+| `media_source_uri` | `media-source://` URI for the base path |
+| `libmediainfo_available` | `true` if libmediainfo is installed (required for video GPS/date extraction) |
+| `cache_size_mb` | SQLite database file size in MB |
+| `geocode_enabled` | `true` if reverse geocoding is configured |
+| `geocode_cache_entries` | Number of cached geocode results |
+| `geocode_cache_hit_rate` | Cache hit percentage (reduces Nominatim API calls) |
+| `files_with_location` | Number of files with GPS coordinates |
+| `geocode_attribution` | Required OpenStreetMap attribution text |
+| `cast_active` | `true` if any cast slideshow session is currently running |
+| `cast_targets` | List of `media_player` entity IDs with active cast sessions |
+
+The `cast_active` and `cast_targets` attributes update immediately (no polling) when a session starts or stops, making them suitable for automation triggers — for example, dimming lights when a slideshow starts.
 
 ## Performance
 
