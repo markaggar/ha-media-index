@@ -53,6 +53,23 @@ class CastSessionManager:
 
     def __init__(self) -> None:
         self._sessions: dict[str, asyncio.Task] = {}
+        self._update_callbacks: list = []
+
+    def register_update_callback(self, callback) -> None:
+        """Register a callable to be invoked whenever session state changes."""
+        self._update_callbacks.append(callback)
+
+    def _notify_update(self) -> None:
+        """Invoke all registered callbacks (e.g. to push sensor state update)."""
+        for cb in self._update_callbacks:
+            try:
+                cb()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def active_targets(self) -> list[str]:
+        """Return entity_ids that currently have a running cast session."""
+        return [t for t, task in self._sessions.items() if not task.done()]
 
     def start(self, target: str, hass, coro) -> None:
         """Cancel any prior session for *target* and start a new one."""
@@ -63,6 +80,7 @@ class CastSessionManager:
         task = hass.async_create_task(coro, name=f"media_index_cast_{target}")
         self._sessions[target] = task
         _LOGGER.info("Cast session started for %s", target)
+        self._notify_update()
 
     def stop(self, target: str | None = None) -> None:
         """Cancel the session for *target*, or all sessions if target is None."""
@@ -75,6 +93,7 @@ class CastSessionManager:
                 _LOGGER.debug("No active cast session found for %s", target)
         else:
             self.stop_all()
+        self._notify_update()
 
     def stop_all(self) -> None:
         """Cancel all active sessions. Called on integration unload."""
@@ -85,6 +104,7 @@ class CastSessionManager:
                 task.cancel()
         if targets:
             _LOGGER.info("All cast sessions stopped (%d)", len(targets))
+        self._notify_update()
 
     def is_active(self, target: str) -> bool:
         """Return True if there is a running session for *target*."""
