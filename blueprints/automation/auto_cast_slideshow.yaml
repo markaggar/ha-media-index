@@ -199,7 +199,7 @@ triggers:
   - trigger: state
     entity_id: !input media_player
     attribute: app_id
-    to: 562859
+    to: "562859"
     for:
       seconds: !input start_delay
     id: Start Cast
@@ -214,7 +214,7 @@ triggers:
   - trigger: state
     entity_id: !input media_player
     attribute: app_id
-    from: 687485
+    from: "687485"
     for:
       seconds: 0
     id: Stop Cast
@@ -222,7 +222,7 @@ triggers:
   - trigger: state
     entity_id: !input media_player
     attribute: app_id
-    from: 562859
+    from: "562859"
     for:
       seconds: 0
     id: Stop Cast
@@ -238,7 +238,7 @@ actions:
           - condition: state
             entity_id: !input media_player
             attribute: app_id
-            state: 562859
+            state: "562859"
         sequence:
           # Build the service data dict, omitting optional fields that were
           # left blank so the service schema validation is not triggered for
@@ -292,7 +292,7 @@ actions:
               - condition: state
                 entity_id: !input media_player
                 attribute: app_id
-                state: 687485
+                state: "687485"
         sequence:
           - action: media_index.stop_cast_slideshow
             data:
