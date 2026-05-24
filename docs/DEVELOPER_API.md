@@ -904,6 +904,110 @@ Media Card v5.6.5+ uses this to eliminate 404 broken image icons:
 - Fix 404 errors from stale database entries
 - Periodic maintenance to sync database with filesystem
 
+### 14. Cast Slideshow Services
+
+**New in v1.8** - Start an autonomous slideshow on a Roku TV, mirror a card's navigation to a TV in real time, or stop an active cast session.
+
+#### `start_cast_slideshow`
+
+Runs a random-batch slideshow on a Roku `media_player` entity — no browser tab or card required.
+
+```yaml
+service: media_index.start_cast_slideshow
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  target_entity_id: media_player.living_room_tv
+  interval: 10          # seconds between items (default 10)
+  folder: /media/photo/Vacation   # optional folder filter
+  file_type: image      # optional: image | video | all (default all)
+  date_from: "2024-01-01"         # optional ISO date filter
+  date_to: "2024-12-31"
+  favorites_only: false
+```
+
+#### `stop_cast_slideshow`
+
+Stops a specific cast session (or all sessions if `entity_id` is omitted):
+
+```yaml
+# Stop one session
+service: media_index.stop_cast_slideshow
+data:
+  entity_id: media_player.living_room_tv
+
+# Stop all sessions
+service: media_index.stop_cast_slideshow
+```
+
+#### `mirror_to_cast`
+
+Mirrors a Media Card's navigation to a TV in real time. The TV follows the card whenever the user navigates.
+
+```yaml
+service: media_index.mirror_to_cast
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  target_entity_id: media_player.living_room_tv
+  sync_group: my_sync_group   # must match card's sync_group config
+```
+
+#### Sensor Attributes for Automation
+
+Every `sensor.media_index_*_total_files` entity exposes two attributes that update immediately when a cast session starts or stops:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `cast_active` | `boolean` | `true` if at least one cast session is running |
+| `cast_targets` | `list[str]` | Entity IDs of all active cast targets |
+
+These attributes are updated synchronously via a callback — there is no polling delay.
+
+**Automation: react when a slideshow starts**
+
+```yaml
+automation:
+  - alias: "Cast slideshow started"
+    trigger:
+      - platform: state
+        entity_id: sensor.media_index_media_photo_photolibrary_total_files
+        attribute: cast_active
+        to: true
+    action:
+      - service: light.turn_off
+        target:
+          entity_id: light.living_room
+```
+
+**Automation: react when all slideshows stop**
+
+```yaml
+automation:
+  - alias: "Cast slideshow stopped"
+    trigger:
+      - platform: state
+        entity_id: sensor.media_index_media_photo_photolibrary_total_files
+        attribute: cast_active
+        to: false
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.living_room
+```
+
+**Template: check if a specific TV is in a cast session**
+
+```yaml
+condition:
+  - condition: template
+    value_template: >
+      {{ 'media_player.living_room_tv' in
+         state_attr('sensor.media_index_media_photo_photolibrary_total_files', 'cast_targets') }}
+```
+
+**Note:** Cast sessions are in-memory only. Sessions do not persist across HA restarts. When HA restarts, `cast_active` will return to `false` and `cast_targets` will be empty.
+
 ## Response Handling
 
 ### Success Response Pattern

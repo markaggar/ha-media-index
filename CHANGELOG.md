@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use when stopping a cast session to prevent the last image remaining frozen on the TV
   - Parameter: `roku_entity_id` (required)
 
+- **Cast State Sensor Attributes**: The `sensor.media_index_*_total_files` entity now exposes `cast_active` (boolean) and `cast_targets` (list of entity IDs) attributes, updated immediately when a cast session starts or stops — no polling delay. Enables automations that trigger on cast state changes (e.g. dim lights when slideshow starts). See `DEVELOPER_API.md` §14 for automation examples.
+
 - **Cast Session Services** (`mirror_to_cast`, `start_cast_slideshow`, `stop_cast_slideshow`): Three services that power continuous cast sessions
   - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
   - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
