@@ -917,7 +917,7 @@ service: media_index.start_cast_slideshow
 target:
   entity_id: sensor.media_index_media_photo_photolibrary_total_files
 data:
-  target_entity_id: media_player.living_room_tv
+  media_player_entity_id: media_player.living_room_tv
   interval: 10          # seconds between items (default 10)
   folder: /media/photo/Vacation   # optional folder filter
   file_type: image      # optional: image | video | all (default all)
