@@ -127,28 +127,62 @@ class RokuEcpTransport:
     """
 
     _XCAST_APP_NAME = "XCast Receiver"
+    _XCAST_APP_ID = "687485"       # Roku channel ID for xcast
     _XCAST_LAUNCH_TIMEOUT = 10.0  # seconds to wait for xcast to start
-    _XCAST_READY_PAUSE = 0.3      # brief pause after xcast reports ready
+    _XCAST_READY_PAUSE = 3.0      # pause after xcast appears active before resending;
+                                  # xcast's media pipeline needs time to init after
+                                  # the app is foregrounded (~0.3s is too soon)
+    _XCAST_ECP_POLL_INTERVAL = 0.3  # how often to poll ECP /query/active-app
 
     def __init__(self, hass, roku_host: str) -> None:
         self._hass = hass
         self._roku_host = roku_host
 
     def _is_xcast_active(self, hass, entity_id: str) -> bool:
-        """Return True if the Roku entity currently has xcast in the foreground."""
+        """Return True if the Roku entity currently has xcast in the foreground.
+
+        Uses HA entity state (may lag by up to the Roku polling interval).
+        Prefer _is_xcast_active_ecp() for time-sensitive checks.
+        """
         state = hass.states.get(entity_id)
         return bool(state and state.attributes.get("app_name") == self._XCAST_APP_NAME)
 
-    async def _wait_for_xcast(self, hass, entity_id: str) -> bool:
-        """Poll HA entity state until xcast is in the foreground or timeout.
+    async def _is_xcast_active_ecp(self, session) -> bool:
+        """Query the Roku ECP /query/active-app endpoint directly.
+
+        Returns True immediately based on the Roku's live state, without
+        waiting for HA's entity polling cycle to catch up.
+        """
+        from yarl import URL as YarlURL
+        try:
+            url = YarlURL(f"http://{self._roku_host}:8060/query/active-app")
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    active = self._XCAST_APP_ID in text
+                    _LOGGER.debug(
+                        "Roku ECP /query/active-app → xcast_active=%s (%s)",
+                        active, text[:120].replace("\n", " "),
+                    )
+                    return active
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Roku ECP /query/active-app failed: %s", exc)
+        return False
+
+    async def _wait_for_xcast(self, session) -> bool:
+        """Poll Roku ECP directly until xcast is in the foreground or timeout.
+
+        Uses /query/active-app rather than HA entity state so we see the
+        real app switch within ~300 ms instead of waiting for HA's slow
+        Roku polling cycle (up to 10-30 s).
 
         Returns True if xcast became active within the timeout window.
         """
-        deadline = hass.loop.time() + self._XCAST_LAUNCH_TIMEOUT
-        while hass.loop.time() < deadline:
-            if self._is_xcast_active(hass, entity_id):
+        deadline = asyncio.get_running_loop().time() + self._XCAST_LAUNCH_TIMEOUT
+        while asyncio.get_running_loop().time() < deadline:
+            if await self._is_xcast_active_ecp(session):
                 return True
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(self._XCAST_ECP_POLL_INTERVAL)
         return False
 
     async def push(self, hass, entity_id: str, media_url: str, file_type: str, item: dict | None = None) -> None:
@@ -250,13 +284,12 @@ class RokuEcpTransport:
         )
 
         # Capture whether xcast was already in the foreground BEFORE we push.
-        # If it wasn't, the push will launch xcast, but xcast needs a few
-        # seconds to initialise before it can display media.  We wait for the
-        # HA entity's app_name to reach "XCast Receiver" and then resend so
-        # the first item is actually shown.
-        xcast_was_active = self._is_xcast_active(hass, entity_id)
-
+        # Use ECP directly rather than HA entity state — the entity's app_name
+        # lags by the Roku polling interval (up to 10-30 s), whereas ECP
+        # reflects live Roku state within ~100 ms.
         session = async_get_clientsession(hass)
+        xcast_was_active = await self._is_xcast_active_ecp(session)
+
         try:
             async with session.post(ecp_url, data=b"") as resp:
                 if resp.status != 200:
@@ -278,7 +311,7 @@ class RokuEcpTransport:
                 "Roku ECP: xcast was not running on %s — waiting for it to initialise",
                 entity_id,
             )
-            started = await self._wait_for_xcast(hass, entity_id)
+            started = await self._wait_for_xcast(session)
             if started:
                 # Brief pause to let xcast fully render its input pipeline.
                 await asyncio.sleep(self._XCAST_READY_PAUSE)

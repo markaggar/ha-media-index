@@ -2757,21 +2757,37 @@ def _register_services(hass: HomeAssistant):
         # For Roku targets, send a Home keypress to dismiss xcast from the TV.
         # Cancelling the HA task only stops new pushes — the Roku's xcast app
         # keeps playing the last item until we explicitly navigate away.
+        # Only press Home if XCast Receiver is currently the active app; if the
+        # user has already switched to Netflix / YouTube / etc. we must not
+        # interrupt them.
         if target_entity_id:
             roku_host = _get_roku_host(hass, target_entity_id)
             if roku_host:
-                ecp_url = YarlURL(f"http://{roku_host}:8060/keypress/Home")
-                session = async_get_clientsession(hass)
-                try:
-                    async with session.post(ecp_url, data=b"") as resp:
-                        _LOGGER.info(
-                            "stop_cast_slideshow: Home keypress → %s (%s) HTTP %s",
-                            target_entity_id, roku_host, resp.status,
+                entity_state = hass.states.get(target_entity_id)
+                xcast_active = bool(
+                    entity_state
+                    and entity_state.attributes.get("app_name") == "XCast Receiver"
+                )
+                if xcast_active:
+                    ecp_url = YarlURL(f"http://{roku_host}:8060/keypress/Home")
+                    session = async_get_clientsession(hass)
+                    try:
+                        async with session.post(ecp_url, data=b"") as resp:
+                            _LOGGER.info(
+                                "stop_cast_slideshow: Home keypress → %s (%s) HTTP %s",
+                                target_entity_id, roku_host, resp.status,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        _LOGGER.warning(
+                            "stop_cast_slideshow: Home keypress failed for %s: %s",
+                            target_entity_id, exc,
                         )
-                except Exception as exc:  # noqa: BLE001
-                    _LOGGER.warning(
-                        "stop_cast_slideshow: Home keypress failed for %s: %s",
-                        target_entity_id, exc,
+                else:
+                    _LOGGER.debug(
+                        "stop_cast_slideshow: skipping Home keypress for %s"
+                        " — XCast Receiver is not the active app (app_name=%r)",
+                        target_entity_id,
+                        entity_state.attributes.get("app_name") if entity_state else None,
                     )
 
     # Register all services
