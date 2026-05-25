@@ -1,0 +1,301 @@
+blueprint:
+  name: Auto-start Cast Slideshow on TV
+  description: >
+    Uses Media Index to automatically start a cast slideshow when a TV is on
+    the home screen, and stops it when another app takes over or the TV turns off.
+    One automation instance per TV — create multiple automations for multiple TVs.
+    The sync_group is auto-generated from the media player entity ID.
+  domain: automation
+  input:
+    media_player:
+      name: Media Player
+      description: The TV or cast-capable media player to control.
+      selector:
+        entity:
+          domain: media_player
+
+    media_index_sensor:
+      name: Media Index Sensor
+      description: The media_index sensor entity to use as the slideshow source.
+      selector:
+        entity:
+          integration: media_index
+
+    start_delay:
+      name: Start Delay
+      description: >
+        How long (seconds) the TV must be on the Home screen before the
+        slideshow starts. Prevents spurious starts during channel switching.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+
+    interval:
+      name: Slideshow Interval
+      description: How long each item is displayed (seconds).
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: seconds
+          mode: box
+
+    video_overlap:
+      name: Video Overlap
+      description: Seconds of overlap between consecutive videos.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: seconds
+          mode: box
+
+    file_type:
+      name: File Type
+      description: Restrict the slideshow to images, videos, or leave blank for all media.
+      default: ""
+      selector:
+        select:
+          options:
+            - label: All media (images and videos)
+              value: ""
+            - label: Images only
+              value: image
+            - label: Videos only
+              value: video
+
+    favorites_only:
+      name: Favorites Only
+      description: Only show files marked as favorites.
+      default: false
+      selector:
+        boolean:
+
+    recursive:
+      name: Recursive
+      description: Include files in sub-folders of the media index source.
+      default: true
+      selector:
+        boolean:
+
+    also_write_sync:
+      name: Write Sync File
+      description: >
+        Write a sync file so paired Media Cards can follow the slideshow.
+        Required if a Media Card on another device should mirror what is
+        being cast.
+      default: false
+      selector:
+        boolean:
+
+    priority_new_files:
+      name: Priority for New Files
+      description: Prioritise recently added files in the random selection.
+      default: false
+      selector:
+        boolean:
+
+    folder:
+      name: Folder Filter
+      description: >
+        Restrict the slideshow to a specific sub-folder path. Leave blank
+        to use all folders in the media index source.
+      default: ""
+      selector:
+        text:
+
+    date_from:
+      name: Date From
+      description: >
+        Only include media on or after this date (YYYY-MM-DD). Leave blank
+        for no lower date limit.
+      default: ""
+      selector:
+        text:
+
+    date_to:
+      name: Date To
+      description: >
+        Only include media on or before this date (YYYY-MM-DD). Leave blank
+        for no upper date limit.
+      default: ""
+      selector:
+        text:
+
+    anniversary_month:
+      name: Anniversary Month
+      description: >
+        Show only media from this calendar month (1–12) across all years.
+        Leave blank to disable anniversary mode.
+      default: ""
+      selector:
+        text:
+
+    anniversary_day:
+      name: Anniversary Day
+      description: Day of month for anniversary filtering (1–31). Used with Anniversary Month.
+      default: ""
+      selector:
+        text:
+
+    anniversary_window_days:
+      name: Anniversary Window
+      description: >
+        Number of days either side of the anniversary date to include.
+        0 means exact date only.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: days
+          mode: box
+
+    sync_group:
+      name: Sync Group
+      description: >
+        Name used to link this slideshow with a Media Card so the card can
+        follow along. Leave blank to auto-generate from the media player entity
+        ID (e.g. media_player.office_tv → autocast_office_tv). If you set a
+        custom value here, enter the same value in the Media Card's
+        "Sync Group" configuration field.
+      default: ""
+      selector:
+        text:
+
+# Capture all inputs as template variables so they can be used in
+# Jinja2 templates (including conditional service data construction).
+variables:
+  media_player_id: !input media_player
+  _interval: !input interval
+  _video_overlap: !input video_overlap
+  _also_write_sync: !input also_write_sync
+  _recursive: !input recursive
+  _favorites_only: !input favorites_only
+  _priority_new_files: !input priority_new_files
+  _file_type: !input file_type
+  _folder: !input folder
+  _date_from: !input date_from
+  _date_to: !input date_to
+  _anniversary_month: !input anniversary_month
+  _anniversary_day: !input anniversary_day
+  _anniversary_window_days: !input anniversary_window_days
+  _sync_group: !input sync_group
+
+triggers:
+  - trigger: state
+    entity_id: !input media_player
+    to: "on"
+    for:
+      seconds: !input start_delay
+    id: Start Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_id
+    to: "562859"
+    for:
+      seconds: !input start_delay
+    id: Start Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    to: "off"
+    for:
+      seconds: 0
+    id: Stop Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_id
+    from: "687485"
+    for:
+      seconds: 0
+    id: Stop Cast
+
+  - trigger: state
+    entity_id: !input media_player
+    attribute: app_id
+    from: "562859"
+    for:
+      seconds: 0
+    id: Stop Cast
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - Start Cast
+          - condition: state
+            entity_id: !input media_player
+            attribute: app_id
+            state: "562859"
+        sequence:
+          # Build the service data dict, omitting optional fields that were
+          # left blank so the service schema validation is not triggered for
+          # unset optional parameters (file_type, folder, date_*, anniversary_*).
+          - variables:
+              _service_data: >
+                {%- set _sg = _sync_group if (_sync_group | default('')) not in ['', none] else 'autocast_' + media_player_id | replace('media_player.', '') -%}
+                {%- set d = {
+                  'media_player_entity_id': media_player_id,
+                  'sync_group': _sg,
+                  'interval': _interval,
+                  'video_overlap': _video_overlap,
+                  'also_write_sync': _also_write_sync,
+                  'recursive': _recursive,
+                  'favorites_only': _favorites_only,
+                  'priority_new_files': _priority_new_files
+                } -%}
+                {%- if _file_type | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'file_type': _file_type}) -%}
+                {%- endif -%}
+                {%- if _folder | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'folder': _folder}) -%}
+                {%- endif -%}
+                {%- if _date_from | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'date_from': _date_from}) -%}
+                {%- endif -%}
+                {%- if _date_to | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'date_to': _date_to}) -%}
+                {%- endif -%}
+                {%- if _anniversary_month | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'anniversary_month': _anniversary_month}) -%}
+                {%- endif -%}
+                {%- if _anniversary_day | default('') not in ['', none] -%}
+                  {%- set d = d | combine({'anniversary_day': _anniversary_day}) -%}
+                {%- endif -%}
+                {%- if (_anniversary_window_days | default(0) | int) > 0 -%}
+                  {%- set d = d | combine({'anniversary_window_days': _anniversary_window_days | int}) -%}
+                {%- endif -%}
+                {{ d }}
+          - action: media_index.start_cast_slideshow
+            target:
+              entity_id: !input media_index_sensor
+            data: "{{ _service_data }}"
+
+      - conditions:
+          - condition: trigger
+            id:
+              - Stop Cast
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input media_player
+                attribute: app_id
+                state: "687485"
+        sequence:
+          - action: media_index.stop_cast_slideshow
+            data:
+              media_player_entity_id: !input media_player
+
+mode: single

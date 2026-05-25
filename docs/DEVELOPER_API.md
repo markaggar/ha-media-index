@@ -92,7 +92,7 @@ const cloudItems = await this.hass.callWS({
 **All Media Index services** support the `target` parameter:
 
 - ✅ `get_random_items` - Random selection (enhanced in v1.3, anniversary mode in v1.5)
-- ✅ `get_ordered_files` - Sequential retrieval (new in v1.3)
+- ✅ `get_ordered_files` - Sequential retrieval with date filters and cursor pagination (new in v1.3, date filters in v1.8)
 - ✅ `get_related_files` - Burst detection and related photos (new in v1.5)
 - ✅ `update_burst_metadata` - Save burst review session data (new in v1.5)
 - ✅ `check_file_exists` - Lightweight filesystem validation (new in v1.5.6)
@@ -103,6 +103,9 @@ const cloudItems = await this.hass.callWS({
 - ✅ `restore_edited_files` - Restore edited files (enhanced in v1.3)
 - ✅ `geocode_file` - Geocoding (enhanced in v1.3)
 - ✅ `scan_folder`
+- ✅ `start_cast_slideshow` - Autonomous TV slideshow; no card required (new in v1.8)
+- ✅ `stop_cast_slideshow` - Stop slideshow and dismiss xcast (new in v1.8)
+- ✅ `mirror_to_cast` - Real-time card-to-TV mirroring via sync group (new in v1.8)
 
 ### Configuration in Custom Cards
 
@@ -289,7 +292,7 @@ Perfect for "What's New" slideshows that prioritize recent content.
 
 ### 2. Get Ordered Media Files
 
-**New in v1.3** - Retrieve media files in a specific order with cursor-based pagination.
+**New in v1.3, date filters added in v1.8** — retrieve media files in a specific order with date range filtering and cursor-based pagination.
 
 ```javascript
 const wsResponse = await this.hass.callWS({
@@ -304,7 +307,16 @@ const wsResponse = await this.hass.callWS({
     recursive: true,               // Include subfolders
     file_type: 'image',            // Optional: 'image' or 'video'
     order_by: 'date_taken',        // 'date_taken', 'filename', 'path', 'modified_time'
-    order_direction: 'desc'        // 'asc' or 'desc'
+    order_direction: 'desc',       // 'asc' or 'desc'
+    // v1.8: Date range filters
+    date_from: '2023-01-01',       // Optional: ISO date string (YYYY-MM-DD)
+    date_to: '2023-12-31',         // Optional: ISO date string (YYYY-MM-DD)
+    // Alternatively, Unix timestamp precision (takes precedence over date_from/date_to):
+    // timestamp_from: 1672531200,
+    // timestamp_to: 1704067199,
+    // v1.5.10: Compound cursor pagination — pass next_cursor from previous response:
+    // after_value: '2023-06-15T10:30:00',
+    // after_id: 1234,
   },
   return_response: true
 });
@@ -319,16 +331,53 @@ if (response && response.items && Array.isArray(response.items)) {
     console.log('Date Taken:', item.date_taken);
     console.log('Order Value:', item.order_value);  // Value used for ordering
   });
+
+  // Cursor for next page — undefined when no more results
+  const cursor = response.next_cursor;
+  if (cursor) {
+    console.log('Next page cursor:', cursor.after_value, cursor.after_id);
+  }
+}
+```
+
+**Cursor-based pagination example:**
+
+```javascript
+async function* streamOrderedFiles(hass, entityId, params = {}) {
+  let cursor = null;
+  while (true) {
+    const wsResponse = await hass.callWS({
+      type: 'call_service',
+      domain: 'media_index',
+      service: 'get_ordered_files',
+      service_data: {
+        count: 100,
+        order_by: 'date_taken',
+        order_direction: 'asc',
+        ...params,
+        ...(cursor ? { after_value: cursor.after_value, after_id: cursor.after_id } : {}),
+      },
+      target: { entity_id: entityId },
+      return_response: true,
+    });
+    const page = wsResponse?.response || wsResponse;
+    if (!page?.items?.length) break;
+    yield page.items;
+    cursor = page.next_cursor;
+    if (!cursor) break;
+  }
 }
 ```
 
 **Use Cases:**
 - Sequential slideshows (oldest to newest or newest to oldest)
 - Alphabetical file listings
-- Date-sorted photo galleries
-- Folder hierarchy traversal
+- Date-sorted photo galleries filtered to a specific year or range
+- Full-library traversal page by page without gaps
 
-**Response Structure:** Same as `get_random_items` with additional `order_value` field containing the value used for ordering.
+**Response Structure:** Same as `get_random_items` with additional fields:
+- `order_value` — the value used for ordering (e.g. the ISO date string for `date_taken`)
+- `next_cursor` — `{ after_value, after_id }` object for fetching the next page, or `null`/absent when on the last page
 
 ### 3. Get Related Files (Burst Detection & Anniversary Mode)
 
@@ -854,6 +903,110 @@ Media Card v5.6.5+ uses this to eliminate 404 broken image icons:
 - After bulk file operations outside Home Assistant
 - Fix 404 errors from stale database entries
 - Periodic maintenance to sync database with filesystem
+
+### 14. Cast Slideshow Services
+
+**New in v1.8** - Start an autonomous slideshow on a Roku TV, mirror a card's navigation to a TV in real time, or stop an active cast session.
+
+#### `start_cast_slideshow`
+
+Runs a random-batch slideshow on a Roku `media_player` entity — no browser tab or card required.
+
+```yaml
+service: media_index.start_cast_slideshow
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  media_player_entity_id: media_player.living_room_tv
+  interval: 10          # seconds between items (default 10)
+  folder: /media/photo/Vacation   # optional folder filter
+  file_type: image      # optional: image | video | all (default all)
+  date_from: "2024-01-01"         # optional ISO date filter
+  date_to: "2024-12-31"
+  favorites_only: false
+```
+
+#### `stop_cast_slideshow`
+
+Stops a specific cast session (or all sessions if `media_player_entity_id` is omitted):
+
+```yaml
+# Stop one session
+service: media_index.stop_cast_slideshow
+data:
+  media_player_entity_id: media_player.living_room_tv
+
+# Stop all sessions
+service: media_index.stop_cast_slideshow
+```
+
+#### `mirror_to_cast`
+
+Mirrors a Media Card's navigation to a TV in real time. The TV follows the card whenever the user navigates.
+
+```yaml
+service: media_index.mirror_to_cast
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  target_entity_id: media_player.living_room_tv
+  sync_group: my_sync_group   # must match card's sync_group config
+```
+
+#### Sensor Attributes for Automation
+
+Every `sensor.media_index_*_total_files` entity exposes two attributes that update immediately when a cast session starts or stops:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `cast_active` | `boolean` | `true` if at least one cast session is running |
+| `cast_targets` | `list[str]` | Entity IDs of all active cast targets |
+
+These attributes are updated synchronously via a callback — there is no polling delay.
+
+**Automation: react when a slideshow starts**
+
+```yaml
+automation:
+  - alias: "Cast slideshow started"
+    trigger:
+      - platform: state
+        entity_id: sensor.media_index_media_photo_photolibrary_total_files
+        attribute: cast_active
+        to: true
+    action:
+      - service: light.turn_off
+        target:
+          entity_id: light.living_room
+```
+
+**Automation: react when all slideshows stop**
+
+```yaml
+automation:
+  - alias: "Cast slideshow stopped"
+    trigger:
+      - platform: state
+        entity_id: sensor.media_index_media_photo_photolibrary_total_files
+        attribute: cast_active
+        to: false
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.living_room
+```
+
+**Template: check if a specific TV is in a cast session**
+
+```yaml
+condition:
+  - condition: template
+    value_template: >
+      {{ 'media_player.living_room_tv' in
+         state_attr('sensor.media_index_media_photo_photolibrary_total_files', 'cast_targets') }}
+```
+
+**Note:** Cast sessions are in-memory only. Sessions do not persist across HA restarts. When HA restarts, `cast_active` will return to `false` and `cast_targets` will be empty.
 
 ## Response Handling
 

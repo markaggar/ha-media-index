@@ -162,7 +162,7 @@ for file_path in files:
 cd C:\Users\marka\ha-media-index
 
 .\scripts\deploy-media-index.ps1 `
-    -VerifyEntity "sensor.media_index_media_photo_photolibrary_total_files" `
+    -VerifyEntity "sensor.media_index_media_shareddata_testpictures_photolibrary_total_files" `
     -DumpErrorLogOnFail
 ```
 
@@ -170,7 +170,7 @@ cd C:\Users\marka\ha-media-index
 
 ```powershell
 .\scripts\deploy-media-index.ps1 `
-    -VerifyEntity "sensor.media_index_media_photo_photolibrary_total_files" `
+    -VerifyEntity "sensor.media_index_media_shareddata_testpictures_photolibrary_total_files" `
     -DumpErrorLogOnFail `
     -AlwaysRestart
 ```

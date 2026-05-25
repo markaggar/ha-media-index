@@ -204,7 +204,8 @@ Add `--recurse` to walk all subfolders of `FOLDER` instead of just its root leve
 You set these keywords in **Synology Photos** (or any IPTC/XMP keyword editor):
 
 | Keyword | Coordinates source |
-|---------|--------------------|| `fixgps` | From `--ref REF_FILE` — a photo that already has the correct GPS location |
+|---------|--------------------|
+| `fixgps` | From `--ref REF_FILE` — a photo that already has the correct GPS location |
 | `fixgps:47.6205:-122.3493` | Embedded in the tag itself (colon-separated decimal coordinates) |
 
 Both forms can coexist in the same folder: files tagged `fixgps:LAT:LON` use the embedded coords; files tagged `fixgps` use the `--ref` file's coords.
@@ -230,9 +231,10 @@ gps_tag.sh --fix-tagged "/volume1/photo/DSLR/2019" --recurse \
 #### Step-by-step workflow
 
 1. In Synology Photos, select the photo(s) with wrong GPS.
-2. Add keyword `fixgps:47.6205:-122.3493` (replace with actual coordinates), **or** add keyword `fixgps` if you intend to supply a `--ref` file.
-3. Run `gps_tag.sh --fix-tagged FOLDER` (with `--ref` if needed).
-4. The keyword is automatically removed from each file after GPS is written.
+2. Find a photo/video with the correct GPS coordinates, or go to Google Maps and find the location where the image was taken - right click on a pin, and copy the coordinates.
+3. Add keyword `fixgps:47.6205:-122.3493` (replace with actual coordinates - you will need to edit to make them colon-delimited, no spaces at all), **or** add keyword `fixgps` if you intend to supply a `--ref` file.
+4. Run `gps_tag.sh --fix-tagged FOLDER` (with `--ref` if needed).
+5. The keyword is automatically removed from each file after GPS is written.
 
 ---
 

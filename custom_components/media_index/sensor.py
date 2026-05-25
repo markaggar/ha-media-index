@@ -41,14 +41,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up Media Index sensors from a config entry."""
     _LOGGER.info("Setting up Media Index sensor")
-    
-    # Create sensors
-    async_add_entities(
-        [
-            MediaIndexTotalFilesSensor(hass, entry),
-        ],
-        True,
-    )
+
+    sensor = MediaIndexTotalFilesSensor(hass, entry)
+    async_add_entities([sensor], True)
+
+    # When a cast session starts or stops, push a sensor state update immediately
+    # so automations can react to cast_active / cast_targets attribute changes.
+    session_manager = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("cast_session_manager")
+    if session_manager:
+        def _on_cast_changed():
+            sensor.async_schedule_update_ha_state()
+        session_manager.register_update_callback(_on_cast_changed)
+        _LOGGER.debug("Registered cast state update callback on sensor")
 
 
 class MediaIndexTotalFilesSensor(SensorEntity):
@@ -125,7 +129,16 @@ class MediaIndexTotalFilesSensor(SensorEntity):
         
         # Get libmediainfo availability status
         pymediainfo_available = self.hass.data[DOMAIN][self._entry.entry_id].get("pymediainfo_available", False)
-        
+
+        # Cast session state — read directly from the session manager
+        session_manager = self.hass.data[DOMAIN][self._entry.entry_id].get("cast_session_manager")
+        if session_manager:
+            cast_targets = session_manager.active_targets()
+            cast_active = len(cast_targets) > 0
+        else:
+            cast_targets = []
+            cast_active = False
+
         self._attr_extra_state_attributes = {
             ATTR_SCAN_STATUS: scan_status,
             ATTR_LAST_SCAN_TIME: stats.get("last_scan_time"),
@@ -142,4 +155,6 @@ class MediaIndexTotalFilesSensor(SensorEntity):
             ATTR_GEOCODE_HIT_RATE: stats.get("geocode_hit_rate", 0.0),
             ATTR_FILES_WITH_LOCATION: stats.get("files_with_location", 0),
             ATTR_GEOCODE_ATTRIBUTION: GEOCODE_ATTRIBUTION if geocode_enabled else None,
+            "cast_active": cast_active,
+            "cast_targets": cast_targets,
         }

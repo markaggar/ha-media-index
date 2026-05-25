@@ -158,6 +158,52 @@ get_ordered_files:
               value: "desc"
             - label: "Ascending (Oldest/A-Z First)"
               value: "asc"
+    date_from:
+      name: Date From
+      description: Include only files taken on or after this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    date_to:
+      name: Date To
+      description: Include only files taken on or before this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    timestamp_from:
+      name: Timestamp From
+      description: Include only files taken on or after this Unix timestamp (integer seconds).
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    timestamp_to:
+      name: Timestamp To
+      description: Include only files taken on or before this Unix timestamp (integer seconds).
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    after_value:
+      name: After Value (cursor)
+      description: >
+        Compound cursor for stable pagination. Pass the `next_cursor.after_value`
+        from the previous response to fetch the next page. Must be used together
+        with `after_id`.
+      required: false
+      selector:
+        text:
+    after_id:
+      name: After ID (cursor)
+      description: >
+        Compound cursor tie-breaker. Pass the `next_cursor.after_id` from the
+        previous response. Must be used together with `after_value`.
+      required: false
+      selector:
+        number:
+          min: 1
 
 get_file_metadata:
   name: Get File Metadata
@@ -641,6 +687,38 @@ update_sync_state:
         number:
           min: 0
 
+get_stream_url:
+  name: Get Stream URL
+  description: "PoC: Generate a short HMAC-signed streaming URL for a media file, for testing Roku ECP cast. Returns the URL plus file metadata."
+  target:
+    entity:
+      integration: media_index
+  fields:
+    path_contains:
+      name: Path Contains
+      description: Partial filename or path string to search for (case-insensitive). Returns the first matching file.
+      required: false
+      example: "20230806_160109.mp4"
+      selector:
+        text:
+    file_id:
+      name: File ID
+      description: Exact database file ID to generate a URL for. Takes precedence over path_contains if both are provided.
+      required: false
+      example: 1234
+      selector:
+        number:
+          min: 1
+    ttl:
+      name: TTL (seconds)
+      description: How long the URL remains valid. Defaults to 3600 (1 hour).
+      required: false
+      example: 3600
+      selector:
+        number:
+          min: 60
+          max: 86400
+
 get_sync_state:
   name: Get Sync State
   description: >
@@ -658,3 +736,333 @@ get_sync_state:
       example: "living_room_slideshow"
       selector:
         text:
+
+roku_ecp_cast:
+  name: Roku ECP Cast (xcast)
+  description: >
+    Cast media to a Roku device via the xcast app (ECP app ID 687485), bypassing
+    HA's play_media service. Generates a signed stream URL, properly percent-encodes it,
+    and POSTs to the xcast ECP endpoint server-side — avoiding browser CORS restrictions.
+    Supports both video and image content. For images, automatically applies EXIF
+    orientation as a radians rotation value so portrait photos display correctly.
+  target:
+    entity:
+      integration: media_index
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device to cast to.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    media_source_uri:
+      name: Media Source URI
+      description: media-source:// URI of the file (preferred — from media_index item). One of media_source_uri, file_path, file_id, or path_contains is required.
+      required: false
+      example: "media-source://media_source/media/Photo/PhotoLibrary/2024/IMG_1234.jpg"
+      selector:
+        text:
+    file_path:
+      name: File Path
+      description: Exact filesystem path of the file. Used when media_source_uri is not available.
+      required: false
+      example: "/media/Photo/PhotoLibrary/2024/IMG_1234.jpg"
+      selector:
+        text:
+    file_id:
+      name: File ID
+      description: Database file ID. Takes precedence over path_contains and file_path.
+      required: false
+      selector:
+        number:
+          min: 1
+    path_contains:
+      name: Path Contains
+      description: Partial path/filename substring — matches first result.
+      required: false
+      example: "20230806_160109.mp4"
+      selector:
+        text:
+    ttl:
+      name: TTL (seconds)
+      description: Signed URL validity period. Defaults to 3600 (1 hour).
+      required: false
+      example: 3600
+      selector:
+        number:
+          min: 60
+          max: 86400
+    start_position_seconds:
+      name: Start Position (seconds)
+      description: >
+        Optional playback start position in seconds. When provided, appends
+        contentPosition={ms} to the xcast ECP URL so Roku buffers from that
+        point instead of the beginning. Use this for seek re-push.
+      required: false
+      example: 45.0
+      selector:
+        number:
+          min: 0
+          step: 0.1
+          unit_of_measurement: s
+
+roku_ecp_query:
+  name: Roku ECP Query Media Player
+  description: >
+    Queries the current playback state of a Roku device directly via ECP
+    (http://{roku_host}:8060/query/media-player), bypassing HA's media_player
+    entity which has up to an 8-second polling lag. Returns the player state,
+    current position, and total duration so the card can keep its local video
+    clock in sync with what the Roku is playing.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device to query.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+
+roku_ecp_keypress:
+  name: Roku ECP Keypress
+  description: >
+    Sends an ECP keypress directly to a Roku device bypassing the HA media_player
+    entity (which has an ~8s polling lag). Use for timing-sensitive actions such
+    as pausing video a few seconds before it ends to prevent xcast returning to
+    its splash screen.
+    Common keypresses: Play (toggle), Pause, Home, Back, Fwd, Rev.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    keyname:
+      name: Key Name
+      description: ECP key name to press. Letters, digits, hyphens, and underscores only.
+      required: true
+      example: "Play"
+      selector:
+        text:
+
+stop_cast:
+  name: Stop Cast (Roku)
+  description: >
+    Send a Home keypress to a Roku device via ECP, dismissing the xcast app
+    and clearing the cast image from the screen. Use this to stop a single
+    direct cast pushed by roku_ecp_cast. To stop a mirror or slideshow session
+    use stop_cast_slideshow instead.
+  fields:
+    roku_entity_id:
+      name: Roku Entity
+      description: The media_player entity of the Roku device to stop.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+
+start_cast_slideshow:
+  name: Start Cast Slideshow
+  description: >
+    Start an unattended random-batch slideshow on a media_player entity.
+    Picks random files from the database in batches of 100, casting each one
+    in turn. Supports all the same filters as get_random_items. The slideshow
+    runs until stopped with stop_cast_slideshow.
+  target:
+    entity:
+      integration: media_index
+  fields:
+    media_player_entity_id:
+      name: Media Player
+      description: The media_player entity to cast to. For Roku devices, ECP is used automatically for better orientation and format handling.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    interval:
+      name: Interval (seconds)
+      description: >
+        How long to display each image before moving to the next. For videos,
+        the actual duration is used automatically (minus video_overlap seconds).
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+    video_overlap:
+      name: Video Overlap (seconds)
+      description: >
+        Start loading the next item this many seconds before the current video
+        would naturally end. Ignored for images. Set to 1-2 if you see a brief
+        black screen between videos.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: s
+    sync_group:
+      name: Sync Group
+      description: >
+        Optional shared queue group ID. When set, the slideshow also writes its
+        current state to the sync group so paired cards can follow along.
+      required: false
+      selector:
+        text:
+    also_write_sync:
+      name: Also Write Sync
+      description: >
+        Write the current item to the sync group on each advance so cards in
+        the same sync group follow the slideshow.
+      required: false
+      default: false
+      selector:
+        boolean:
+    folder:
+      name: Folder
+      description: Limit files to this folder (supports media-source:// URIs).
+      required: false
+      selector:
+        text:
+    recursive:
+      name: Recursive
+      description: Include files in sub-folders.
+      required: false
+      default: true
+      selector:
+        boolean:
+    file_type:
+      name: File Type
+      description: "Filter by type: image or video."
+      required: false
+      selector:
+        select:
+          options:
+            - image
+            - video
+    date_from:
+      name: Date From
+      description: Include only files taken on or after this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    date_to:
+      name: Date To
+      description: Include only files taken on or before this date (YYYY-MM-DD).
+      required: false
+      selector:
+        text:
+    favorites_only:
+      name: Favorites Only
+      description: Include only favorited files.
+      required: false
+      default: false
+      selector:
+        boolean:
+    anniversary_month:
+      name: Anniversary Month
+      description: Include files taken in this month (1-12) for anniversary filtering.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 12
+    anniversary_day:
+      name: Anniversary Day
+      description: Include files taken on this day of the month for anniversary filtering.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 31
+    anniversary_window_days:
+      name: Anniversary Window (days)
+      description: Number of days either side of the anniversary date to include.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+    priority_new_files:
+      name: Priority New Files
+      description: Prioritise files that have not yet been shown.
+      required: false
+      default: false
+      selector:
+        boolean:
+
+stop_cast_slideshow:
+  name: Stop Cast Slideshow
+  description: >
+    Stop a cast slideshow or mirror session. If entity_id is omitted, all
+    active cast sessions are stopped.
+  fields:
+    media_player_entity_id:
+      name: Media Player
+      description: >
+        The media_player entity whose cast session should be stopped. Omit to
+        stop all active sessions.
+      required: false
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+
+mirror_to_cast:
+  name: Mirror to Cast
+  description: >
+    Mirror a media-card shared queue group to a media_player entity in
+    real-time. Every time the card advances (or the sync state is updated by
+    any source), the same media is pushed to the TV. Stop with
+    stop_cast_slideshow.
+  target:
+    entity:
+      integration: media_index
+  fields:
+    media_player_entity_id:
+      name: Media Player
+      description: The media_player entity to mirror to. For Roku devices, ECP is used automatically for better orientation and format handling.
+      required: true
+      example: "media_player.roku_tv"
+      selector:
+        entity:
+          domain: media_player
+    sync_group:
+      name: Sync Group
+      description: The shared queue group ID to mirror from.
+      required: true
+      example: "my_photo_frame"
+      selector:
+        text:
+    pre_end_pause:
+      name: Pre-End Pause
+      description: >
+        Pause the TV a few seconds before a video would naturally end, so it
+        doesn't loop or show a black screen while the next item loads.
+      required: false
+      default: true
+      selector:
+        boolean:
+    video_overlap:
+      name: Video Overlap (seconds)
+      description: >
+        Issue the pause command this many seconds before a video ends.
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: s

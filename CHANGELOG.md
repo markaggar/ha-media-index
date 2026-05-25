@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-22
+
+### Added
+
+- **`roku_ecp_cast` Service**: Cast images and videos directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app, bypassing browser CORS restrictions by making the ECP call server-side
+  - Generates a short HMAC-signed stream URL that the Roku fetches directly from HA — works around the 255-character URL limit imposed by HA's standard JWT auth tokens
+  - Images are re-encoded through Pillow before being served: standard Huffman/quantization tables fix grey-screen failures on cameras with non-standard JPEG encoding (e.g. Nikon D5100), and images are downscaled to 3840×2160 max for Roku decoder compatibility
+  - `ImageOps.exif_transpose()` physically applies EXIF orientation before serving, so the image dimensions always match what the Roku is told (`w`/`h`) — prevents horizontal stretch on rotated phone photos
+  - Rotation parameters (`r`, `ri`) are never sent to Roku; orientation is already baked into the served JPEG
+  - For 90°/270° EXIF rotations, `w` and `h` are swapped in the ECP call to match the post-transpose pixel dimensions
+  - Parameters: `roku_entity_id` (required), one of `file_id` / `file_path` / `media_source_uri` / `path_contains`, optional `ttl` (URL expiry in seconds, default 3600)
+  - **Requires**: Roku HA integration configured for the target device; [xcast](https://channelstore.roku.com/details/687485) channel installed on the Roku
+
+- **`stop_cast` Service**: Send an ECP `keypress/Home` to a Roku device, clearing the cast image and returning to the Roku home screen
+  - Resolves the Roku host from the HA device/config registry — no IP address configuration needed
+  - Use when stopping a cast session to prevent the last image remaining frozen on the TV
+  - Parameter: `roku_entity_id` (required)
+
+- **Cast State Sensor Attributes**: The `sensor.media_index_*_total_files` entity now exposes `cast_active` (boolean) and `cast_targets` (list of entity IDs) attributes, updated immediately when a cast session starts or stops — no polling delay. Enables automations that trigger on cast state changes (e.g. dim lights when slideshow starts). See `DEVELOPER_API.md` §14 for automation examples.
+
+- **Cast Session Services** (`mirror_to_cast`, `start_cast_slideshow`, `stop_cast_slideshow`): Three services that power continuous cast sessions
+  - `mirror_to_cast` — listens to `media_index.sync_updated` events for a `sync_group` and pushes each new item to a `media_player` entity via `media_player.play_media`. The TV follows the card's navigation in real time. Optional `pre_end_pause` (default `true`) pauses the TV a few seconds before a video ends to prevent black-screen flash. Stop with `stop_cast_slideshow`
+  - `start_cast_slideshow` — autonomous random-batch slideshow on a `media_player` entity, no card required. Accepts all `get_random_items` filters (`folder`, `file_type`, `date_from`/`date_to`, `favorites_only`, anniversary options). Runs forever until stopped with `stop_cast_slideshow`
+  - `stop_cast_slideshow` — stops either a specific cast session (by `entity_id`) or all active sessions if `entity_id` is omitted
+  - All three services are registered via `cast_manager.py` containing `CastSessionManager` (asyncio Task registry), `HaMediaPlayerTransport`, `run_cast_slideshow`, and `run_mirror_cast`. Sessions are in-memory only and do not persist across HA restarts
+
+- **Blueprint: Auto-start Cast Slideshow on TV** (`blueprints/automation/auto_cast_slideshow.yaml`): Ready-to-use HA automation blueprint that starts a cast slideshow when a Roku TV returns to the Home screen, and stops it when another app launches or the TV turns off
+  - All `start_cast_slideshow` parameters exposed as blueprint inputs (interval, file type, favorites, date filters, anniversary mode, sync group, etc.)
+  - Sync group auto-generated from the media player entity ID with optional override — tells you the value to enter in a paired Media Card
+  - One blueprint instance per TV; create multiple automations for multiple TVs
+
+- **`fix_videos.sh` NAS Utility** (`NAS_utils/fix_videos.sh`): Bash script that normalises video files in a single Docker QSV hardware-encode pass — fixes misoriented portrait videos (EXIF rotation 90°/270°), converts legacy formats (WMV/AVI/MTS/MOV) to MP4, and re-encodes browser-incompatible codecs to HEVC or H.264. Supersedes the earlier `fix_video_rotation.sh`. See `NAS_utils/FIX_VIDEOS.md` for full documentation.
+
+- **Date Filters for `get_ordered_files`**: Added `date_from`, `date_to`, `timestamp_from`, and `timestamp_to` parameters to the `get_ordered_files` service, matching the filter capability already present in `get_random_items`
+  - `date_from` / `date_to`: accept `YYYY-MM-DD` strings; `date_to` is inclusive (end of day)
+  - `timestamp_from` / `timestamp_to`: accept Unix integer timestamps for precise range queries
+  - Applied to `COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time)))` so files without EXIF are filtered by filesystem date
+
+### Fixed
+
+- **`get_ordered_files` DESC Sort Returning Oldest Files First**: Ordered files in `desc` mode were returning 2018 photos before 2026 photos. Root cause: `date_taken` is stored as a Unix integer timestamp, but wrapping it in SQLite's `unixepoch()` treats the integer as a Julian Day Number and produces large negative values (e.g. −78 billion for a 2018 timestamp). Fixed by using `date_taken` directly in the `COALESCE` expression without the redundant `unixepoch()` wrapper.
+
+- **Cross-device sync followers show wrong images after a filter change**: `update_sync_state` was broadcasting only the last 20 items of the queue (`queue[-20:]`) while keeping `current_index` relative to the original full queue. For a 146-item result, index 1 pointed to the 2nd-to-last photo (a 2025 image) instead of the 2nd item (Iceland 006.JPG), causing every subsequent sync event to navigate the follower to a completely different image. The trim has been removed; the full queue is now stored and broadcast so `current_index` always lines up with the correct item.
+
+---
+
 ## [1.7.0] - 2026-04-30
 
 ### Added

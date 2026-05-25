@@ -284,6 +284,25 @@ class CacheManager:
         """)
 
         await self._db.commit()
+
+        # Add session_override_json and config_fields_json to sync_state
+        async with self._db.execute("PRAGMA table_info(sync_state)") as cursor:
+            sync_columns = [col[1] for col in await cursor.fetchall()]
+        sync_new_columns = {
+            "session_override_json": "TEXT",
+            "config_fields_json": "TEXT",
+        }
+        sync_allowed_col_names = set(sync_new_columns.keys())
+        sync_allowed_col_types = {"TEXT"}
+        for col_name, col_type in sync_new_columns.items():
+            if col_name not in sync_columns:
+                if col_name not in sync_allowed_col_names or col_type not in sync_allowed_col_types:
+                    _LOGGER.error("Attempted to add invalid sync_state column: %s %s", col_name, col_type)
+                    continue
+                _LOGGER.info("Adding column '%s' to sync_state table", col_name)
+                await self._db.execute(f"ALTER TABLE sync_state ADD COLUMN {col_name} {col_type}")
+
+        await self._db.commit()
         _LOGGER.debug("Database migrations completed")
     
     async def _sanitize_location_names(self) -> None:
@@ -891,9 +910,9 @@ class CacheManager:
             
             if folder:
                 if recursive:
-                    # Recursive: match folder and all subfolders
-                    new_files_query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                    params.append(f"{folder}%")
+                    # Recursive: match folder and all subfolders (exact OR subpath)
+                    new_files_query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                    params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
                 else:
                     # Non-recursive: exact folder match only
                     new_files_query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1067,9 +1086,9 @@ class CacheManager:
             if folder:
                 # Use case-insensitive matching for folder paths (handles /media/Photo vs /media/photo)
                 if recursive:
-                    # Recursive: match folder and all subfolders
-                    query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                    params.append(f"{folder}%")
+                    # Recursive: match folder and all subfolders (exact OR subpath)
+                    query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                    params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
                 else:
                     # Non-recursive: exact folder match only
                     query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1250,9 +1269,9 @@ class CacheManager:
         
         if folder:
             if recursive:
-                # Recursive: match folder and all subfolders
-                query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                params.append(f"{folder}%")
+                # Recursive: match folder and all subfolders (exact OR subpath)
+                query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             else:
                 # Non-recursive: exact folder match only
                 query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1359,6 +1378,10 @@ class CacheManager:
         order_direction: str = "desc",
         after_value: str | int | float | None = None,
         after_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        timestamp_from: int | None = None,
+        timestamp_to: int | None = None,
     ) -> list[dict]:
         """Get ordered media files with configurable sort field and direction.
         
@@ -1373,6 +1396,10 @@ class CacheManager:
             order_direction: Sort direction - 'asc' or 'desc'
             after_value: Cursor for pagination - return items AFTER this value
             after_id: Secondary cursor (file ID) for tie-breaking when values are equal
+            date_from: Filter by date >= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            date_to: Filter by date <= this value (YYYY-MM-DD). Uses EXIF date_taken if available, falls back to created_time.
+            timestamp_from: Filter by timestamp >= this value (Unix timestamp in seconds). Takes precedence over date_from.
+            timestamp_to: Filter by timestamp <= this value (Unix timestamp in seconds). Takes precedence over date_to.
             
         Returns:
             List of ordered file records with metadata
@@ -1400,9 +1427,9 @@ class CacheManager:
         
         if folder:
             if recursive:
-                # Include subfolders
-                query += " AND LOWER(m.folder) LIKE LOWER(?)"
-                params.append(f"{folder}%")
+                # Include subfolders (exact OR subpath)
+                query += " AND (LOWER(m.folder) = LOWER(?) OR LOWER(m.folder) LIKE LOWER(?))"
+                params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             else:
                 # Exact folder match only
                 query += " AND LOWER(m.folder) = LOWER(?)"
@@ -1411,6 +1438,33 @@ class CacheManager:
         if file_type:
             query += " AND m.file_type = ?"
             params.append(file_type.lower())
+        
+        # Date range filtering
+        if timestamp_from is not None:
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
+            params.append(timestamp_from)
+        elif date_from is not None:
+            try:
+                date_from_str = str(date_from) if not isinstance(date_from, str) else date_from
+                dt = datetime.strptime(date_from_str, "%Y-%m-%d")
+                timestamp = int(dt.timestamp())
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) >= ?"
+                params.append(timestamp)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_from parameter: %s - %s", date_from, e)
+        
+        if timestamp_to is not None:
+            query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
+            params.append(timestamp_to)
+        elif date_to is not None:
+            try:
+                date_to_str = str(date_to) if not isinstance(date_to, str) else date_to
+                dt = datetime.strptime(date_to_str, "%Y-%m-%d")
+                timestamp = int((dt + timedelta(days=1)).timestamp()) - 1
+                query += " AND COALESCE(e.date_taken, MIN(unixepoch(m.created_time), unixepoch(m.modified_time))) <= ?"
+                params.append(timestamp)
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Invalid date_to parameter: %s - %s", date_to, e)
         
         # Use explicit whitelist mapping for sort fields and directions
         allowed_sort_fields = {
@@ -1736,7 +1790,25 @@ class CacheManager:
             row = await cursor.fetchone()
         
         return dict(row) if row else None
-    
+
+    async def search_files_by_path(self, path_fragment: str, limit: int = 5) -> list:
+        """Find files whose path contains *path_fragment* (case-insensitive LIKE).
+
+        Args:
+            path_fragment: Substring to search for in the path column.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of file records (dicts) matching the fragment.
+        """
+        pattern = f"%{path_fragment}%"
+        async with self._db.execute(
+            "SELECT * FROM media_files WHERE path LIKE ? COLLATE NOCASE LIMIT ?",
+            (pattern, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
     async def get_exif_by_file_id(self, file_id: int) -> dict | None:
         """Get EXIF data for a file by ID.
         
@@ -1905,8 +1977,8 @@ class CacheManager:
             )
             clear_params: list = []
             if folder:
-                clear_where += "  AND m.folder LIKE ?"
-                clear_params.append(folder.rstrip("/") + "%")
+                clear_where += "  AND (m.folder = ? OR m.folder LIKE ?)"
+                clear_params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
             clear_where += ")"
             await self._db.execute(
                 f"UPDATE exif_data SET burst_count = NULL, burst_favorites = NULL, burst_id = NULL {clear_where}",
@@ -1921,8 +1993,8 @@ class CacheManager:
         where_clause = "WHERE e.date_taken IS NOT NULL"
         params: list = []
         if folder:
-            where_clause += " AND m.folder LIKE ?"
-            params.append(folder.rstrip("/") + "%")
+            where_clause += " AND (m.folder = ? OR m.folder LIKE ?)"
+            params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
         if not overwrite_existing:
             where_clause += " AND (e.burst_count IS NULL OR e.burst_count = 0)"
 
@@ -2156,8 +2228,8 @@ class CacheManager:
         where = "WHERE e.burst_id IS NOT NULL AND m.file_size IS NOT NULL AND e.date_taken IS NOT NULL"
         params: list = []
         if folder:
-            where += " AND m.folder LIKE ?"
-            params.append(folder.rstrip("/") + "%")
+            where += " AND (m.folder = ? OR m.folder LIKE ?)"
+            params.extend([folder.rstrip('/'), folder.rstrip('/') + '/%'])
 
         query = f"""
             SELECT
@@ -2499,24 +2571,42 @@ class CacheManager:
     # Sync state methods (cross-device queue sharing)
     # ---------------------------------------------------------------------------
 
-    async def upsert_sync_state(self, sync_group: str, queue: list, current_index: int) -> None:
+    async def upsert_sync_state(
+        self,
+        sync_group: str,
+        queue: list,
+        current_index: int,
+        session_override: dict | None = None,
+        config_fields: dict | None = None,
+    ) -> None:
         """Write (or replace) sync state for a named sync group.
 
-        Only stores the most recent 20 queue items to keep the payload small.
+        Stores the full queue so current_index always lines up with the correct item.
+        A previous 20-item tail-trim (queue[-20:]) caused current_index to point to
+        a completely different item after queue extension via lookahead navigation,
+        making same-device view-switching restore the wrong image.
         """
         import json
         import time
-        trimmed = queue[-20:] if len(queue) > 20 else queue
         await self._db.execute(
             """
-            INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sync_state (sync_group, queue_json, current_index, updated_at, session_override_json, config_fields_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(sync_group) DO UPDATE SET
                 queue_json = excluded.queue_json,
                 current_index = excluded.current_index,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                session_override_json = excluded.session_override_json,
+                config_fields_json = excluded.config_fields_json
             """,
-            (sync_group, json.dumps(trimmed), current_index, int(time.time())),
+            (
+                sync_group,
+                json.dumps(queue),
+                current_index,
+                int(time.time()),
+                json.dumps(session_override) if session_override is not None else None,
+                json.dumps(config_fields) if config_fields is not None else None,
+            ),
         )
         await self._db.commit()
 
@@ -2524,7 +2614,7 @@ class CacheManager:
         """Return sync state for a named sync group, or None if not found."""
         import json
         async with self._db.execute(
-            "SELECT queue_json, current_index, updated_at FROM sync_state WHERE sync_group = ?",
+            "SELECT queue_json, current_index, updated_at, session_override_json, config_fields_json FROM sync_state WHERE sync_group = ?",
             (sync_group,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -2535,5 +2625,7 @@ class CacheManager:
             "queue": json.loads(row[0]),
             "current_index": row[1],
             "updated_at": row[2],
+            "session_override": json.loads(row[3]) if row[3] else None,
+            "config_fields": json.loads(row[4]) if row[4] else None,
         }
 

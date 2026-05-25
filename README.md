@@ -54,7 +54,26 @@ A custom Home Assistant integration that indexes media files (images and videos)
 - **Safe dry-run mode** - previews duplicate groups and a folder-pair summary before deleting anything
 - **Auto-delete** - moves all non-keeper duplicates to `_Junk` when confirmed
 
-### 🗑️ File Management
+### 📺 Cast to TV
+
+> **🎬 Works without Media Card** — the cast slideshow services (`start_cast_slideshow` / `stop_cast_slideshow`) are the first Media Index services that run a fully autonomous slideshow without needing any Lovelace card or browser session.
+
+The slideshow and mirror services work with **any HA `media_player` entity** (Chromecast, smart TVs, Fire TV, Roku, etc.):
+
+- **`start_cast_slideshow` service** — start an unattended random slideshow on any HA media player. Supports all the same filters as `get_random_items` (folder, date range, favorites, anniversary mode). For Roku targets, ECP is used automatically for correct orientation and native format support; for other devices, standard `media_player.play_media` is used.
+- **`stop_cast_slideshow` service** — stops the slideshow. For Roku targets, also sends `keypress/Home` to dismiss xcast from the screen; for other devices, the cast session is simply stopped.
+- **`mirror_to_cast` service** — mirrors a Media Card's navigation to any media player in real-time (card leads, TV follows)
+- **`cast_active` / `cast_targets` sensor attributes** — update immediately when any session starts or stops; works regardless of device type. See [Sensors](#sensors).
+
+**Roku-specific services** (ECP-based, require the [xcast channel](https://channelstore.roku.com/details/687485) and Roku HA integration):
+
+- **`roku_ecp_cast` service** — cast a single image or video directly to a Roku TV via xcast ECP (used by [Media Card](https://github.com/markaggar/ha-media-card)'s cast button)
+- **`stop_cast` service** — sends an ECP `keypress/Home` to clear the image from the TV after a single direct cast
+- **JPEG transcoding** — images re-encoded with standard Huffman tables via Pillow, fixing grey-screen failures on cameras with non-standard JPEG encoding (e.g. Nikon D5100)
+- **EXIF orientation correction** — rotated phone photos are physically transposed before serving so the Roku always receives correctly-oriented pixels at the right aspect ratio
+- **Short signed stream URLs** — HMAC-signed URL generated per cast; the Roku fetches the image directly from HA, bypassing the 255-character URL length limit of standard HA auth tokens
+
+### 📁🗑️ File Management
 - **Delete media** - moves files to `_Junk` folder
 - **Mark for editing** - moves files to `_Edit` folder
 - **Database cleanup** - automatically removes deleted files from index
@@ -68,6 +87,45 @@ Media Index is designed to work seamlessly with [Media Card](https://github.com/
 - **Rich metadata display** - Shows location names, ratings, and EXIF data
 - **Interactive controls** - Favorite, delete, and mark for editing directly from the card
 - **Background updates** - New photos appear automatically without restart
+
+## Using Without Media Card
+
+The cast slideshow services work entirely standalone — no Lovelace card or browser needed:
+
+- **`start_cast_slideshow`** — start a random photo/video slideshow on any HA media player from an automation or script
+- **`stop_cast_slideshow`** — stop the slideshow and clear the screen
+- **`mirror_to_cast`** — mirror whatever a Media Card is currently showing to any media player in real-time
+
+These can be triggered from HA automations (e.g. turn on the TV slideshow at a set time), scripts, or the Developer Tools Actions panel directly.
+
+### Blueprint: Auto-start Cast Slideshow on TV
+
+A ready-to-use HA automation blueprint (`blueprints/automation/auto_cast_slideshow.yaml`) starts the cast slideshow automatically when a Roku TV returns to the Home screen and stops it when another app launches or the TV turns off.
+
+- Import via **Settings → Automations → Blueprints → Import Blueprint** using the raw GitHub URL, or copy the file into your HA `config/blueprints/automation/` folder
+- All `start_cast_slideshow` parameters are exposed in the blueprint UI — no manual YAML editing required
+- Sync group is auto-generated from the media player entity ID (e.g. `media_player.office_tv` → `autocast_office_tv`); the blueprint UI displays the value so you can copy it into a paired Media Card
+- Create one automation instance per TV for independent control of multiple TVs
+
+## NAS Utilities
+
+The `NAS_utils/` folder contains standalone Bash scripts for Synology NAS (or any Linux host with Docker and exiftool) to prepare your media library before or alongside indexing.
+
+### `fix_videos.sh`
+
+Normalises video files in a single Docker QSV hardware-encode pass:
+- **Rotation fix** — re-encodes misoriented portrait videos (EXIF rotation 90°/270°) so they display correctly in every player
+- **Format conversion** — converts WMV, AVI, MTS, and MOV files to MP4
+- **Codec normalisation** — re-encodes non-browser-safe video codecs to HEVC (default) or H.264; transcodes non-AAC audio to AAC
+- Incremental scanning with per-folder state files; originals preserved via backup-root or `_hp` rename
+- See [`NAS_utils/FIX_VIDEOS.md`](NAS_utils/FIX_VIDEOS.md) for full documentation
+
+### `gps_tag.sh`
+
+Backfills GPS coordinates into photos and videos that lack them by matching timestamps against nearby GPS-enabled files (e.g. phone photos taken at the same time):
+- Supports auto mode, explicit donor folders, DSLR recursive backfills, and merged multi-phone donor caches
+- Writes GPS to EXIF (JPG) and QuickTime user-data atoms (MP4/MOV)
+- See [`NAS_utils/GPS_TAG.md`](NAS_utils/GPS_TAG.md) for full documentation
 
 ## Installation
 
@@ -223,18 +281,35 @@ The integration provides additional services for advanced use cases and Media Ca
 
 ## Sensors
 
-The integration creates the following sensors for each configured entry:
+The integration creates one sensor per configured entry. Most people never look at the attributes, but they are useful for automations and dashboards.
 
 ### `sensor.media_index_{entry_name}_total_files`
 
-**State:** Total number of files in database
+**State:** Total number of indexed files (images + videos)
 
 **Attributes:**
-- `scan_status`: Current scan status (idle, scanning, error)
-- `last_scan_time`: Timestamp of last scan
-- `total_folders`: Number of watched folders
-- `geocoded_files`: Number of files with location data
-- `favorited_files`: Number of favorited files
+
+| Attribute | Description |
+|---|---|
+| `scan_status` | Current scan state: `idle`, `scanning`, or `error` |
+| `last_scan_time` | ISO timestamp of the last completed scan |
+| `total_folders` | Number of distinct folders in the index |
+| `total_images` | Number of indexed image files |
+| `total_videos` | Number of indexed video files |
+| `watched_folders` | List of folders being monitored for changes |
+| `media_path` | Base media path for this integration instance |
+| `media_source_uri` | `media-source://` URI for the base path |
+| `libmediainfo_available` | `true` if libmediainfo is installed (required for video GPS/date extraction) |
+| `cache_size_mb` | SQLite database file size in MB |
+| `geocode_enabled` | `true` if reverse geocoding is configured |
+| `geocode_cache_entries` | Number of cached geocode results |
+| `geocode_cache_hit_rate` | Cache hit percentage (reduces Nominatim API calls) |
+| `files_with_location` | Number of files with GPS coordinates |
+| `geocode_attribution` | Required OpenStreetMap attribution text |
+| `cast_active` | `true` if any cast slideshow session is currently running |
+| `cast_targets` | List of `media_player` entity IDs with active cast sessions |
+
+The `cast_active` and `cast_targets` attributes update immediately (no polling) when a session starts or stops, making them suitable for automation triggers — for example, dimming lights when a slideshow starts.
 
 ## Performance
 

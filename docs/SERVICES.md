@@ -210,7 +210,7 @@ data:
 
 ### `media_index.get_ordered_files`
 
-**New in v1.3** - Get ordered media files with configurable sort field and direction.
+**New in v1.3** - Get ordered media files with configurable sort field and direction. Supports date range filtering and cursor-based pagination for stable page-by-page traversal.
 
 **Parameters:**
 - `count` (optional, default: 50): Maximum number of files to return (1-1000)
@@ -219,8 +219,16 @@ data:
 - `file_type` (optional): Filter by `image` or `video`
 - `order_by` (optional, default: `date_taken`): Sort field (`date_taken`, `filename`, `path`, `modified_time`)
 - `order_direction` (optional, default: `desc`): Sort direction (`asc` or `desc`)
+- `date_from` (optional): Include only files taken on or after this date (`YYYY-MM-DD`)
+- `date_to` (optional): Include only files taken on or before this date (`YYYY-MM-DD`)
+- `timestamp_from` (optional): Unix timestamp lower bound (takes precedence over `date_from`)
+- `timestamp_to` (optional): Unix timestamp upper bound (takes precedence over `date_to`)
+- `after_value` (optional): Compound cursor — pass `next_cursor.after_value` from the previous response to fetch the next page
+- `after_id` (optional): Cursor tie-breaker — pass `next_cursor.after_id` from the previous response (must accompany `after_value`)
 
-**Returns:** List of ordered media items with metadata (includes `media_source_uri` in v1.4+)
+**Cursor pagination:** The response includes a `next_cursor` object (`{after_value, after_id}`) when more results exist. Pass these back on the next call to get the next page without duplicates or gaps, even if files are added/removed between calls.
+
+**Returns:** List of ordered media items with metadata (includes `media_source_uri` in v1.4+) and a `next_cursor` field for pagination.
 
 **Examples:**
 ```yaml
@@ -238,6 +246,24 @@ data:
   order_by: filename
   order_direction: asc
   recursive: false
+
+# Date-filtered — photos from a specific year only
+service: media_index.get_ordered_files
+data:
+  count: 100
+  order_by: date_taken
+  order_direction: asc
+  date_from: "2023-01-01"
+  date_to: "2023-12-31"
+
+# Next page using cursor from previous response
+service: media_index.get_ordered_files
+data:
+  count: 50
+  order_by: date_taken
+  order_direction: desc
+  after_value: "2024-06-15T10:30:00"
+  after_id: 1234
 ```
 
 ### `media_index.get_file_metadata`
@@ -629,6 +655,270 @@ data:
 }
 ```
 
+## Cast to TV Services
+
+These services power the [Media Card](https://github.com/markaggar/ha-media-card) cast-to-TV feature and can also be called directly from automations or scripts.
+
+### `media_index.roku_ecp_cast`
+
+Cast an image or video directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app (app ID 687485).
+
+**How it works**
+
+The service generates a short HMAC-signed stream URL pointing to HA's built-in streaming endpoint, then POSTs it to the Roku ECP input API (`http://{roku_host}:8060/input/687485?...`) server-side — bypassing browser CORS restrictions. The Roku fetches the image directly from HA.
+
+Before serving, images are transcoded through Pillow:
+- Re-encoded with standard JPEG Huffman/quantization tables (fixes grey screen on cameras like Nikon D5100 with non-standard encoding)
+- Downscaled to 3840×2160 max for Roku hardware JPEG decoder compatibility
+- EXIF orientation applied (`exif_transpose`) so the pixels are always in their correct display orientation — prevents horizontal stretch on rotated phone photos
+
+**Requirements**
+
+1. **Roku HA integration** configured for the target device (Settings → Devices & Services → Roku)
+2. **xcast channel** installed on the Roku from the [Roku Channel Store](https://channelstore.roku.com/details/687485)
+   - xcast acts as a Digital Media Renderer (DMR) that receives content pushed from HA
+   - On first activation (cold start), xcast launches automatically when the ECP command arrives; the card retries ~2.5 s later to ensure receipt once the channel is fully loaded
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+| `file_id` | one of these | Media Index file ID |
+| `file_path` | one of these | Filesystem path to the file |
+| `media_source_uri` | one of these | HA media-source URI |
+| `path_contains` | one of these | Partial path substring to look up |
+| `ttl` | optional | Stream URL expiry in seconds (default: 3600) |
+
+**Returns**
+
+```json
+{
+  "url": "http://10.0.0.62:8123/api/media_index/stream/1234/photo.jpg?t=abc1&exp=...",
+  "file_id": 1234,
+  "roku_host": "10.0.0.15",
+  "ecp_status": 200,
+  "ecp_url_sent": "http://10.0.0.15:8060/input/687485?...",
+  "media_type": "image"
+}
+```
+
+**Example**
+
+```yaml
+service: media_index.roku_ecp_cast
+data:
+  roku_entity_id: media_player.living_room_tv
+  media_source_uri: media-source://media_source/media/photo/Photos/IMG_1234.jpg
+```
+
+---
+
+### `media_index.stop_cast`
+
+Send an ECP `keypress/Home` to a Roku device, clearing the cast image and returning the TV to its home screen.
+
+Use this when stopping a cast session to prevent the last image remaining frozen on the TV. The [Media Card](https://github.com/markaggar/ha-media-card) calls this automatically when the user taps the cast button to stop or navigates away from the card.
+
+Note: This service uses the ECP protocol directly because the Roku's `media_player` entity in HA does not support the generic `media_player.media_stop` action when xcast is active.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+
+**Returns**
+
+```json
+{
+  "roku_host": "10.0.0.15",
+  "ecp_status": 200
+}
+```
+
+**Example**
+
+```yaml
+service: media_index.stop_cast
+data:
+  roku_entity_id: media_player.living_room_tv
+```
+
+---
+
+### `media_index.roku_ecp_query`
+
+Query the current playback state of a Roku device directly via ECP, bypassing the HA `media_player` entity which has up to an 8-second polling lag. Used by Media Card to keep its local video clock in sync with what the Roku is actually playing.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+
+**Returns**
+
+```json
+{
+  "state": "play",
+  "position": 42.3,
+  "duration": 120.0
+}
+```
+
+---
+
+### `media_index.roku_ecp_keypress`
+
+Send an ECP keypress directly to a Roku device, bypassing the HA `media_player` entity. Use for timing-sensitive actions such as pausing video a few seconds before it ends.
+
+**Common key names:** `Play` (toggle play/pause), `Pause`, `Home`, `Back`, `Fwd`, `Rev`
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `roku_entity_id` | ✅ | The `media_player.*` entity ID of the Roku device |
+| `keyname` | ✅ | ECP key name (letters, digits, hyphens, underscores only) |
+
+**Example**
+
+```yaml
+service: media_index.roku_ecp_keypress
+data:
+  roku_entity_id: media_player.living_room_tv
+  keyname: Pause
+```
+
+---
+
+## Cast Slideshow Services (v1.8+)
+
+> **🎬 No Media Card required** — these services run a fully autonomous slideshow directly on a Roku TV from Home Assistant automations or scripts. No browser, no Lovelace dashboard, no Media Card needed.
+
+### `media_index.start_cast_slideshow`
+
+Start an unattended random-batch slideshow cast to a Roku TV (or any HA `media_player`). The integration fetches random files from its database in batches of 100 and pushes each one to the TV in turn, advancing automatically on a configurable interval. The slideshow continues indefinitely until stopped with `stop_cast_slideshow`.
+
+For Roku devices, ECP is used automatically (better orientation, native format support). For other `media_player` entities, `media_player.play_media` is used.
+
+**xcast cold-start handling**: On first use (or after the Roku has left xcast), the initial push launches the xcast app. The integration detects when xcast is fully initialised by watching the HA entity's `app_name` attribute and automatically resends the first item once xcast is ready — so the first photo/video always plays correctly.
+
+**Parameters**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `media_player_entity_id` | ✅ | — | Target `media_player` entity |
+| `interval` | optional | `10` | Seconds to display each image. For videos, the actual file duration is used automatically. |
+| `video_overlap` | optional | `0` | Push the next item this many seconds before the current video ends. Set to `1`–`2` if you see a black screen between videos. |
+| `sync_group` | optional | — | Sync group ID. When set, each advance is written to the sync group so paired Media Cards follow along. |
+| `also_write_sync` | optional | `false` | Enable writing to `sync_group` on each advance. |
+| `folder` | optional | — | Limit files to this folder path or `media-source://` URI. |
+| `recursive` | optional | `true` | Include files in sub-folders. |
+| `file_type` | optional | — | Filter by `image` or `video`. |
+| `date_from` | optional | — | Include files taken on or after this date (`YYYY-MM-DD`). |
+| `date_to` | optional | — | Include files taken on or before this date (`YYYY-MM-DD`). |
+| `favorites_only` | optional | `false` | Include only favorited files. |
+| `anniversary_month` | optional | — | Month (1–12) for anniversary filtering. |
+| `anniversary_day` | optional | — | Day of month for anniversary filtering. |
+| `anniversary_window_days` | optional | `0` | Days either side of the anniversary date to include. |
+| `priority_new_files` | optional | `false` | Prioritise files not yet shown in this session. |
+
+**Target selector**
+
+Uses a `target:` entity picker set to `integration: media_index` to select which Media Index instance provides the media. Required for multi-instance setups.
+
+**Example — basic**
+
+```yaml
+service: media_index.start_cast_slideshow
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  media_player_entity_id: media_player.living_room_tv
+  interval: 15
+```
+
+**Example — anniversary slideshow, shared with a card**
+
+```yaml
+service: media_index.start_cast_slideshow
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  media_player_entity_id: media_player.living_room_tv
+  interval: 20
+  anniversary_month: 5
+  anniversary_day: 22
+  anniversary_window_days: 3
+  sync_group: living_room_queue
+  also_write_sync: true
+```
+
+---
+
+### `media_index.stop_cast_slideshow`
+
+Stop a running `start_cast_slideshow` or `mirror_to_cast` session. For Roku targets, also sends a `keypress/Home` ECP command to dismiss the xcast app from the TV screen — preventing the last photo/video from remaining frozen on screen.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `media_player_entity_id` | optional | Stop the session for this specific entity. Omit to stop **all** active cast sessions. |
+
+**Example — stop a specific session**
+
+```yaml
+service: media_index.stop_cast_slideshow
+data:
+  media_player_entity_id: media_player.living_room_tv
+```
+
+**Example — stop all sessions**
+
+```yaml
+service: media_index.stop_cast_slideshow
+```
+
+---
+
+### `media_index.mirror_to_cast`
+
+Mirror a Media Card's shared queue group to a Roku TV in real-time. Every time the card navigates to a new item (or any source writes to the sync group), the same media is pushed to the TV immediately. The TV follows the card rather than advancing on its own timer.
+
+This is the complement to `start_cast_slideshow`: instead of the TV leading and the card following, the card leads and the TV mirrors.
+
+Stop the session with `stop_cast_slideshow`.
+
+**Parameters**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `media_player_entity_id` | ✅ | — | Target `media_player` entity |
+| `sync_group` | ✅ | — | Shared queue group ID to listen to. Must match the `sync_group` set on the Media Card. |
+| `pre_end_pause` | optional | `true` | Issue a `Pause` keypress a few seconds before a video ends, preventing xcast from exiting to the home screen when the video finishes. |
+| `video_overlap` | optional | `2` | How many seconds before the video end to issue the pre-end pause. |
+
+**Target selector**
+
+Uses a `target:` entity picker set to `integration: media_index`.
+
+**Example**
+
+```yaml
+service: media_index.mirror_to_cast
+target:
+  entity_id: sensor.media_index_photos_total_files
+data:
+  media_player_entity_id: media_player.living_room_tv
+  sync_group: living_room_queue
+  pre_end_pause: true
+```
+
+---
+
 ## Service Usage with Media Card
 
 The Media Index services integrate seamlessly with the [Home Assistant Media Card](https://github.com/markaggar/ha-media-card):
@@ -643,6 +933,21 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 - **`delete_media`** - Called when clicking delete button on Media Card
 - **`mark_for_edit`** - Called when clicking edit button on Media Card
 - **`restore_edited_files`** - Run periodically to restore edited files
+- **`roku_ecp_cast`** - Called by Media Card cast button to push current item to Roku
+- **`stop_cast`** - Called by Media Card when stopping a cast session
+- **`roku_ecp_query`** - Polls Roku playback position for video sync (bypasses 8s HA entity lag)
+- **`roku_ecp_keypress`** - Issues timing-sensitive keypresses (e.g. Pause before video end)
+
+## v1.8 Enhancements Summary
+
+### New Services
+- ✨ **`start_cast_slideshow`** — Autonomous random slideshow directly to a Roku TV; no Media Card required. Supports all `get_random_items` filters, configurable interval, sync group write-back so paired cards can follow along. Auto-detects Roku and uses ECP transport.
+- ✨ **`stop_cast_slideshow`** — Stops a running slideshow or mirror session and sends `keypress/Home` to dismiss xcast from the TV screen.
+- ✨ **`mirror_to_cast`** — Real-time mirror: TV follows a Media Card's sync group navigation instead of advancing on its own timer.
+
+### Enhanced Services
+- 🔄 **`start_cast_slideshow`** — xcast cold-start handling: detects when xcast is fully initialised (via `app_name` entity attribute) and resends the first item, fixing the common "first item doesn't display" issue.
+- 🐛 **`mirror_to_cast` / `roku_ecp_cast`** — File type is now resolved from the database record rather than trusting card-supplied metadata, fixing videos displaying as grey screens on Roku when cast from the Media Card.
 
 ## v1.6.0 Enhancements Summary
 
