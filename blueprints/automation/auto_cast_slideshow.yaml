@@ -174,7 +174,7 @@ blueprint:
       description: >
         Optional guard entity (for example a TV power entity). If set, the
         slideshow will only start when this entity state is NOT `off`, and it
-        will stop immediately when this entity becomes `off`.
+        will stop immediately when this entity becomes `off` or `unavailable`.
       default: ""
       selector:
         entity: {}
@@ -222,7 +222,7 @@ triggers:
     value_template: >
       {{
         (run_when_not_off_entity | default('')) not in ['', none]
-        and states(run_when_not_off_entity) != 'off'
+        and states(run_when_not_off_entity) not in ['off', 'unavailable']
       }}
     for:
       seconds: !input start_delay
@@ -255,7 +255,7 @@ triggers:
     value_template: >
       {{
         (run_when_not_off_entity | default('')) not in ['', none]
-        and states(run_when_not_off_entity) == 'off'
+        and states(run_when_not_off_entity) in ['off', 'unavailable']
       }}
     id: Stop Cast Guard
 
@@ -275,7 +275,7 @@ actions:
             value_template: >
               {{
                 (_run_when_not_off_entity | default('')) in ['', none]
-                or states(_run_when_not_off_entity) != 'off'
+                or states(_run_when_not_off_entity) not in ['off', 'unavailable']
               }}
         sequence:
           # Build the service data dict, omitting optional fields that were
