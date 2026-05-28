@@ -169,6 +169,16 @@ blueprint:
       selector:
         text:
 
+    run_when_not_off_entity:
+      name: Run Only When Entity Is Not Off (Optional)
+      description: >
+        Optional guard entity (for example a TV power entity). If set, the
+        slideshow will only start when this entity state is NOT `off`, and it
+        will stop immediately when this entity becomes `off`.
+      default: ""
+      selector:
+        entity: {}
+
 # Capture all inputs as template variables so they can be used in
 # Jinja2 templates (including conditional service data construction).
 variables:
@@ -187,6 +197,10 @@ variables:
   _anniversary_day: !input anniversary_day
   _anniversary_window_days: !input anniversary_window_days
   _sync_group: !input sync_group
+  _run_when_not_off_entity: !input run_when_not_off_entity
+
+trigger_variables:
+  run_when_not_off_entity: !input run_when_not_off_entity
 
 triggers:
   - trigger: state
@@ -200,6 +214,16 @@ triggers:
     entity_id: !input media_player
     attribute: app_id
     to: "562859"
+    for:
+      seconds: !input start_delay
+    id: Start Cast
+
+  - trigger: template
+    value_template: >
+      {{
+        (run_when_not_off_entity | default('')) not in ['', none]
+        and states(run_when_not_off_entity) != 'off'
+      }}
     for:
       seconds: !input start_delay
     id: Start Cast
@@ -227,6 +251,14 @@ triggers:
       seconds: 0
     id: Stop Cast
 
+  - trigger: template
+    value_template: >
+      {{
+        (run_when_not_off_entity | default('')) not in ['', none]
+        and states(run_when_not_off_entity) == 'off'
+      }}
+    id: Stop Cast Guard
+
 conditions: []
 
 actions:
@@ -239,6 +271,12 @@ actions:
             entity_id: !input media_player
             attribute: app_id
             state: "562859"
+          - condition: template
+            value_template: >
+              {{
+                (_run_when_not_off_entity | default('')) in ['', none]
+                or states(_run_when_not_off_entity) != 'off'
+              }}
         sequence:
           # Build the service data dict, omitting optional fields that were
           # left blank so the service schema validation is not triggered for
@@ -282,6 +320,15 @@ actions:
             target:
               entity_id: !input media_index_sensor
             data: "{{ _service_data }}"
+
+      - conditions:
+          - condition: trigger
+            id:
+              - Stop Cast Guard
+        sequence:
+          - action: media_index.stop_cast_slideshow
+            data:
+              media_player_entity_id: !input media_player
 
       - conditions:
           - condition: trigger
