@@ -1,6 +1,7 @@
 """Media file scanner for Home Assistant."""
 import asyncio
 import os
+import re
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,52 @@ _LOGGER = logging.getLogger(__name__)
 # Media file extensions
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.heic'}
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'}
+
+# Mirrors media-card's /(\d{4})(\d{2})(\d{2})[_-](\d{2})(\d{2})(\d{2})/ pattern.
+# Matches YYYYMMDD_HHMMSS or YYYYMMDD-HHMMSS anywhere in a filename
+# (e.g. "Tanya_20220727_140134.jpg", "20190926_194800.mp4").
+_FILENAME_DATETIME_RE = re.compile(r'(\d{4})(\d{2})(\d{2})[_-](\d{2})(\d{2})(\d{2})')
+
+
+def _apply_filename_timezone_hint(file_path: str, exif_data: dict) -> None:
+    """Correct date_taken when the embedded timestamp is UTC but the filename encodes local time.
+
+    Android MP4s (and some cameras) store the Create Date as UTC in the container
+    while encoding the local capture time in the filename as YYYYMMDD_HHMMSS.
+    If the embedded date_taken differs from the filename time by a whole number of
+    hours within ±14h, we treat the embedded value as UTC-offset and replace it
+    with the filename-derived local time.
+
+    Works for both images and videos.  No-ops silently if the pattern doesn't
+    match or the delta is not a clean UTC offset.
+    """
+    if not exif_data or not exif_data.get('date_taken'):
+        return
+    filename = Path(file_path).name
+    m = _FILENAME_DATETIME_RE.search(filename)
+    if not m:
+        return
+    try:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hour, minute, second = int(m.group(4)), int(m.group(5)), int(m.group(6))
+        filename_dt = datetime(year, month, day, hour, minute, second)
+        filename_ts = int(filename_dt.timestamp())
+        embedded_ts = exif_data['date_taken']
+        delta_seconds = embedded_ts - filename_ts
+        delta_hours = delta_seconds / 3600
+        # Accept only if within ±14h and within 6 minutes of a whole-hour boundary
+        if abs(delta_hours) <= 14 and abs(delta_hours - round(delta_hours)) < 0.1:
+            _LOGGER.debug(
+                "Filename timezone hint applied for %s: embedded %s → filename local %s (UTC offset ~%+.0fh)",
+                filename,
+                datetime.fromtimestamp(embedded_ts).isoformat(),
+                filename_dt.isoformat(),
+                -round(delta_hours),
+            )
+            exif_data['date_taken'] = filename_ts
+    except Exception as exc:  # pylint: disable=broad-except
+        _LOGGER.debug("Filename timezone hint failed for %s: %s", file_path, exc)
+
 
 class MediaScanner:
     """Scanner for media files."""
@@ -274,6 +321,7 @@ class MediaScanner:
                         
                         # Store EXIF data in exif_data table
                         if exif_data and file_id > 0:
+                            _apply_filename_timezone_hint(metadata['path'], exif_data)
                             await self.cache.add_exif_data(file_id, exif_data)
                             _LOGGER.debug("✅ EXIF data saved for file ID %s (has date_taken: %s)", file_id, bool(exif_data.get('date_taken')))
                             
@@ -478,6 +526,7 @@ class MediaScanner:
             
             # Store EXIF/video metadata in exif_data table
             if exif_data:
+                _apply_filename_timezone_hint(file_path, exif_data)
                 await self.cache.add_exif_data(file_id, exif_data)
                 
                 # Check for favorite rating

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.0] - 2026-05-22
 
+### Fixed
+
+- **Filename timezone hint for `date_taken`**: Android MP4s (and some cameras) encode the Create Date as UTC in the container while the filename encodes local capture time (e.g. `20190926_194800.mp4` = local, embedded `2019:09:27 02:48:40` = UTC). The scanner now detects when the embedded timestamp differs from the filename time by a whole number of hours (≤14h offset, within 6-minute tolerance), and replaces `date_taken` with the filename-derived local time. Applies to both images and videos. Uses the same `YYYYMMDD_HHMMSS` / `YYYYMMDD-HHMMSS` filename pattern as the media card's `extractDateFromFilename()`.
+
+- **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
+
+- **Both-favorited duplicate sets: neither file moved to junk**: When both files in a duplicate set were favorited, `_per_file_sort` correctly assigned one as keeper and one as duplicate, but the keeper-selection logic in the same-folder path could surface the wrong file as keeper when both had equal `is_favorited` scores. The sort order (favorited → latest mtime → alphabetical path) already handles this correctly; the real cause was the detection miss (see above) that prevented these pairs from appearing in results at all.
+
 ### Added
 
 - **`roku_ecp_cast` Service**: Cast images and videos directly to a Roku TV via the [xcast](https://channelstore.roku.com/details/687485) ECP app, bypassing browser CORS restrictions by making the ECP call server-side

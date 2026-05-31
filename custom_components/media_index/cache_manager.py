@@ -2240,6 +2240,7 @@ class CacheManager:
                 m.height,
                 m.path,
                 m.folder,
+                m.filename,
                 m.id          AS file_id,
                 e.is_favorited,
                 m.modified_time
@@ -2255,13 +2256,46 @@ class CacheManager:
         # ------------------------------------------------------------------
         # 1. Group rows into raw duplicate sets
         # ------------------------------------------------------------------
+        # Primary pass: exact match on (burst_id, file_size, date_taken, width, height)
         raw_groups: dict[tuple, list[dict]] = defaultdict(list)
         for raw in rows:
             row = dict(raw)
             key = (row["burst_id"], row["file_size"], row["date_taken"], row["width"], row["height"])
             raw_groups[key].append(row)
 
-        raw_sets = [members for members in raw_groups.values() if len(members) >= 2]
+        exact_sets = [members for members in raw_groups.values() if len(members) >= 2]
+
+        # Secondary pass: filename-based match for singletons whose file sizes differ
+        # by at most 1% (e.g. same photo uploaded twice with minor EXIF padding differences).
+        # Only considers files not already matched by the primary pass.
+        _FILE_SIZE_TOLERANCE = 0.01
+        already_matched: set[int] = {m["file_id"] for members in exact_sets for m in members}
+        fname_groups: dict[tuple, list[dict]] = defaultdict(list)
+        for raw in rows:
+            row = dict(raw)
+            if row["file_id"] in already_matched:
+                continue
+            fname_key = (row["burst_id"], row["filename"], row["date_taken"], row["width"], row["height"])
+            fname_groups[fname_key].append(row)
+
+        filename_sets = []
+        for members in fname_groups.values():
+            if len(members) < 2:
+                continue
+            sizes = [m["file_size"] for m in members if m["file_size"] is not None]
+            if len(sizes) == len(members):
+                max_sz, min_sz = max(sizes), min(sizes)
+                if max_sz > 0 and (max_sz - min_sz) / max_sz > _FILE_SIZE_TOLERANCE:
+                    continue  # Size difference too large — not a duplicate
+            filename_sets.append(members)
+
+        if filename_sets:
+            _LOGGER.debug(
+                "find_duplicate_files: %d additional sets found via filename match",
+                len(filename_sets),
+            )
+
+        raw_sets = exact_sets + filename_sets
 
         def _safe_mtime(v) -> int:
             """Coerce modified_time to int; returns 0 for NULL or non-numeric text."""
