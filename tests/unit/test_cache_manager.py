@@ -306,3 +306,61 @@ class TestFindDuplicateFiles:
         await cache.add_exif_data(fid, _exif_data())   # burst_id = None by default
         result = await cache.find_duplicate_files()
         assert result["sets"] == []
+
+    async def test_filename_match_near_identical_size_detected(self, cache):
+        """Filename-based secondary pass: sizes within 1% must be grouped as duplicates.
+
+        Two files share (burst_id, filename, date_taken, width, height) but have
+        slightly different file sizes (0.5% difference) — e.g. the same photo
+        uploaded twice with minor EXIF padding.  They must be detected even though
+        their file sizes differ (and therefore miss the exact-match primary pass).
+        """
+        folder_a = "/media/photo/UploadA"
+        folder_b = "/media/photo/UploadB"
+        size_a = 1_000_000
+        size_b = 1_005_000  # 0.5% larger — within the 1% tolerance
+
+        # Same filename in two different folders, different sizes → secondary pass territory.
+        await self._add_burst_file(
+            cache, f"{folder_a}/photo_001.jpg", folder_a, "burst_fname1",
+            file_size=size_a, is_favorited=1,
+        )
+        await self._add_burst_file(
+            cache, f"{folder_b}/photo_001.jpg", folder_b, "burst_fname1",
+            file_size=size_b,
+        )
+
+        result = await cache.find_duplicate_files()
+        assert len(result["sets"]) == 1, (
+            "files with same filename and ≤1% size difference must be grouped as duplicates"
+        )
+        dup_set = result["sets"][0]
+        all_paths = {dup_set["keeper"]["path"]} | {d["path"] for d in dup_set["duplicates"]}
+        assert f"{folder_a}/photo_001.jpg" in all_paths
+        assert f"{folder_b}/photo_001.jpg" in all_paths
+
+    async def test_filename_match_large_size_difference_not_detected(self, cache):
+        """Filename-based secondary pass: sizes differing by >1% must NOT be grouped.
+
+        Two files share (burst_id, filename, date_taken, width, height) but their
+        file sizes differ by 2%, which exceeds the 1% tolerance.  They must not
+        be treated as duplicates.
+        """
+        folder_a = "/media/photo/SrcA"
+        folder_b = "/media/photo/SrcB"
+        size_a = 1_000_000
+        size_b = 1_020_000  # 2% larger — exceeds the 1% tolerance
+
+        await self._add_burst_file(
+            cache, f"{folder_a}/photo_002.jpg", folder_a, "burst_fname2",
+            file_size=size_a,
+        )
+        await self._add_burst_file(
+            cache, f"{folder_b}/photo_002.jpg", folder_b, "burst_fname2",
+            file_size=size_b,
+        )
+
+        result = await cache.find_duplicate_files()
+        assert result["sets"] == [], (
+            "files with same filename but >1% size difference must not be grouped as duplicates"
+        )
