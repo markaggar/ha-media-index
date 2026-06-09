@@ -13,10 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scans every DB entry, removes those whose file no longer exists on disk, cleans orphaned EXIF rows, and runs VACUUM — identical to the manual `cleanup_database` service
   - Three new options flow settings: **Auto Cleanup** (on/off toggle), **Cleanup Schedule** (daily / weekly / monthly dropdown), **Cleanup Time** (HH:MM string, default `02:00`)
   - Logs a summary: entries checked, stale entries removed, and MB reclaimed by VACUUM
-
-### Fixed
-
-- **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
+ 
+- **HEIC files indexed**: Added `pillow-heif>=0.13.0` as a dependency and registered its Pillow opener at import time so all HEIC file metadata is decoded transparently.
 
 ### Changed
 
@@ -26,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **HEIC files not indexed (EXIF extraction fails)**: `Image.open()` raised "cannot identify image file" for `.heic` files because Pillow does not natively support HEIF/HEIC. Added `pillow-heif>=0.13.0` as a dependency and registered its Pillow opener at import time so all HEIC files are decoded transparently.
+- **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
 
 - **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
 
