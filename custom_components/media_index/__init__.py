@@ -863,6 +863,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     auto_cleanup = config.get(CONF_AUTO_CLEANUP, DEFAULT_AUTO_CLEANUP)
     if auto_cleanup:
         cleanup_schedule = config.get(CONF_CLEANUP_SCHEDULE, DEFAULT_CLEANUP_SCHEDULE)
+        if cleanup_schedule not in ("daily", "weekly", "monthly"):
+            _LOGGER.warning(
+                "Unknown cleanup schedule '%s'; defaulting to '%s'", cleanup_schedule, DEFAULT_CLEANUP_SCHEDULE
+            )
+            cleanup_schedule = DEFAULT_CLEANUP_SCHEDULE
         cleanup_time_str = config.get(CONF_CLEANUP_TIME, DEFAULT_CLEANUP_TIME)
         try:
             cleanup_hour, cleanup_minute = (int(p) for p in cleanup_time_str.split(":"))
