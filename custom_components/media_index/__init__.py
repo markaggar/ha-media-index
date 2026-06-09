@@ -935,7 +935,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     entry.title or entry.entry_id,
                 )
             except Exception as cleanup_err:
-                _LOGGER.error("Scheduled cleanup failed: %s", cleanup_err)
+                _cleanup_state["last_run"] = last
+                _LOGGER.error("Scheduled cleanup failed: %s", cleanup_err, exc_info=True)
 
         remove_cleanup_listener = async_track_time_change(
             hass,
