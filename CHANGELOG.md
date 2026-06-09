@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **HEIC files not indexed (EXIF extraction fails)**: `Image.open()` raised "cannot identify image file" for `.heic` files because Pillow does not natively support HEIF/HEIC. Added `pillow-heif>=0.13.0` as a dependency and registered its Pillow opener at import time so all HEIC files are decoded transparently.
+
 - **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
 
 - **Both-favorited duplicate sets: neither file moved to junk**: When both files in a duplicate set were favorited, `_per_file_sort` correctly assigned one as keeper and one as duplicate, but the keeper-selection logic in the same-folder path could surface the wrong file as keeper when both had equal `is_favorited` scores. The sort order (favorited → latest mtime → alphabetical path) already handles this correctly; the real cause was the detection miss (see above) that prevented these pairs from appearing in results at all.
