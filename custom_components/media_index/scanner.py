@@ -52,14 +52,17 @@ def _apply_filename_timezone_hint(file_path: str, exif_data: dict) -> None:
         embedded_ts = exif_data['date_taken']
         delta_seconds = embedded_ts - filename_ts
         delta_hours = delta_seconds / 3600
-        # Accept only if within ±14h and within 6 minutes of a whole-hour boundary
-        if abs(delta_hours) <= 14 and abs(delta_hours - round(delta_hours)) < 0.1:
+        # Accept if within ±14h and within 6 minutes of a 15-minute boundary.
+        # This handles whole-hour offsets (UTC+5, UTC-8 …) as well as half-hour
+        # and quarter-hour offsets (IST UTC+5:30, NST UTC+5:45, ACST UTC+9:30 …).
+        rounded_offset = round(delta_hours * 4) / 4
+        if abs(delta_hours) <= 14 and abs(delta_hours - rounded_offset) < 0.1:
             _LOGGER.debug(
-                "Filename timezone hint applied for %s: embedded %s → filename local %s (UTC offset ~%+.0fh)",
+                "Filename timezone hint applied for %s: embedded %s → filename local %s (UTC offset %+gh)",
                 filename,
                 datetime.fromtimestamp(embedded_ts).isoformat(),
                 filename_dt.isoformat(),
-                -round(delta_hours),
+                -rounded_offset,
             )
             exif_data['date_taken'] = filename_ts
     except Exception as exc:  # pylint: disable=broad-except

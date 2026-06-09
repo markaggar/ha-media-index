@@ -32,6 +32,9 @@ from .const import (
     CONF_BURST_LOCATION_TOLERANCE_METERS,
     CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
     CONF_BURST_INDEX_AFTER_SCAN,
+    CONF_AUTO_CLEANUP,
+    CONF_CLEANUP_SCHEDULE,
+    CONF_CLEANUP_TIME,
     DEFAULT_BASE_FOLDER,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
@@ -50,7 +53,11 @@ from .const import (
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
     DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
     DEFAULT_BURST_INDEX_AFTER_SCAN,
+    DEFAULT_AUTO_CLEANUP,
+    DEFAULT_CLEANUP_SCHEDULE,
+    DEFAULT_CLEANUP_TIME,
     SCAN_SCHEDULES,
+    CLEANUP_SCHEDULES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -274,6 +281,18 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_BURST_INDEX_AFTER_SCAN,
             self.config_entry.data.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN),
         )
+        current_auto_cleanup = self.config_entry.options.get(
+            CONF_AUTO_CLEANUP,
+            self.config_entry.data.get(CONF_AUTO_CLEANUP, DEFAULT_AUTO_CLEANUP),
+        )
+        current_cleanup_schedule = self.config_entry.options.get(
+            CONF_CLEANUP_SCHEDULE,
+            self.config_entry.data.get(CONF_CLEANUP_SCHEDULE, DEFAULT_CLEANUP_SCHEDULE),
+        )
+        current_cleanup_time = self.config_entry.options.get(
+            CONF_CLEANUP_TIME,
+            self.config_entry.data.get(CONF_CLEANUP_TIME, DEFAULT_CLEANUP_TIME),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -337,6 +356,15 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_BURST_INDEX_AFTER_SCAN, default=current_burst_index_after_scan
                     ): bool,
+                    vol.Optional(
+                        CONF_AUTO_CLEANUP, default=current_auto_cleanup
+                    ): bool,
+                    vol.Optional(
+                        CONF_CLEANUP_SCHEDULE, default=current_cleanup_schedule
+                    ): selector.SelectSelector({"options": CLEANUP_SCHEDULES}),
+                    vol.Optional(
+                        CONF_CLEANUP_TIME, default=current_cleanup_time
+                    ): str,
                 }
             ),
         )

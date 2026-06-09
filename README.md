@@ -255,6 +255,19 @@ These options keep burst group (multiple images created at the same time and pla
 
 See the integration options panel in Home Assistant for descriptions and recommended defaults for each setting.
 
+### Automatic Cleanup
+
+When files or folders are deleted directly on disk (outside of Home Assistant), the database can accumulate stale entries pointing to files that no longer exist. The integration handles this automatically:
+
+- **Enabled by default** — no action required after upgrading. Every install gets a weekly cleanup at 2:00 AM out of the box.
+- **What it does**: Scans every database entry, removes those whose file no longer exists on disk, cleans up orphaned EXIF rows, and runs a VACUUM to reclaim disk space.
+- **Configurable** via **Settings** → **Devices & Services** → **Media Index** → **Configure**:
+  - **Enable automatic cleanup** — toggle on/off (default: on)
+  - **Cleanup schedule** — `daily`, `weekly` (default), or `monthly`
+  - **Cleanup time** — time of day in `HH:MM` format (default: `02:00`)
+
+You can also run cleanup on demand at any time using the `media_index.cleanup_database` service.
+
 ### Reconfiguration
 
 After setup, you can reconfigure options via:
