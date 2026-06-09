@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Three new options flow settings: **Auto Cleanup** (on/off toggle), **Cleanup Schedule** (daily / weekly / monthly dropdown), **Cleanup Time** (HH:MM string, default `02:00`)
   - Logs a summary: entries checked, stale entries removed, and MB reclaimed by VACUUM
 
+### Fixed
+
+- **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
+
 ### Changed
 
 - **Filename timezone hint for `date_taken`**: Android MP4s (and some cameras) encode the Create Date as UTC in the container while the filename encodes local capture time (e.g. `20190926_194800.mp4` = local, embedded `2019:09:27 02:48:40` = UTC). The scanner now detects when the embedded timestamp differs from the filename time by a UTC-standard offset (≤14h, within 6-minute tolerance), and replaces `date_taken` with the filename-derived local time. Supports whole-hour, half-hour, and quarter-hour offsets (e.g. IST UTC+5:30, NST UTC+5:45, ACST UTC+9:30). Applies to both images and videos. Uses the same `YYYYMMDD_HHMMSS` / `YYYYMMDD-HHMMSS` filename pattern as the media card's `extractDateFromFilename()`.
