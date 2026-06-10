@@ -14,7 +14,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_time_interval, async_track_time_change
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -34,6 +34,9 @@ from .const import (
     CONF_BURST_LOCATION_TOLERANCE_METERS,
     CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
     CONF_BURST_INDEX_AFTER_SCAN,
+    CONF_AUTO_CLEANUP,
+    CONF_CLEANUP_SCHEDULE,
+    CONF_CLEANUP_TIME,
     DEFAULT_ENABLE_WATCHER,
     DEFAULT_GEOCODE_ENABLED,
     DEFAULT_GEOCODE_NATIVE_LANGUAGE,
@@ -44,6 +47,9 @@ from .const import (
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
     DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
     DEFAULT_BURST_INDEX_AFTER_SCAN,
+    DEFAULT_AUTO_CLEANUP,
+    DEFAULT_CLEANUP_SCHEDULE,
+    DEFAULT_CLEANUP_TIME,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
     SCAN_SCHEDULE_STARTUP_ONLY,
@@ -852,6 +858,99 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, _weekly_vacuum_callback, timedelta(weeks=1)
     )
     entry.async_on_unload(remove_vacuum_listener)
+
+    # Setup scheduled cleanup (removes stale DB entries for deleted files/folders)
+    auto_cleanup = config.get(CONF_AUTO_CLEANUP, DEFAULT_AUTO_CLEANUP)
+    if auto_cleanup:
+        cleanup_schedule = config.get(CONF_CLEANUP_SCHEDULE, DEFAULT_CLEANUP_SCHEDULE)
+        if cleanup_schedule not in ("daily", "weekly", "monthly"):
+            _LOGGER.warning(
+                "Unknown cleanup schedule '%s'; defaulting to '%s'", cleanup_schedule, DEFAULT_CLEANUP_SCHEDULE
+            )
+            cleanup_schedule = DEFAULT_CLEANUP_SCHEDULE
+        cleanup_time_str = config.get(CONF_CLEANUP_TIME, DEFAULT_CLEANUP_TIME)
+        try:
+            cleanup_hour, cleanup_minute = (int(p) for p in cleanup_time_str.split(":"))
+        except (ValueError, AttributeError):
+            cleanup_hour, cleanup_minute = 2, 0
+
+        # last_cleanup tracks when the time-change callback last fired so we can
+        # enforce daily/weekly/monthly frequency without a separate interval timer.
+        _cleanup_state = {"last_run": None}
+
+        async def _scheduled_cleanup_callback(now):
+            """Run cleanup if the configured frequency has elapsed since last run."""
+            from datetime import date
+            last = _cleanup_state["last_run"]
+            today = now.date() if hasattr(now, "date") else date.today()
+
+            if last is not None:
+                if cleanup_schedule == "daily":
+                    if (today - last).days < 1:
+                        return
+                elif cleanup_schedule == "weekly":
+                    if (today - last).days < 7:
+                        return
+                elif cleanup_schedule == "monthly":
+                    # Approximate: 28 days minimum
+                    if (today - last).days < 28:
+                        return
+
+            _cleanup_state["last_run"] = today
+            _LOGGER.info(
+                "Scheduled cleanup starting (schedule=%s, time=%02d:%02d) [%s]",
+                cleanup_schedule, cleanup_hour, cleanup_minute,
+                entry.title or entry.entry_id,
+            )
+            try:
+                db_size_before = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+
+                async with cache_manager._db.execute(
+                    "SELECT id, path FROM media_files ORDER BY path"
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+                stale_count = 0
+                checked = 0
+                for row in rows:
+                    _, file_path = row
+                    checked += 1
+                    exists = await hass.async_add_executor_job(os.path.exists, file_path)
+                    if not exists:
+                        await cache_manager.delete_file(file_path)
+                        stale_count += 1
+                        _LOGGER.debug("Scheduled cleanup: removed stale entry %s", file_path)
+                    if checked % 50 == 0:
+                        await asyncio.sleep(0)
+
+                await cache_manager.cleanup_orphaned_exif()
+                await cache_manager.vacuum_database()
+
+                db_size_after = os.path.getsize(cache_manager.db_path) / (1024 * 1024)
+                _LOGGER.info(
+                    "Scheduled cleanup complete: %d stale of %d checked, "
+                    "%.2f MB → %.2f MB (reclaimed %.2f MB) [%s]",
+                    stale_count, checked,
+                    db_size_before, db_size_after, db_size_before - db_size_after,
+                    entry.title or entry.entry_id,
+                )
+            except Exception as cleanup_err:
+                _cleanup_state["last_run"] = last
+                _LOGGER.error("Scheduled cleanup failed: %s", cleanup_err, exc_info=True)
+
+        remove_cleanup_listener = async_track_time_change(
+            hass,
+            _scheduled_cleanup_callback,
+            hour=cleanup_hour,
+            minute=cleanup_minute,
+            second=0,
+        )
+        entry.async_on_unload(remove_cleanup_listener)
+        _LOGGER.info(
+            "Scheduled cleanup enabled: %s at %02d:%02d [%s]",
+            cleanup_schedule, cleanup_hour, cleanup_minute,
+            entry.title or entry.entry_id,
+        )
     
     # Register services (only once, on first entry setup)
     if not hass.services.has_service(DOMAIN, SERVICE_GET_RANDOM_ITEMS):

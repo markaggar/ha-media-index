@@ -113,10 +113,14 @@ class CastSessionManager:
 
 
 class HaMediaPlayerTransport:
-    """Transport that pushes media to any HA media_player entity.
+    """Transport that pushes media to any HA media_player entity via play_media.
 
-    Uses media_player.play_media — works for LG WebOS, Chromecast, and most
-    other HA-integrated players.
+    Works for integrations whose media_player entity accepts arbitrary HTTP URLs
+    via media_player.play_media: Chromecast (Google Cast), DLNA DMR devices,
+    and Roku (via XCast — see RokuEcpTransport for the preferred Roku path).
+
+    Does NOT work for LG WebOS, Samsung SmartThings, or other TV integrations
+    whose media_player entity does not accept direct HTTP stream URLs.
     """
 
     async def push(self, hass, entity_id: str, media_url: str, file_type: str, item: dict | None = None) -> None:

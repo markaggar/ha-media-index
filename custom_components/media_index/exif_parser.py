@@ -8,6 +8,12 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 import piexif
 
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass  # pillow-heif not installed; HEIC files will fail gracefully
+
 _LOGGER = logging.getLogger(__name__)
 
 

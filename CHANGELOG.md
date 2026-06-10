@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-06-04
+
+### Added
+
+- **Periodic automatic cleanup scheduling**: The integration can now periodically remove stale database entries for files that have been deleted from disk, without any manual service call. Runs at a configurable time of day (default 02:00) on a daily, weekly (default), or monthly schedule. Enabled by default.
+  - Scans every DB entry, removes those whose file no longer exists on disk, cleans orphaned EXIF rows, and runs VACUUM — identical to the manual `cleanup_database` service
+  - Three new options flow settings: **Auto Cleanup** (on/off toggle), **Cleanup Schedule** (daily / weekly / monthly dropdown), **Cleanup Time** (HH:MM string, default `02:00`)
+  - Logs a summary: entries checked, stale entries removed, and MB reclaimed by VACUUM
+ 
+- **HEIC files indexed**: Added `pillow-heif>=0.13.0` as a dependency and registered its Pillow opener at import time so all HEIC file metadata is decoded transparently.
+
+### Changed
+
+- **Filename timezone hint for `date_taken`**: Android MP4s (and some cameras) encode the Create Date as UTC in the container while the filename encodes local capture time (e.g. `20190926_194800.mp4` = local, embedded `2019:09:27 02:48:40` = UTC). The scanner now detects when the embedded timestamp differs from the filename time by a UTC-standard offset (≤14h, within 6-minute tolerance), and replaces `date_taken` with the filename-derived local time. Supports whole-hour, half-hour, and quarter-hour offsets (e.g. IST UTC+5:30, NST UTC+5:45, ACST UTC+9:30). Applies to both images and videos. Uses the same `YYYYMMDD_HHMMSS` / `YYYYMMDD-HHMMSS` filename pattern as the media card's `extractDateFromFilename()`.
+
+- **`SensorStateClass.MEASUREMENT` on total-files sensor**: The `sensor.media_index_*_total_files` entity now declares `state_class: measurement`, so Home Assistant renders its history as a line graph instead of a stepped activity chart.
+
+### Fixed
+
+- **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
+
+- **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
+
+- **Both-favorited duplicate sets: neither file moved to junk**: When both files in a duplicate set were favorited, `_per_file_sort` correctly assigned one as keeper and one as duplicate, but the keeper-selection logic in the same-folder path could surface the wrong file as keeper when both had equal `is_favorited` scores. The sort order (favorited → latest mtime → alphabetical path) already handles this correctly; the real cause was the detection miss (see above) that prevented these pairs from appearing in results at all.
+
 ## [1.8.0] - 2026-05-22
 
 ### Added

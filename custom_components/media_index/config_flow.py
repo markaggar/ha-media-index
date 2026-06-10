@@ -32,6 +32,9 @@ from .const import (
     CONF_BURST_LOCATION_TOLERANCE_METERS,
     CONF_BURST_AUTO_INDEX_INTERVAL_HOURS,
     CONF_BURST_INDEX_AFTER_SCAN,
+    CONF_AUTO_CLEANUP,
+    CONF_CLEANUP_SCHEDULE,
+    CONF_CLEANUP_TIME,
     DEFAULT_BASE_FOLDER,
     DEFAULT_SCAN_ON_STARTUP,
     DEFAULT_SCAN_SCHEDULE,
@@ -50,7 +53,11 @@ from .const import (
     DEFAULT_BURST_LOCATION_TOLERANCE_METERS,
     DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS,
     DEFAULT_BURST_INDEX_AFTER_SCAN,
+    DEFAULT_AUTO_CLEANUP,
+    DEFAULT_CLEANUP_SCHEDULE,
+    DEFAULT_CLEANUP_TIME,
     SCAN_SCHEDULES,
+    CLEANUP_SCHEDULES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,6 +164,30 @@ class MediaIndexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_CACHE_MAX_AGE, default=DEFAULT_CACHE_MAX_AGE
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                    vol.Optional(
+                        CONF_AUTO_BURST_INDEX, default=DEFAULT_AUTO_BURST_INDEX
+                    ): bool,
+                    vol.Optional(
+                        CONF_BURST_TIME_WINDOW_SECONDS, default=DEFAULT_BURST_TIME_WINDOW_SECONDS
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+                    vol.Optional(
+                        CONF_BURST_LOCATION_TOLERANCE_METERS, default=DEFAULT_BURST_LOCATION_TOLERANCE_METERS
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
+                    vol.Optional(
+                        CONF_BURST_AUTO_INDEX_INTERVAL_HOURS, default=DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
+                    vol.Optional(
+                        CONF_BURST_INDEX_AFTER_SCAN, default=DEFAULT_BURST_INDEX_AFTER_SCAN
+                    ): bool,
+                    vol.Optional(
+                        CONF_AUTO_CLEANUP, default=DEFAULT_AUTO_CLEANUP
+                    ): bool,
+                    vol.Optional(
+                        CONF_CLEANUP_SCHEDULE, default=DEFAULT_CLEANUP_SCHEDULE
+                    ): selector.SelectSelector({"options": CLEANUP_SCHEDULES}),
+                    vol.Optional(
+                        CONF_CLEANUP_TIME, default=DEFAULT_CLEANUP_TIME
+                    ): str,
                 }
             ),
             errors=errors,
@@ -274,6 +305,18 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
             CONF_BURST_INDEX_AFTER_SCAN,
             self.config_entry.data.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN),
         )
+        current_auto_cleanup = self.config_entry.options.get(
+            CONF_AUTO_CLEANUP,
+            self.config_entry.data.get(CONF_AUTO_CLEANUP, DEFAULT_AUTO_CLEANUP),
+        )
+        current_cleanup_schedule = self.config_entry.options.get(
+            CONF_CLEANUP_SCHEDULE,
+            self.config_entry.data.get(CONF_CLEANUP_SCHEDULE, DEFAULT_CLEANUP_SCHEDULE),
+        )
+        current_cleanup_time = self.config_entry.options.get(
+            CONF_CLEANUP_TIME,
+            self.config_entry.data.get(CONF_CLEANUP_TIME, DEFAULT_CLEANUP_TIME),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -337,6 +380,15 @@ class MediaIndexOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_BURST_INDEX_AFTER_SCAN, default=current_burst_index_after_scan
                     ): bool,
+                    vol.Optional(
+                        CONF_AUTO_CLEANUP, default=current_auto_cleanup
+                    ): bool,
+                    vol.Optional(
+                        CONF_CLEANUP_SCHEDULE, default=current_cleanup_schedule
+                    ): selector.SelectSelector({"options": CLEANUP_SCHEDULES}),
+                    vol.Optional(
+                        CONF_CLEANUP_TIME, default=current_cleanup_time
+                    ): str,
                 }
             ),
         )

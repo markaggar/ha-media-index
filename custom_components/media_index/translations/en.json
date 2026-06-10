@@ -19,7 +19,15 @@
           "auto_install_libmediainfo": "Auto-install libmediainfo for video metadata extraction. During initial setup, Home Assistant restart required after install. When using install_libmediainfo service, integration auto-reloads (no restart needed). If you have multiple Media Index instances, only enable this for one.",
           "scan_without_libmediainfo": "Allow scanning without libmediainfo (images only). Enable this if you do not have video files and want scanning to proceed even when libmediainfo is not installed. Video metadata will not be extracted.",
           "batch_size": "Batch size (files per batch)",
-          "cache_max_age_days": "Cache max age (days)"
+          "cache_max_age_days": "Cache max age (days)",
+          "auto_burst_index": "Auto Burst Indexing",
+          "burst_time_window_seconds": "Burst Time Window (seconds)",
+          "burst_location_tolerance_meters": "Burst GPS Tolerance (meters)",
+          "burst_auto_index_interval_hours": "Minimum Hours Between Watcher Re-indexes",
+          "burst_index_after_scan": "Re-index Burst Groups After Each Full Scan",
+          "auto_cleanup": "Enable automatic cleanup (remove deleted files from database)",
+          "cleanup_schedule": "Cleanup schedule",
+          "cleanup_time": "Cleanup time (HH:MM, e.g. 02:00)"
         }
       }
     },
@@ -54,7 +62,10 @@
           "burst_time_window_seconds": "Burst Time Window (seconds)",
           "burst_location_tolerance_meters": "Burst GPS Tolerance (meters)",
           "burst_auto_index_interval_hours": "Minimum Hours Between Watcher Re-indexes",
-          "burst_index_after_scan": "Re-index Burst Groups After Each Full Scan"
+          "burst_index_after_scan": "Re-index Burst Groups After Each Full Scan",
+          "auto_cleanup": "Enable automatic cleanup (remove deleted files from database)",
+          "cleanup_schedule": "Cleanup schedule",
+          "cleanup_time": "Cleanup time (HH:MM, e.g. 02:00)"
         }
       }
     }

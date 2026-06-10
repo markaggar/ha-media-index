@@ -62,6 +62,9 @@ CONF_BURST_TIME_WINDOW_SECONDS: Final = "burst_time_window_seconds"
 CONF_BURST_LOCATION_TOLERANCE_METERS: Final = "burst_location_tolerance_meters"
 CONF_BURST_AUTO_INDEX_INTERVAL_HOURS: Final = "burst_auto_index_interval_hours"
 CONF_BURST_INDEX_AFTER_SCAN: Final = "burst_index_after_scan"
+CONF_AUTO_CLEANUP: Final = "auto_cleanup"
+CONF_CLEANUP_SCHEDULE: Final = "cleanup_schedule"
+CONF_CLEANUP_TIME: Final = "cleanup_time"
 
 # Defaults
 DEFAULT_BASE_FOLDER: Final = "/media"
@@ -83,6 +86,9 @@ DEFAULT_BURST_TIME_WINDOW_SECONDS: Final = 10
 DEFAULT_BURST_LOCATION_TOLERANCE_METERS: Final = 50
 DEFAULT_BURST_AUTO_INDEX_INTERVAL_HOURS: Final = 24
 DEFAULT_BURST_INDEX_AFTER_SCAN: Final = False
+DEFAULT_AUTO_CLEANUP: Final = True
+DEFAULT_CLEANUP_SCHEDULE: Final = "weekly"
+DEFAULT_CLEANUP_TIME: Final = "02:00"
 
 # Installation timeouts and delays
 INSTALL_TIMEOUT_APK: Final = 30  # Reduced from 60 to fail faster when internet is down
@@ -101,6 +107,17 @@ SCAN_SCHEDULES: Final = [
     SCAN_SCHEDULE_HOURLY,
     SCAN_SCHEDULE_DAILY,
     SCAN_SCHEDULE_WEEKLY,
+]
+
+# Cleanup schedule options
+CLEANUP_SCHEDULE_DAILY: Final = "daily"
+CLEANUP_SCHEDULE_WEEKLY: Final = "weekly"
+CLEANUP_SCHEDULE_MONTHLY: Final = "monthly"
+
+CLEANUP_SCHEDULES: Final = [
+    CLEANUP_SCHEDULE_DAILY,
+    CLEANUP_SCHEDULE_WEEKLY,
+    CLEANUP_SCHEDULE_MONTHLY,
 ]
 
 # Scan status
