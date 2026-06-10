@@ -793,10 +793,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 name=f"media_index_scan_{entry.entry_id}"
             )
         
-        # Listen for Home Assistant start event to trigger scan
+        # If HA is already running (e.g. integration added at runtime via UI),
+        # fire immediately. Otherwise wait for the started event.
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
-        _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
+        from homeassistant.core import CoreState
+        if hass.state is CoreState.running:
+            _LOGGER.info("HA already running — triggering startup scan immediately")
+            hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
+        else:
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
+            _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
     else:
         _LOGGER.info("Startup scan disabled by configuration")
     
