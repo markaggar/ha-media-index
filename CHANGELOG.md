@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-06-10
+
+### Changed
+
+- **New instance does not scan on creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
+
 ## [1.9.0] - 2026-06-04
 
 ### Added
@@ -25,8 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
-
-- **New instance does not scan on creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. The integration now checks `hass.state` at setup time and triggers the initial scan immediately when HA is already in the running state.
 
 - **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
 

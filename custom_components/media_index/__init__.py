@@ -762,47 +762,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Trigger initial scan AFTER Home Assistant has fully started (not during setup)
     # Use config already constructed above
     watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
-    
-    if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
-        async def _trigger_startup_scan(_event=None):
-            """Trigger scan after Home Assistant has fully started."""
-            # Block if pymediainfo not available (unless user opted to scan without it)
-            if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-                scan_without_libmediainfo = config.get(
-                    CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+
+    async def _trigger_startup_scan(_event=None):
+        """Trigger scan after Home Assistant has fully started."""
+        # Block if pymediainfo not available (unless user opted to scan without it)
+        if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
+            scan_without_libmediainfo = config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+            )
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Startup scan SKIPPED: libmediainfo not available and "
+                    "'scan_without_libmediainfo' is disabled. "
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support."
                 )
-                if not scan_without_libmediainfo:
-                    _LOGGER.warning(
-                        "⏸️ Startup scan SKIPPED: libmediainfo not available and "
-                        "'scan_without_libmediainfo' is disabled. "
-                        "Enable 'scan_without_libmediainfo' in options if you only index images, "
-                        "or call 'media_index.install_libmediainfo' to install video support."
-                    )
-                    return
-                _LOGGER.info(
-                    "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
-                    "proceeding with scan (video metadata will not be extracted)."
-                )
-            
+                return
             _LOGGER.info(
-                "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]", 
-                entry.title or entry.entry_id, base_folder, watched_folders
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                "proceeding with scan (video metadata will not be extracted)."
             )
-            hass.async_create_task(
-                scanner.scan_folder(base_folder, watched_folders),
-                name=f"media_index_scan_{entry.entry_id}"
-            )
-        
-        # If HA is already running (e.g. integration added at runtime via UI),
-        # fire immediately. Otherwise wait for the started event.
-        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-        from homeassistant.core import CoreState
-        if hass.state is CoreState.running:
-            _LOGGER.info("HA already running — triggering startup scan immediately")
-            hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
-        else:
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
-            _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
+
+        _LOGGER.info(
+            "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]",
+            entry.title or entry.entry_id, base_folder, watched_folders
+        )
+        hass.async_create_task(
+            scanner.scan_folder(base_folder, watched_folders),
+            name=f"media_index_scan_{entry.entry_id}"
+        )
+
+    # If HA is already running (integration added at runtime via UI), always scan
+    # immediately regardless of scan_on_startup — the user just created this instance
+    # and expects it to index files right away.
+    if hass.state is CoreState.running:
+        _LOGGER.info("HA already running — triggering initial scan immediately")
+        hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
+    elif config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
+        # On HA restart, respect the scan_on_startup setting
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
+        _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
     else:
         _LOGGER.info("Startup scan disabled by configuration")
     
