@@ -787,25 +787,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         _LOGGER.info(
-            "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]",
-            entry.title or entry.entry_id, base_folder, watched_folders
+            "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s, watched_only: %s]",
+            entry.title or entry.entry_id, base_folder, watched_folders, _watched_only
         )
         hass.async_create_task(
-            scanner.scan_folder(base_folder, watched_folders),
+            scanner.scan_folder(base_folder, watched_folders, watched_only=_watched_only),
             name=f"media_index_scan_{entry.entry_id}"
         )
 
-    # If HA is already running (integration added at runtime via UI), always scan
-    # immediately regardless of scan_on_startup — the user just created this instance
-    # and expects it to index files right away.
+    # If HA is already running (integration added at runtime via UI), always do a full
+    # scan immediately — the user just created this instance and expects complete indexing.
     if hass.state is CoreState.running:
-        _LOGGER.info("HA already running — triggering initial scan immediately")
+        _watched_only = False
+        _LOGGER.info("HA already running — triggering full initial scan immediately")
         hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
     elif config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
-        # On HA restart, respect the scan_on_startup setting
+        # On HA restart, restrict to watched folders when configured (faster — only catches
+        # changes that occurred in monitored paths while HA was offline).
+        # Falls back to full scan when no watched folders are specified.
+        _watched_only = bool(watched_folders)
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
-        _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
+        _LOGGER.info(
+            "Startup scan scheduled after HA start (watched_only=%s, watched_folders=%s)",
+            _watched_only, watched_folders
+        )
     else:
+        _watched_only = False  # unused, but defined for clarity
         _LOGGER.info("Startup scan disabled by configuration")
     
     # Start file system watcher if enabled AND watched_folders are specified

@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **New instance does not scan on creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
+- **New instance does not scan on creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate full scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
+
+- **`scan_on_startup` default changed to `false` and scoped to watched folders**: Rescanning on every HA restart was wasteful and slowed startup. The default is now `false`. When enabled and watched folders are configured, the restart scan is restricted to those folders only (the paths most likely to have changed while HA was offline); it falls back to a full scan when no watched folders are specified. The config label is updated to reflect this behaviour.
 
 ## [1.9.0] - 2026-06-04
 
