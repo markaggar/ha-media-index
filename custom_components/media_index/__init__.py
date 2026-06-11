@@ -2086,12 +2086,9 @@ def _register_services(hass: HomeAssistant):
         config = instance["config"]
 
         folder = call.data.get("folder")
-        prefer_folder = call.data.get("prefer_folder")
-        # prefer_folders accepts a comma-delimited string; merge with legacy prefer_folder
+        # prefer_folders accepts a comma-delimited string of folder paths/suffixes
         raw_pf = call.data.get("prefer_folders", "")
         prefer_folders = [p.strip() for p in raw_pf.split(",") if p.strip()] if raw_pf else []
-        if prefer_folder and prefer_folder not in prefer_folders:
-            prefer_folders.append(prefer_folder)
         dry_run = call.data.get("dry_run", True)
         auto_delete = call.data.get("auto_delete", False)
 
@@ -2142,6 +2139,18 @@ def _register_services(hass: HomeAssistant):
                             keeper_path,
                         )
                         continue
+
+                    # Propagate favorite status: if any duplicate being moved is
+                    # favorited but the keeper isn't, mark the keeper as favorited so
+                    # the status is not silently lost.
+                    if grp["keeper"]["is_favorited"] == 0 and any(
+                        d["is_favorited"] for d in grp["duplicates"]
+                    ):
+                        _LOGGER.debug(
+                            "find_duplicate_files: propagating favorite to keeper: %s",
+                            keeper_path,
+                        )
+                        await cache_manager.update_favorite(keeper_path, True)
 
                     for dup in grp["duplicates"]:
                         dup_path = dup["path"]
@@ -3163,7 +3172,6 @@ def _register_services(hass: HomeAssistant):
         handle_find_duplicate_files,
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
-            vol.Optional("prefer_folder"): cv.string,
             vol.Optional("prefer_folders"): cv.string,
             vol.Optional("dry_run", default=True): cv.boolean,
             vol.Optional("auto_delete", default=False): cv.boolean,

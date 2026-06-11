@@ -2193,7 +2193,6 @@ class CacheManager:
     async def find_duplicate_files(
         self,
         folder: str | None = None,
-        prefer_folder: str | None = None,
         prefer_folders: list[str] | None = None,
     ) -> dict:
         """Find duplicate files within burst groups using file_size + date_taken + dimensions.
@@ -2210,9 +2209,12 @@ class CacheManager:
              tallied.  The folder appearing as the majority contributor (more member
              files across all sets in that pair) becomes the keeper folder for the
              whole pair.  Tie-breaks: more favorited files → alphabetically first path.
-          3. If ``prefer_folders`` is supplied, any folder whose path starts with one
-             of those prefixes wins any pair it belongs to.
-             The legacy single ``prefer_folder`` argument is merged into the list.
+          3. If ``prefer_folders`` is supplied, any folder that matches one of those
+             entries wins any pair it belongs to.  Matching is by full path or by
+             path suffix (so ``/Camera Roll`` matches
+             ``/media/homes/.../Camera Roll``).
+             When both folders in a pair are preferred, the one matching the earliest
+             entry in the list wins.
           4. Within each set the keeper is the member in the keeper folder that is
              most favorited / latest modified_time / first alphabetically.  All
              members in the other folder become duplicates.
@@ -2222,9 +2224,9 @@ class CacheManager:
 
         Args:
             folder:         Optional folder prefix to restrict the search.
-            prefer_folder:  Legacy single path prefix — merged into prefer_folders.
-            prefer_folders: List of path prefixes that should always be chosen as
-                            keeper folders when they appear in a pair.
+            prefer_folders: Ordered list of folder path entries.  Each entry can be a
+                            full absolute path or a partial/suffix path.  Entries
+                            earlier in the list take precedence over later entries.
 
         Returns:
             {
@@ -2254,19 +2256,30 @@ class CacheManager:
         """
         from collections import defaultdict
 
-        # Normalise prefer_folders — merge legacy prefer_folder into list
-        _prefer_folders: list[str] = list(prefer_folders or [])
-        if prefer_folder and prefer_folder not in _prefer_folders:
-            _prefer_folders.append(prefer_folder)
-        # Strip trailing slashes for consistent prefix matching
-        _prefer_folders = [p.rstrip('/') for p in _prefer_folders]
+        # Normalise prefer_folders — strip trailing slashes for consistent matching
+        _prefer_folders: list[str] = [p.rstrip('/') for p in (prefer_folders or [])]
+
+        def _prefer_rank(folder_path: str) -> int:
+            """Return the priority rank of folder_path (lower = higher priority).
+
+            Each entry in _prefer_folders is matched as:
+              - a full absolute path  (exact or ancestor prefix), OR
+              - a path suffix         (entry can omit the leading base dirs)
+            """
+            for i, pf in enumerate(_prefer_folders):
+                # Full-path match: exact or pf is an ancestor of folder_path
+                if folder_path == pf or folder_path.startswith(pf + '/'):
+                    return i
+                # Suffix match: pf (with normalised leading slash) ends the folder path
+                # or appears as an intermediate segment
+                pf_as_suffix = '/' + pf.lstrip('/')
+                if folder_path.endswith(pf_as_suffix) or (pf_as_suffix + '/') in folder_path:
+                    return i
+            return len(_prefer_folders)  # not preferred
 
         def _is_preferred(folder_path: str) -> bool:
-            """Return True if folder_path starts with any prefer prefix."""
-            return any(
-                folder_path == pf or folder_path.startswith(pf + '/')
-                for pf in _prefer_folders
-            )
+            """Return True if folder_path matches any prefer entry."""
+            return _prefer_rank(folder_path) < len(_prefer_folders)
 
         where = "WHERE e.burst_id IS NOT NULL AND m.file_size IS NOT NULL AND e.date_taken IS NOT NULL"
         params: list = []
@@ -2382,8 +2395,13 @@ class CacheManager:
             f0, f1 = pair
             s0, s1 = stats[f0], stats[f1]
             if _prefer_folders and any(_is_preferred(f) for f in pair):
-                # Pick the preferred folder; if both are preferred, take the first alphabetically
-                preferred_in_pair = [f for f in pair if _is_preferred(f)]
+                # When one or both folders are preferred, pick the one matching the
+                # earliest (highest-priority) entry in _prefer_folders.  Rank uses
+                # the same full-path / suffix matching as _is_preferred.
+                preferred_in_pair = sorted(
+                    [f for f in pair if _is_preferred(f)],
+                    key=_prefer_rank,
+                )
                 keeper_for_pair[pair] = preferred_in_pair[0]
             elif s0["count"] > s1["count"]:
                 keeper_for_pair[pair] = f0

@@ -11,11 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`scan_on_startup` default changed to `false` and scoped to watched folders**: Rescanning on every HA restart was wasteful and slowed startup. The default is now `false`. When enabled and watched folders are configured, the restart scan is restricted to those folders only (the paths most likely to have changed while HA was offline); it falls back to a full scan when no watched folders are specified. The config label is updated to reflect this behaviour.
 
-- **`find_duplicate_files` now runs burst indexing first**: The service automatically runs `index_burst_groups` before searching for duplicates so the duplicate detection always works from fresh burst data. No separate `index_burst_groups` call is required beforehand.
+- **`find_duplicate_files` `prefer_folders` now supports partial/suffix paths and respects list order**: Two bugs fixed. (1) `prefer_folders` entries were matched only as path prefixes, so a partial path like `/Camera Roll` would not match `/media/homes/.../Camera Roll`. Matching now also checks whether the entry appears as a suffix of the folder path, so either form works. (2) When both folders in a pair matched the `prefer_folders` list, the winner was chosen alphabetically from the folder pair instead of by the user's preference order (first entry = highest priority). Both are now resolved. Also removed the deprecated `prefer_folder` (singular) parameter.
 
-- **`find_duplicate_files` accepts a list of preferred keeper folders**: The new `prefer_folders` field accepts a comma-delimited list of folder paths (e.g. `/media/Primary,/media/Archive`). Any file residing under one of these paths wins keeper status over the automatic majority-vote logic. The legacy `prefer_folder` (single path) still works and is silently merged into the list.
-
-- **`find_duplicate_files` verifies keeper exists on disk before deleting**: When `dry_run=false` and `auto_delete=true`, each duplicate group now confirms the keeper file is present on disk before moving any of its duplicates to `_Junk`. Groups whose keeper is missing are skipped with a warning, preventing orphaned files.
+- **`find_duplicate_files` propagates favorite status to keeper on auto-delete**: When `dry_run=false` and `auto_delete=true`, if any duplicate being moved to `_Junk` was favorited but its keeper was not, the keeper is now marked as favorited before the duplicate is removed, so the favorite status is not silently lost.
 
 ### Fixed
 
