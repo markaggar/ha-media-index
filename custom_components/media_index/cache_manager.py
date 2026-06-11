@@ -829,7 +829,33 @@ class CacheManager:
         ))
         
         await self._db.commit()
-    
+
+    async def check_and_mark_interrupted_scans(self) -> bool:
+        """Check for scans interrupted by a previous HA restart or crash.
+
+        Any scan_history row still in 'running' state at startup was never completed.
+        Marks them as 'interrupted' so they won't re-trigger on subsequent restarts.
+
+        Returns:
+            True if at least one interrupted scan was found and marked.
+        """
+        async with self._db.execute(
+            "SELECT COUNT(*) FROM scan_history WHERE status = 'running'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+
+        if count > 0:
+            await self._db.execute(
+                "UPDATE scan_history SET status = 'interrupted' WHERE status = 'running'"
+            )
+            await self._db.commit()
+            _LOGGER.warning(
+                "Found %d interrupted scan(s) from previous run — will resume on startup", count
+            )
+            return True
+        return False
+
     async def get_random_files(
         self,
         count: int = 10,

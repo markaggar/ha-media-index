@@ -805,12 +805,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except Exception as err:
                 _LOGGER.error("Post-startup-scan burst index failed: %s", err)
 
+    # Check for scans that were interrupted by a previous HA restart or crash.
+    # Must be done before the scan-decision block so we can override scan_on_startup.
+    has_interrupted_scan = await cache_manager.check_and_mark_interrupted_scans()
+
     # If HA is already running (integration added at runtime via UI), always do a full
     # scan immediately — the user just created this instance and expects complete indexing.
     if hass.state is CoreState.running:
         _watched_only = False
         _LOGGER.info("HA already running — triggering full initial scan immediately")
         hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
+    elif has_interrupted_scan:
+        # A previous scan was interrupted (HA restarted mid-scan). Always resume with a
+        # full scan regardless of scan_on_startup — the library may be partially indexed.
+        # _trigger_startup_scan will also run burst indexing afterward if configured.
+        _watched_only = False
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
+        _LOGGER.info(
+            "Interrupted scan detected — resuming with full scan after HA starts "
+            "(already-indexed files will be skipped)"
+        )
     elif config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
         # On HA restart, restrict to watched folders when configured (faster — only catches
         # changes that occurred in monitored paths while HA was offline).
