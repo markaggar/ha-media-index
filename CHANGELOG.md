@@ -9,9 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **New instance does not scan on creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate full scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
-
 - **`scan_on_startup` default changed to `false` and scoped to watched folders**: Rescanning on every HA restart was wasteful and slowed startup. The default is now `false`. When enabled and watched folders are configured, the restart scan is restricted to those folders only (the paths most likely to have changed while HA was offline); it falls back to a full scan when no watched folders are specified. The config label is updated to reflect this behaviour.
+
+- **`find_duplicate_files` now runs burst indexing first**: The service automatically runs `index_burst_groups` before searching for duplicates so the duplicate detection always works from fresh burst data. No separate `index_burst_groups` call is required beforehand.
+
+- **`find_duplicate_files` accepts a list of preferred keeper folders**: The new `prefer_folders` field accepts a comma-delimited list of folder paths (e.g. `/media/Primary,/media/Archive`). Any file residing under one of these paths wins keeper status over the automatic majority-vote logic. The legacy `prefer_folder` (single path) still works and is silently merged into the list.
+
+- **`find_duplicate_files` verifies keeper exists on disk before deleting**: When `dry_run=false` and `auto_delete=true`, each duplicate group now confirms the keeper file is present on disk before moving any of its duplicates to `_Junk`. Groups whose keeper is missing are skipped with a warning, preventing orphaned files.
+
+### Fixed
+
+- **New instance now scans after creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate full scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
+
+- **Startup scan now runs burst indexing**: The startup scan (`_trigger_startup_scan`) fired off `scan_folder` as a fire-and-forget task and returned immediately, so burst indexing never ran after it completed — even when "Re-index After Scan" was enabled. Changed to `await` the scan directly inside the function, then run `index_burst_groups` when `auto_burst_index` and `burst_index_after_scan` are both enabled. Behaviour now matches the scheduled scan callback.
+
+- **Interrupted scans now resumed after HA restart**: If HA was restarted mid-scan, the scan_history row was left in `status = 'running'` indefinitely and no new scan was triggered on startup (especially with `scan_on_startup = false`). Added `check_and_mark_interrupted_scans()` to `CacheManager` which detects any `running` rows on startup, marks them as `interrupted`, and returns `True` so `async_setup_entry` can trigger a full resume scan. The resume uses `_trigger_startup_scan` so burst indexing also runs afterward if configured.
 
 ## [1.9.0] - 2026-06-04
 
@@ -33,10 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Initial config flow missing options**: Burst indexing settings (Auto Burst Indexing, Burst Time Window, GPS Tolerance, Minimum Hours Between Watcher Re-indexes, Re-index After Scan) and cleanup settings (Auto Cleanup, Cleanup Schedule, Cleanup Time) were only configurable via reconfigure, not during initial setup. All these options are now present in the initial setup form with the same defaults used by the options flow.
-
-- **Startup scan does not run burst indexing**: The startup scan (`_trigger_startup_scan`) fired off `scan_folder` as a fire-and-forget task and returned immediately, so burst indexing never ran after it completed — even when "Re-index After Scan" was enabled. Changed to `await` the scan directly inside the function, then run `index_burst_groups` when `auto_burst_index` and `burst_index_after_scan` are both enabled. Behaviour now matches the scheduled scan callback.
-
-- **Interrupted scan not resumed after HA restart**: If HA was restarted mid-scan, the scan_history row was left in `status = 'running'` indefinitely and no new scan was triggered on startup (especially with `scan_on_startup = false`). Added `check_and_mark_interrupted_scans()` to `CacheManager` which detects any `running` rows on startup, marks them as `interrupted`, and returns `True` so `async_setup_entry` can trigger a full resume scan. The resume uses `_trigger_startup_scan` so burst indexing also runs afterward if configured.
 
 - **Duplicate detection misses near-identical files**: `find_duplicate_files` grouped by exact `file_size`, so two copies of the same photo with trivially different file sizes (e.g. 79-byte EXIF padding difference) were not detected as duplicates. Added a secondary filename-based pass: unmatched singletons with the same `(burst_id, filename, date_taken, width, height)` and file sizes within 1% of each other are now also flagged as duplicates.
 

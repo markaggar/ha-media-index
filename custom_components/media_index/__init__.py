@@ -2087,17 +2087,35 @@ def _register_services(hass: HomeAssistant):
 
         folder = call.data.get("folder")
         prefer_folder = call.data.get("prefer_folder")
+        # prefer_folders accepts a comma-delimited string; merge with legacy prefer_folder
+        raw_pf = call.data.get("prefer_folders", "")
+        prefer_folders = [p.strip() for p in raw_pf.split(",") if p.strip()] if raw_pf else []
+        if prefer_folder and prefer_folder not in prefer_folders:
+            prefer_folders.append(prefer_folder)
         dry_run = call.data.get("dry_run", True)
         auto_delete = call.data.get("auto_delete", False)
 
         _LOGGER.info(
-            "find_duplicate_files: folder=%s, prefer_folder=%s, dry_run=%s, auto_delete=%s",
-            folder or "all", prefer_folder, dry_run, auto_delete,
+            "find_duplicate_files: folder=%s, prefer_folders=%s, dry_run=%s, auto_delete=%s",
+            folder or "all", prefer_folders or "none", dry_run, auto_delete,
         )
 
         try:
+            # Always run burst indexing first so we have a fresh view of burst groups
+            # before determining which files are duplicates.
+            inst_config = instance["config"]
+            _btime = inst_config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+            _bloc = inst_config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+            _LOGGER.info("find_duplicate_files: running burst index first (time_window=%ss, gps_tolerance=%sm)", _btime, _bloc)
+            await cache_manager.index_burst_groups(
+                folder=folder,
+                time_window_seconds=_btime,
+                location_tolerance_meters=_bloc,
+                overwrite_existing=True,
+            )
+
             result = await cache_manager.find_duplicate_files(
-                folder=folder, prefer_folder=prefer_folder
+                folder=folder, prefer_folders=prefer_folders
             )
             sets = result["sets"]
             folder_pairs = result["folder_pairs"]
@@ -2113,6 +2131,18 @@ def _register_services(hass: HomeAssistant):
                 await hass.async_add_executor_job(lambda: junk_folder.mkdir(parents=True, exist_ok=True))
 
                 for grp in sets:
+                    # Safety check: verify the keeper actually exists on disk before
+                    # moving its duplicates. If the keeper is missing, skip this group
+                    # entirely rather than orphaning files with no surviving copy.
+                    keeper_path = grp["keeper"]["path"]
+                    keeper_exists = await hass.async_add_executor_job(os.path.exists, keeper_path)
+                    if not keeper_exists:
+                        _LOGGER.warning(
+                            "find_duplicate_files: keeper file not found on disk, skipping group: %s",
+                            keeper_path,
+                        )
+                        continue
+
                     for dup in grp["duplicates"]:
                         dup_path = dup["path"]
                         try:
@@ -3134,6 +3164,7 @@ def _register_services(hass: HomeAssistant):
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
             vol.Optional("prefer_folder"): cv.string,
+            vol.Optional("prefer_folders"): cv.string,
             vol.Optional("dry_run", default=True): cv.boolean,
             vol.Optional("auto_delete", default=False): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),

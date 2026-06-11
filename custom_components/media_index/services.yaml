@@ -546,13 +546,14 @@ find_duplicate_files:
   name: Find Duplicate Files
   description: >
     Find files within burst groups that are filesystem-level duplicates (same
-    file_size, date_taken, width, and height). Requires index_burst_groups to have
-    been run first so that burst_id values are populated.
+    file_size, date_taken, width, and height). Burst indexing is automatically
+    run first so the duplicate search always works from fresh data.
     Keeper selection is folder-pair aware: the folder contributing more duplicate
     files across all pairs is kept globally, so keepers are not scattered randomly
     between two folders. With dry_run=true (default) returns the duplicate groups
     without touching any files. With dry_run=false and auto_delete=true, non-keeper
-    duplicates are moved to the _Junk folder.
+    duplicates are moved to the _Junk folder. The keeper file is verified to exist
+    on disk before any duplicates in its group are moved.
   target:
     entity:
       integration: media_index
@@ -565,11 +566,21 @@ find_duplicate_files:
       example: "/media/photo/PhotoLibrary"
       selector:
         text:
-    prefer_folder:
-      name: Prefer Folder
+    prefer_folders:
+      name: Prefer Folders
       description: >
-        If supplied, this folder is always chosen as the keeper folder for any
-        duplicate pair it appears in, overriding the automatic majority-vote logic.
+        Optional comma-delimited list of folder paths that should always be chosen as
+        keeper folders for any duplicate pair they appear in, overriding the automatic
+        majority-vote logic. Example: "/media/photo/Primary,/media/photo/Archive"
+      required: false
+      example: "/media/photo/Primary,/media/photo/Archive"
+      selector:
+        text:
+    prefer_folder:
+      name: Prefer Folder (legacy)
+      description: >
+        Deprecated — use prefer_folders instead. If supplied, this single folder path
+        is always chosen as the keeper folder for any duplicate pair it appears in.
       required: false
       example: "/media/photo/PhotoLibrary"
       selector:
