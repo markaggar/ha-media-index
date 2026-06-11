@@ -2119,6 +2119,10 @@ def _register_services(hass: HomeAssistant):
 
             duplicate_sets = len(sets)
             total_duplicates = sum(len(s["duplicates"]) for s in sets)
+            total_duplicate_bytes = sum(
+                (s.get("file_size") or 0) * len(s["duplicates"]) for s in sets
+            )
+            total_duplicate_size_gb = round(total_duplicate_bytes / (1024 ** 3), 2)
             deleted = 0
             delete_errors = 0
 
@@ -2182,6 +2186,7 @@ def _register_services(hass: HomeAssistant):
                 "dry_run": dry_run,
                 "duplicate_sets": duplicate_sets,
                 "total_duplicates": total_duplicates,
+                "total_duplicate_size_gb": total_duplicate_size_gb,
                 "deleted": deleted,
                 "delete_errors": delete_errors,
                 "folder_pairs": folder_pairs,
