@@ -790,10 +790,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s, watched_only: %s]",
             entry.title or entry.entry_id, base_folder, watched_folders, _watched_only
         )
-        hass.async_create_task(
-            scanner.scan_folder(base_folder, watched_folders, watched_only=_watched_only),
-            name=f"media_index_scan_{entry.entry_id}"
-        )
+        await scanner.scan_folder(base_folder, watched_folders, watched_only=_watched_only)
+
+        # Optionally run burst indexing after startup scan — same behaviour as scheduled scans
+        _burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
+        if auto_burst_index and _burst_index_after_scan and cache_manager is not None:
+            _LOGGER.info("Running full-library burst group index after startup scan")
+            try:
+                await cache_manager.index_burst_groups(
+                    time_window_seconds=burst_time_window_seconds,
+                    location_tolerance_meters=burst_location_tolerance_meters,
+                    overwrite_existing=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Post-startup-scan burst index failed: %s", err)
 
     # If HA is already running (integration added at runtime via UI), always do a full
     # scan immediately — the user just created this instance and expects complete indexing.
