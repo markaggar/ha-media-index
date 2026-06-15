@@ -50,7 +50,7 @@ A custom Home Assistant integration that indexes media files (images and videos)
 ### 🔍 Duplicate Detection
 - **`find_duplicate_files` service** - detects filesystem-level duplicates within burst groups (same `file_size`, `date_taken`, and dimensions)
 - **Folder-pair aware** - designates one entire folder as the keeper rather than scattering keepers across both folders
-- **`prefer_folder` override** - force a specific folder to always be kept
+- **`prefer_folders` override** - force files from a specific set of folders to always be kept, tranferring favorite metadata from files in non-preferred folders if necessary
 - **Safe dry-run mode** - previews duplicate groups and a folder-pair summary before deleting anything
 - **Auto-delete** - moves all non-keeper duplicates to `_Junk` when confirmed
 
