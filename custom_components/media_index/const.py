@@ -68,7 +68,7 @@ CONF_CLEANUP_TIME: Final = "cleanup_time"
 
 # Defaults
 DEFAULT_BASE_FOLDER: Final = "/media"
-DEFAULT_SCAN_ON_STARTUP: Final = True
+DEFAULT_SCAN_ON_STARTUP: Final = False
 DEFAULT_SCAN_SCHEDULE: Final = "hourly"
 DEFAULT_EXTRACT_EXIF: Final = True
 DEFAULT_GEOCODE_ENABLED: Final = True

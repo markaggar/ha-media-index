@@ -829,7 +829,33 @@ class CacheManager:
         ))
         
         await self._db.commit()
-    
+
+    async def check_and_mark_interrupted_scans(self) -> bool:
+        """Check for scans interrupted by a previous HA restart or crash.
+
+        Any scan_history row still in 'running' state at startup was never completed.
+        Marks them as 'interrupted' so they won't re-trigger on subsequent restarts.
+
+        Returns:
+            True if at least one interrupted scan was found and marked.
+        """
+        async with self._db.execute(
+            "SELECT COUNT(*) FROM scan_history WHERE status = 'running'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+
+        if count > 0:
+            await self._db.execute(
+                "UPDATE scan_history SET status = 'interrupted' WHERE status = 'running'"
+            )
+            await self._db.commit()
+            _LOGGER.warning(
+                "Found %d interrupted scan(s) from previous run — will resume on startup", count
+            )
+            return True
+        return False
+
     async def get_random_files(
         self,
         count: int = 10,
@@ -2167,7 +2193,7 @@ class CacheManager:
     async def find_duplicate_files(
         self,
         folder: str | None = None,
-        prefer_folder: str | None = None,
+        prefer_folders: list[str] | None = None,
     ) -> dict:
         """Find duplicate files within burst groups using file_size + date_taken + dimensions.
 
@@ -2182,9 +2208,13 @@ class CacheManager:
           2. For each set whose members span exactly two folders, the folder pair is
              tallied.  The folder appearing as the majority contributor (more member
              files across all sets in that pair) becomes the keeper folder for the
-             whole pair.  Tie-breaks: more favorited files → alphabetically first path.
-          3. If ``prefer_folder`` is supplied that folder always wins any pair it
-             belongs to.
+             whole pair.  Tie-breaks: more favorited files → most-recently modified → alphabetically first path.
+          3. If ``prefer_folders`` is supplied, any folder that matches one of those
+             entries wins any pair it belongs to.  Matching is by full path or by
+             path suffix (so ``/Camera Roll`` matches
+             ``/media/homes/.../Camera Roll``).
+             When both folders in a pair are preferred, the one matching the earliest
+             entry in the list wins.
           4. Within each set the keeper is the member in the keeper folder that is
              most favorited / latest modified_time / first alphabetically.  All
              members in the other folder become duplicates.
@@ -2193,9 +2223,10 @@ class CacheManager:
              favorited → latest modified_time → alphabetical path.
 
         Args:
-            folder:        Optional folder prefix to restrict the search.
-            prefer_folder: Path prefix that should always be chosen as the keeper
-                           folder when it appears in a pair.
+            folder:         Optional folder prefix to restrict the search.
+            prefer_folders: Ordered list of folder path entries.  Each entry can be a
+                            full absolute path or a partial/suffix path.  Entries
+                            earlier in the list take precedence over later entries.
 
         Returns:
             {
@@ -2224,6 +2255,33 @@ class CacheManager:
             }
         """
         from collections import defaultdict
+
+        # Normalise prefer_folders — strip trailing slashes for consistent matching;
+        # filter out entries that reduce to empty (e.g. "/" or whitespace) to avoid
+        # matching every folder as preferred.
+        _prefer_folders: list[str] = [p.rstrip('/').strip() for p in (prefer_folders or []) if p.rstrip('/').strip()]
+
+        def _prefer_rank(folder_path: str) -> int:
+            """Return the priority rank of folder_path (lower = higher priority).
+
+            Each entry in _prefer_folders is matched as:
+              - a full absolute path  (exact or ancestor prefix), OR
+              - a path suffix         (entry can omit the leading base dirs)
+            """
+            for i, pf in enumerate(_prefer_folders):
+                # Full-path match: exact or pf is an ancestor of folder_path
+                if folder_path == pf or folder_path.startswith(pf + '/'):
+                    return i
+                # Suffix match: pf (with normalised leading slash) ends the folder path
+                # or appears as an intermediate segment
+                pf_as_suffix = '/' + pf.lstrip('/')
+                if folder_path.endswith(pf_as_suffix) or (pf_as_suffix + '/') in folder_path:
+                    return i
+            return len(_prefer_folders)  # not preferred
+
+        def _is_preferred(folder_path: str) -> bool:
+            """Return True if folder_path matches any prefer entry."""
+            return _prefer_rank(folder_path) < len(_prefer_folders)
 
         where = "WHERE e.burst_id IS NOT NULL AND m.file_size IS NOT NULL AND e.date_taken IS NOT NULL"
         params: list = []
@@ -2338,8 +2396,15 @@ class CacheManager:
         for pair, stats in pair_stats.items():
             f0, f1 = pair
             s0, s1 = stats[f0], stats[f1]
-            if prefer_folder and prefer_folder in pair:
-                keeper_for_pair[pair] = prefer_folder
+            if _prefer_folders and any(_is_preferred(f) for f in pair):
+                # When one or both folders are preferred, pick the one matching the
+                # earliest (highest-priority) entry in _prefer_folders.  Rank uses
+                # the same full-path / suffix matching as _is_preferred.
+                preferred_in_pair = sorted(
+                    [f for f in pair if _is_preferred(f)],
+                    key=_prefer_rank,
+                )
+                keeper_for_pair[pair] = preferred_in_pair[0]
             elif s0["count"] > s1["count"]:
                 keeper_for_pair[pair] = f0
             elif s1["count"] > s0["count"]:

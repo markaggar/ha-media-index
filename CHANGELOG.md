@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-06-10
+
+### Changed
+
+- **`scan_on_startup` default changed to `false` and scoped to watched folders**: Rescanning on every HA restart was wasteful and slowed startup. The default is now `false`. When enabled and watched folders are configured, the restart scan is restricted to those folders only (the paths most likely to have changed while HA was offline); it falls back to a full scan when no watched folders are specified. The config label is updated to reflect this behaviour.
+
+- **`find_duplicate_files` reports estimated reclaimable disk space**: The response now includes `total_duplicate_size_gb` — the sum of `file_size × duplicate_count` across all sets, rounded to two decimal places. Gives an upfront estimate of how much space would be freed before committing to `auto_delete`.
+
+- **`find_duplicate_files` `prefer_folders` now supports partial/suffix paths and respects list order**: Two bugs fixed. (1) `prefer_folders` entries were matched only as path prefixes, so a partial path like `/Camera Roll` would not match `/media/homes/.../Camera Roll`. Matching now also checks whether the entry appears as a suffix of the folder path, so either form works. (2) When both folders in a pair matched the `prefer_folders` list, the winner was chosen alphabetically from the folder pair instead of by the user's preference order (first entry = highest priority). Both are now resolved. Also removed the deprecated `prefer_folder` (singular) parameter.
+
+- **`find_duplicate_files` propagates favorite status to keeper on auto-delete**: When `dry_run=false` and `auto_delete=true`, if any duplicate being moved to `_Junk` was favorited but its keeper was not, the keeper is now marked as favorited before the duplicate is removed, so the favorite status is not silently lost.
+
+### Fixed
+
+- **New instance now scans after creation**: When an integration entry is added at runtime (via the UI while HA is already running), `EVENT_HOMEASSISTANT_STARTED` has already fired and the startup scan listener was never called, so no scan occurred. Additionally, the scan was gated behind the `scan_on_startup` setting — which users reasonably disable to avoid rescanning on every HA restart. The integration now always triggers an immediate full scan when `hass.state is CoreState.running` (entry added at runtime), regardless of the `scan_on_startup` setting. `scan_on_startup` continues to control behaviour only on HA restarts.
+
+- **Startup scan now runs burst indexing**: The startup scan (`_trigger_startup_scan`) fired off `scan_folder` as a fire-and-forget task and returned immediately, so burst indexing never ran after it completed — even when "Re-index After Scan" was enabled. Changed to `await` the scan directly inside the function, then run `index_burst_groups` when `auto_burst_index` and `burst_index_after_scan` are both enabled. Behaviour now matches the scheduled scan callback.
+
+- **Interrupted scans now resumed after HA restart**: If HA was restarted mid-scan, the scan_history row was left in `status = 'running'` indefinitely and no new scan was triggered on startup (especially with `scan_on_startup = false`). Added `check_and_mark_interrupted_scans()` to `CacheManager` which detects any `running` rows on startup, marks them as `interrupted`, and returns `True` so `async_setup_entry` can trigger a full resume scan. The resume uses `_trigger_startup_scan` so burst indexing also runs afterward if configured.
+
 ## [1.9.0] - 2026-06-04
 
 ### Added

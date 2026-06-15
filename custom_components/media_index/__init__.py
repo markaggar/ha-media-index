@@ -762,42 +762,81 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Trigger initial scan AFTER Home Assistant has fully started (not during setup)
     # Use config already constructed above
     watched_folders = config.get(CONF_WATCHED_FOLDERS, [])
-    
-    if config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
-        async def _trigger_startup_scan(_event=None):
-            """Trigger scan after Home Assistant has fully started."""
-            # Block if pymediainfo not available (unless user opted to scan without it)
-            if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
-                scan_without_libmediainfo = config.get(
-                    CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+
+    async def _trigger_startup_scan(_event=None):
+        """Trigger scan after Home Assistant has fully started."""
+        # Block if pymediainfo not available (unless user opted to scan without it)
+        if not hass.data[DOMAIN][entry.entry_id].get("pymediainfo_available", False):
+            scan_without_libmediainfo = config.get(
+                CONF_SCAN_WITHOUT_LIBMEDIAINFO, DEFAULT_SCAN_WITHOUT_LIBMEDIAINFO
+            )
+            if not scan_without_libmediainfo:
+                _LOGGER.warning(
+                    "⏸️ Startup scan SKIPPED: libmediainfo not available and "
+                    "'scan_without_libmediainfo' is disabled. "
+                    "Enable 'scan_without_libmediainfo' in options if you only index images, "
+                    "or call 'media_index.install_libmediainfo' to install video support."
                 )
-                if not scan_without_libmediainfo:
-                    _LOGGER.warning(
-                        "⏸️ Startup scan SKIPPED: libmediainfo not available and "
-                        "'scan_without_libmediainfo' is disabled. "
-                        "Enable 'scan_without_libmediainfo' in options if you only index images, "
-                        "or call 'media_index.install_libmediainfo' to install video support."
-                    )
-                    return
-                _LOGGER.info(
-                    "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
-                    "proceeding with scan (video metadata will not be extracted)."
-                )
-            
+                return
             _LOGGER.info(
-                "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s]", 
-                entry.title or entry.entry_id, base_folder, watched_folders
+                "ℹ️ libmediainfo not available but 'scan_without_libmediainfo' is enabled - "
+                "proceeding with scan (video metadata will not be extracted)."
             )
-            hass.async_create_task(
-                scanner.scan_folder(base_folder, watched_folders),
-                name=f"media_index_scan_{entry.entry_id}"
-            )
-        
-        # Listen for Home Assistant start event to trigger scan
-        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+
+        _LOGGER.info(
+            "🔄 TRIGGER: Startup scan beginning [instance: %s, folder: %s, watched: %s, watched_only: %s]",
+            entry.title or entry.entry_id, base_folder, watched_folders, _watched_only
+        )
+        await scanner.scan_folder(base_folder, watched_folders, watched_only=_watched_only)
+
+        # Optionally run burst indexing after startup scan — same behaviour as scheduled scans
+        _burst_index_after_scan = config.get(CONF_BURST_INDEX_AFTER_SCAN, DEFAULT_BURST_INDEX_AFTER_SCAN)
+        if auto_burst_index and _burst_index_after_scan and cache_manager is not None:
+            _LOGGER.info("Running full-library burst group index after startup scan")
+            try:
+                await cache_manager.index_burst_groups(
+                    time_window_seconds=burst_time_window_seconds,
+                    location_tolerance_meters=burst_location_tolerance_meters,
+                    overwrite_existing=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Post-startup-scan burst index failed: %s", err)
+
+    # Check for scans that were interrupted by a previous HA restart or crash.
+    # Must be done before the scan-decision block so we can override scan_on_startup.
+    has_interrupted_scan = await cache_manager.check_and_mark_interrupted_scans()
+
+    # If HA is already running (integration added at runtime via UI), always do a full
+    # scan immediately — the user just created this instance and expects complete indexing.
+    if hass.state is CoreState.running:
+        _watched_only = False
+        _LOGGER.info("HA already running — triggering full initial scan immediately")
+        hass.async_create_task(_trigger_startup_scan(), name=f"media_index_initial_scan_{entry.entry_id}")
+    elif has_interrupted_scan:
+        # A previous scan was interrupted (HA restarted mid-scan). Always resume with a
+        # full scan regardless of scan_on_startup — the library may be partially indexed.
+        # _trigger_startup_scan will also run burst indexing afterward if configured.
+        _watched_only = False
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
-        _LOGGER.info("Startup scan scheduled to run after Home Assistant finishes starting")
+        _LOGGER.info(
+            "Interrupted scan detected — resuming with full scan after HA starts "
+            "(already-indexed files will be skipped)"
+        )
+    elif config.get(CONF_SCAN_ON_STARTUP, DEFAULT_SCAN_ON_STARTUP):
+        # On HA restart, restrict to watched folders when configured (faster — only catches
+        # changes that occurred in monitored paths while HA was offline).
+        # Falls back to full scan when no watched folders are specified.
+        _watched_only = bool(watched_folders)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _trigger_startup_scan)
+        _LOGGER.info(
+            "Startup scan scheduled after HA start (watched_only=%s, watched_folders=%s)",
+            _watched_only, watched_folders
+        )
     else:
+        _watched_only = False  # unused, but defined for clarity
         _LOGGER.info("Startup scan disabled by configuration")
     
     # Start file system watcher if enabled AND watched_folders are specified
@@ -2047,24 +2086,49 @@ def _register_services(hass: HomeAssistant):
         config = instance["config"]
 
         folder = call.data.get("folder")
-        prefer_folder = call.data.get("prefer_folder")
+        # Warn if caller is still using the removed prefer_folder (singular) key.
+        if call.data.get("prefer_folder") is not None:
+            _LOGGER.warning(
+                "find_duplicate_files: 'prefer_folder' is no longer supported and has been "
+                "ignored. Use 'prefer_folders' (comma-delimited string) instead."
+            )
+        # prefer_folders accepts a comma-delimited string of folder paths/suffixes
+        raw_pf = call.data.get("prefer_folders", "")
+        prefer_folders = [p.strip() for p in raw_pf.split(",") if p.strip()] if raw_pf else []
         dry_run = call.data.get("dry_run", True)
         auto_delete = call.data.get("auto_delete", False)
 
         _LOGGER.info(
-            "find_duplicate_files: folder=%s, prefer_folder=%s, dry_run=%s, auto_delete=%s",
-            folder or "all", prefer_folder, dry_run, auto_delete,
+            "find_duplicate_files: folder=%s, prefer_folders=%s, dry_run=%s, auto_delete=%s",
+            folder or "all", prefer_folders or "none", dry_run, auto_delete,
         )
 
         try:
+            # Always run burst indexing first so we have a fresh view of burst groups
+            # before determining which files are duplicates.
+            inst_config = instance["config"]
+            _btime = inst_config.get(CONF_BURST_TIME_WINDOW_SECONDS, DEFAULT_BURST_TIME_WINDOW_SECONDS)
+            _bloc = inst_config.get(CONF_BURST_LOCATION_TOLERANCE_METERS, DEFAULT_BURST_LOCATION_TOLERANCE_METERS)
+            _LOGGER.info("find_duplicate_files: running burst index first (time_window=%ss, gps_tolerance=%sm)", _btime, _bloc)
+            await cache_manager.index_burst_groups(
+                folder=folder,
+                time_window_seconds=_btime,
+                location_tolerance_meters=_bloc,
+                overwrite_existing=True,
+            )
+
             result = await cache_manager.find_duplicate_files(
-                folder=folder, prefer_folder=prefer_folder
+                folder=folder, prefer_folders=prefer_folders
             )
             sets = result["sets"]
             folder_pairs = result["folder_pairs"]
 
             duplicate_sets = len(sets)
             total_duplicates = sum(len(s["duplicates"]) for s in sets)
+            total_duplicate_bytes = sum(
+                (s.get("file_size") or 0) * len(s["duplicates"]) for s in sets
+            )
+            total_duplicate_size_gb = round(total_duplicate_bytes / (1024 ** 3), 2)
             deleted = 0
             delete_errors = 0
 
@@ -2074,6 +2138,30 @@ def _register_services(hass: HomeAssistant):
                 await hass.async_add_executor_job(lambda: junk_folder.mkdir(parents=True, exist_ok=True))
 
                 for grp in sets:
+                    # Safety check: verify the keeper actually exists on disk before
+                    # moving its duplicates. If the keeper is missing, skip this group
+                    # entirely rather than orphaning files with no surviving copy.
+                    keeper_path = grp["keeper"]["path"]
+                    keeper_exists = await hass.async_add_executor_job(os.path.exists, keeper_path)
+                    if not keeper_exists:
+                        _LOGGER.warning(
+                            "find_duplicate_files: keeper file not found on disk, skipping group: %s",
+                            keeper_path,
+                        )
+                        continue
+
+                    # Propagate favorite status: if any duplicate being moved is
+                    # favorited but the keeper isn't, mark the keeper as favorited so
+                    # the status is not silently lost.
+                    if grp["keeper"]["is_favorited"] == 0 and any(
+                        d["is_favorited"] for d in grp["duplicates"]
+                    ):
+                        _LOGGER.debug(
+                            "find_duplicate_files: propagating favorite to keeper: %s",
+                            keeper_path,
+                        )
+                        await cache_manager.update_favorite(keeper_path, True)
+
                     for dup in grp["duplicates"]:
                         dup_path = dup["path"]
                         try:
@@ -2104,6 +2192,7 @@ def _register_services(hass: HomeAssistant):
                 "dry_run": dry_run,
                 "duplicate_sets": duplicate_sets,
                 "total_duplicates": total_duplicates,
+                "total_duplicate_size_gb": total_duplicate_size_gb,
                 "deleted": deleted,
                 "delete_errors": delete_errors,
                 "folder_pairs": folder_pairs,
@@ -3094,7 +3183,7 @@ def _register_services(hass: HomeAssistant):
         handle_find_duplicate_files,
         schema=vol.Schema({
             vol.Optional("folder"): cv.string,
-            vol.Optional("prefer_folder"): cv.string,
+            vol.Optional("prefer_folders"): cv.string,
             vol.Optional("dry_run", default=True): cv.boolean,
             vol.Optional("auto_delete", default=False): cv.boolean,
         }, extra=vol.ALLOW_EXTRA),

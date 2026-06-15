@@ -186,6 +186,7 @@ class MediaScanner:
         watched_folders: Optional[list] = None,
         max_depth: Optional[int] = None,
         force: bool = False,
+        watched_only: bool = False,
     ) -> int:
         """Scan a folder for media files and update cache.
         
@@ -216,11 +217,19 @@ class MediaScanner:
             # Reset error counter for this scan
             self._scan_error_count = 0
             
-            # Full scan always scans the entire base folder
-            # Watched folders are for file system monitoring only, not for limiting full scans
-            scan_paths = [base_folder]
-            
-            _LOGGER.info("Full scan will cover entire base folder: %s (watched folders are for monitoring only)", base_folder)
+            # Determine which paths to scan
+            if watched_only and watched_folders:
+                scan_paths = [
+                    os.path.join(base_folder, wf) if not os.path.isabs(wf) else wf
+                    for wf in watched_folders
+                ]
+                _LOGGER.info(
+                    "Startup scan restricted to watched folders: %s", scan_paths
+                )
+            else:
+                # Full scan always scans the entire base folder
+                scan_paths = [base_folder]
+                _LOGGER.info("Full scan will cover entire base folder: %s", base_folder)
             
             # Scan each path (run blocking I/O in executor)
             for scan_path in scan_paths:
