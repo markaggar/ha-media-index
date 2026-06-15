@@ -436,48 +436,62 @@ data:
 
 **New in v1.7.0** - Find filesystem-level duplicate files within burst groups and optionally move non-keepers to `_Junk`.
 
-Requires `index_burst_groups` to have been run first so `burst_id` values are populated. Matches files by `file_size + date_taken + width + height` — identical values within the same burst group indicate the file was uploaded more than once.
+Burst indexing is run automatically at the start of every call so duplicate detection always works from fresh data — no separate `index_burst_groups` call is needed beforehand.
 
-**Keeper selection is folder-pair aware**: rather than picking a keeper per file, the service tallies which folder contributes more duplicate files across all matching pairs and designates that folder as the keeper globally. This ensures all keepers come from one folder and all non-keepers from the other, rather than being scattered randomly.
+**Duplicate detection uses two passes:**
+1. **Exact match** — files in the same burst group sharing identical `file_size + date_taken + width + height`
+2. **Filename match** — files in the same burst group with the same `filename + date_taken + width + height` whose file sizes are within 1% of each other (catches the same photo uploaded twice with minor EXIF padding differences)
+
+**Keeper selection is folder-pair aware**: rather than picking a keeper per file, the service tallies which folder contributes more duplicate files across all matching pairs and designates that folder as the keeper globally. This ensures all keepers come from one folder and all non-keepers from the other, rather than being scattered randomly. Within the keeper folder the file that is favorited / most recently modified / first alphabetically is kept.
 
 **Parameters:**
 - `folder` (optional): Limit the search to files under this folder prefix. Omit to search the entire library.
-- `prefer_folder` (optional): Force this folder to be the keeper whenever it appears in a duplicate pair, overriding the automatic majority-vote logic.
+- `prefer_folders` (optional): Comma-delimited list of folder path entries that override the automatic majority-vote. Any folder matching an entry is always chosen as the keeper. Entries earlier in the list take precedence over later ones.
+  - Each entry can be a **full absolute path** (`/media/homes/jdaggar/Photos/Camera Roll`) or a **partial suffix** (`/Camera Roll`) — suffix matching means you don't need to know the full base path.
+  - Example: `prefer_folders: "/Samsung Gallery/DCIM/Camera,/Camera Roll"` — the first entry wins if both match.
 - `dry_run` (optional, default: `true`): Return duplicate groups without moving any files.
 - `auto_delete` (optional, default: `false`): When `dry_run: false`, move all non-keeper duplicates to `_Junk`. Has no effect when `dry_run: true`.
+
+**Safety behaviour when `auto_delete: true`:**
+- The keeper file is verified to exist on disk before any duplicate in its group is moved. Groups with a missing keeper are skipped entirely (logged as a warning) so no file is ever orphaned.
+- If any duplicate being moved is favorited but the keeper is not, the keeper is automatically marked as favorited before the duplicate is deleted, so the favorite status is never silently lost.
 
 **Returns:**
 - `status`: `"success"` or `"error"`
 - `dry_run`: Whether this was a preview run
 - `duplicate_sets`: Number of distinct duplicate groups found
 - `total_duplicates`: Total non-keeper files identified
+- `total_duplicate_size_gb`: Estimated reclaimable disk space in GB (sum of `file_size × duplicate_count` per group)
 - `deleted`: Files moved to `_Junk` (0 when `dry_run: true`)
 - `delete_errors`: Files that could not be moved
 - `folder_pairs`: High-level summary per folder pair — each entry has `keeper_folder`, `duplicate_folder`, `duplicate_sets`, `total_duplicates`
 - `groups`: Full list of duplicate sets — each has `keeper` and `duplicates` entries with `path`, `folder`, `file_id`, `is_favorited`, `modified_time`
 
-**Workflow:**
+**Recommended workflow:**
 ```yaml
-# Step 1: Preview — inspect folder_pairs summary before deleting
+# Step 1: Preview — check folder_pairs summary and total_duplicate_size_gb before committing
 service: media_index.find_duplicate_files
 target:
   entity_id: sensor.media_index_media_photo_photolibrary_total_files
 data:
   dry_run: true
 
-# Step 2: Delete — once satisfied with the preview
+# Step 2: Preview with preferred keeper folders (partial suffix paths work)
+service: media_index.find_duplicate_files
+target:
+  entity_id: sensor.media_index_media_photo_photolibrary_total_files
+data:
+  dry_run: true
+  prefer_folders: "/Samsung Gallery/DCIM/Camera,/Camera Roll"
+
+# Step 3: Delete — once satisfied with the preview
 service: media_index.find_duplicate_files
 target:
   entity_id: sensor.media_index_media_photo_photolibrary_total_files
 data:
   dry_run: false
   auto_delete: true
-
-# Optional: force a specific folder to always be the keeper
-service: media_index.find_duplicate_files
-data:
-  prefer_folder: /media/photo/PhotoLibrary
-  dry_run: true
+  prefer_folders: "/Samsung Gallery/DCIM/Camera,/Camera Roll"
 ```
 
 ## File Management Services
@@ -953,7 +967,7 @@ The Media Index services integrate seamlessly with the [Home Assistant Media Car
 
 ### New Services
 - ✨ **`index_burst_groups`** - Full-library burst indexer; enables SQL-level filtering of non-favorite burst members
-- ✨ **`find_duplicate_files`** - Folder-pair-aware duplicate detection within burst groups; dry-run preview + auto-delete to `_Junk`
+- ✨ **`find_duplicate_files`** - Folder-pair-aware duplicate detection within burst groups; dry-run preview + auto-delete to `_Junk`; auto-runs burst indexing first; `prefer_folders` with full-path/suffix matching; keeper disk-existence check; favorite propagation; `total_duplicate_size_gb` in response
 
 ### Enhanced Services
 - 🌟 **`get_random_items`** - Added `auto_select_burst_favorite` parameter; non-favorite burst members are excluded in the database query before results reach the card
