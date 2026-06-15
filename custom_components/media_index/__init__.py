@@ -2086,6 +2086,12 @@ def _register_services(hass: HomeAssistant):
         config = instance["config"]
 
         folder = call.data.get("folder")
+        # Warn if caller is still using the removed prefer_folder (singular) key.
+        if call.data.get("prefer_folder") is not None:
+            _LOGGER.warning(
+                "find_duplicate_files: 'prefer_folder' is no longer supported and has been "
+                "ignored. Use 'prefer_folders' (comma-delimited string) instead."
+            )
         # prefer_folders accepts a comma-delimited string of folder paths/suffixes
         raw_pf = call.data.get("prefer_folders", "")
         prefer_folders = [p.strip() for p in raw_pf.split(",") if p.strip()] if raw_pf else []

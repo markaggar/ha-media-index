@@ -2208,7 +2208,7 @@ class CacheManager:
           2. For each set whose members span exactly two folders, the folder pair is
              tallied.  The folder appearing as the majority contributor (more member
              files across all sets in that pair) becomes the keeper folder for the
-             whole pair.  Tie-breaks: more favorited files → alphabetically first path.
+             whole pair.  Tie-breaks: more favorited files → most-recently modified → alphabetically first path.
           3. If ``prefer_folders`` is supplied, any folder that matches one of those
              entries wins any pair it belongs to.  Matching is by full path or by
              path suffix (so ``/Camera Roll`` matches
@@ -2256,8 +2256,10 @@ class CacheManager:
         """
         from collections import defaultdict
 
-        # Normalise prefer_folders — strip trailing slashes for consistent matching
-        _prefer_folders: list[str] = [p.rstrip('/') for p in (prefer_folders or [])]
+        # Normalise prefer_folders — strip trailing slashes for consistent matching;
+        # filter out entries that reduce to empty (e.g. "/" or whitespace) to avoid
+        # matching every folder as preferred.
+        _prefer_folders: list[str] = [p.rstrip('/').strip() for p in (prefer_folders or []) if p.rstrip('/').strip()]
 
         def _prefer_rank(folder_path: str) -> int:
             """Return the priority rank of folder_path (lower = higher priority).
