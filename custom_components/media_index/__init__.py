@@ -88,6 +88,7 @@ from .scanner import MediaScanner
 from .watcher import MediaWatcher
 from .exif_parser import ExifParser
 from .video_parser import VideoMetadataParser
+from . import video_parser
 from .geocoding import GeocodeService
 from .cast_manager import CastSessionManager, HaMediaPlayerTransport, RokuEcpTransport, _get_roku_host, run_cast_slideshow, run_mirror_cast
 
@@ -635,7 +636,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Store availability status for services to check
     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = pymediainfo_available
-    
+
+    # Keep video_parser's own module-level PYMEDIAINFO_AVAILABLE flag in sync.
+    # VideoMetadataParser.extract_metadata() gates all pymediainfo extraction on that
+    # flag, which is normally only computed once at first import - without this call
+    # it would stay stale (e.g. False) across config entry reloads even though the
+    # check above just verified the library loads fine.
+    video_parser.refresh_pymediainfo_availability()
+
     # Auto-install if missing and auto_install is enabled - DO IT NOW before continuing setup
     if not pymediainfo_available:
         config = {**entry.data, **entry.options}
@@ -654,20 +662,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("✅ Auto-install successful: %s", result["message"])
                 # Re-test library availability after installation
                 try:
-                    # Clear Python's import cache and reload the module to pick up the newly installed library.
-                    # importlib.reload does blocking filesystem I/O (listdir, read_text), so run it in an
-                    # executor thread to avoid blocking the event loop.
+                    # Clear Python's import cache and reload the pymediainfo module to pick up
+                    # the newly installed library. importlib.reload does blocking filesystem I/O
+                    # (listdir, read_text), so run it in an executor thread to avoid blocking the
+                    # event loop.
                     import sys
                     import importlib
 
                     def _reload_and_verify():
                         if 'pymediainfo' in sys.modules:
                             importlib.reload(sys.modules['pymediainfo'])
-                        from pymediainfo import MediaInfo  # noqa: F401
+                        # Re-test MediaInfo.can_parse() and refresh video_parser's own
+                        # PYMEDIAINFO_AVAILABLE flag - this is the flag extract_metadata()
+                        # actually checks, so reloading pymediainfo alone is not enough.
+                        return video_parser.refresh_pymediainfo_availability()
 
-                    await hass.async_add_executor_job(_reload_and_verify)
-                    hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
-                    _LOGGER.info("✅ libmediainfo verified working after installation (import successful)")
+                    verified = await hass.async_add_executor_job(_reload_and_verify)
+                    hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = verified
+                    if verified:
+                        _LOGGER.info("✅ libmediainfo verified working after installation")
+                    else:
+                        raise RuntimeError("MediaInfo.can_parse() still failing after install")
                 except Exception as e:
                     _LOGGER.error(
                         "❌ libmediainfo verification failed after installation: %s\n"

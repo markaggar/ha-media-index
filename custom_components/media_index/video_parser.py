@@ -10,17 +10,58 @@ _LOGGER = logging.getLogger(__name__)
 
 try:
     from pymediainfo import MediaInfo
-    PYMEDIAINFO_AVAILABLE = True
-    # Test if MediaInfo library is actually available
+    PYMEDIAINFO_IMPORTABLE = True
+except ImportError:
+    MediaInfo = None
+    PYMEDIAINFO_IMPORTABLE = False
+    _LOGGER.warning("[VIDEO] ❌ pymediainfo Python package not installed")
+
+
+def _check_pymediainfo_availability() -> bool:
+    """Test whether pymediainfo is importable AND the libmediainfo shared
+    library it wraps is actually loadable.
+
+    NOTE: This is only evaluated when video_parser.py is first imported into
+    the running Home Assistant Python process. If libmediainfo is installed
+    or reinstalled *after* this module has already been imported (e.g. via
+    the `install_libmediainfo` service, or auto-install-on-setup), this cached
+    result goes stale. Callers that install/repair libmediainfo at runtime
+    MUST call `refresh_pymediainfo_availability()` afterwards to re-test and
+    update the module-level `PYMEDIAINFO_AVAILABLE` flag - otherwise
+    extraction will keep silently skipping pymediainfo until Home Assistant
+    Core itself is restarted (a fresh Python process), even though install
+    logs/services report success.
+    """
+    if not PYMEDIAINFO_IMPORTABLE:
+        return False
     try:
+        # Test if MediaInfo library is actually available
         MediaInfo.can_parse()
         _LOGGER.debug("[VIDEO] ✅ pymediainfo AND MediaInfo library are both available")
+        return True
     except Exception as e:
         _LOGGER.warning(f"[VIDEO] ⚠️ pymediainfo installed but MediaInfo library missing: {e}")
-        PYMEDIAINFO_AVAILABLE = False
-except ImportError:
-    PYMEDIAINFO_AVAILABLE = False
-    _LOGGER.warning("[VIDEO] ❌ pymediainfo Python package not installed")
+        return False
+
+
+def refresh_pymediainfo_availability() -> bool:
+    """Re-test libmediainfo availability and update PYMEDIAINFO_AVAILABLE.
+
+    Must be called after installing/repairing the libmediainfo system library
+    at runtime (e.g. from the `install_libmediainfo` service or auto-install
+    logic in __init__.py). See `_check_pymediainfo_availability` docstring for
+    why this can't just be re-evaluated automatically.
+    """
+    global PYMEDIAINFO_AVAILABLE
+    PYMEDIAINFO_AVAILABLE = _check_pymediainfo_availability()
+    if PYMEDIAINFO_AVAILABLE:
+        _LOGGER.info("[VIDEO] ✅ libmediainfo availability refreshed - pymediainfo extraction re-enabled")
+    else:
+        _LOGGER.warning("[VIDEO] ⚠️ libmediainfo availability refreshed - still NOT available")
+    return PYMEDIAINFO_AVAILABLE
+
+
+PYMEDIAINFO_AVAILABLE = _check_pymediainfo_availability()
 
 try:
     from mutagen.mp4 import MP4
@@ -95,18 +136,55 @@ class VideoMetadataParser:
                             
                             # Extract GPS coordinates (check Apple QuickTime, xyz, and recorded_location fields)
                             gps_iso6709 = None
+                            gps_field_used = None
                             if hasattr(track, 'comapplequicktimelocationiso6709') and track.comapplequicktimelocationiso6709:
                                 gps_iso6709 = track.comapplequicktimelocationiso6709
+                                gps_field_used = 'comapplequicktimelocationiso6709'
                             elif hasattr(track, 'recorded_location') and track.recorded_location:
                                 gps_iso6709 = track.recorded_location
+                                gps_field_used = 'recorded_location'
                             elif hasattr(track, 'xyz') and track.xyz:
                                 gps_iso6709 = track.xyz
-                            
+                                gps_field_used = 'xyz'
+
                             if gps_iso6709:
                                 coords = VideoMetadataParser._parse_iso6709(gps_iso6709)
                                 if coords:
                                     result['latitude'] = coords[0]
                                     result['longitude'] = coords[1]
+                                    _LOGGER.debug(
+                                        f"[VIDEO] GPS extracted via '{gps_field_used}': {coords[0]}, {coords[1]}"
+                                    )
+                            else:
+                                # DIAGNOSTIC: None of the 3 known field names matched. Rather than
+                                # silently reporting "no GPS", scan the full track field dump for
+                                # anything that looks GPS/location-related so we can catch cases
+                                # where a libmediainfo/pymediainfo version change renamed the field
+                                # (this has been observed to happen across HA Core upgrades that
+                                # reinstall a newer libmediainfo package).
+                                try:
+                                    track_data = track.to_data()
+                                    candidates = {
+                                        k: v for k, v in track_data.items()
+                                        if v and any(hint in k.lower() for hint in ('locat', 'gps', 'xyz', 'iso6709'))
+                                    }
+                                    if candidates:
+                                        from .const import sanitize_unicode_to_ascii
+                                        sanitized_path = sanitize_unicode_to_ascii(str(file_path))
+                                        _LOGGER.warning(
+                                            "[VIDEO] ⚠️ No GPS extracted for %s using known field names, but found "
+                                            "possible GPS/location field(s) under different name(s): %s. "
+                                            "libmediainfo may have renamed this field after a package update - "
+                                            "please report this so the known field list can be updated.",
+                                            sanitized_path, sanitize_unicode_to_ascii(str(candidates))
+                                        )
+                                    else:
+                                        _LOGGER.debug(
+                                            "[VIDEO] No GPS/location fields found in General track for %s",
+                                            Path(file_path).name
+                                        )
+                                except Exception:
+                                    pass
                             
                             # Extract rating (if available)
                             if hasattr(track, 'rating') and track.rating:
@@ -322,18 +400,42 @@ class VideoMetadataParser:
     
     @staticmethod
     def _parse_iso6709(iso6709_str: str) -> Optional[tuple[float, float]]:
-        """Parse ISO 6709 location string into latitude/longitude.
-        
-        ISO 6709 format examples:
-        - +40.7484-073.9857/ (latitude, longitude)
-        - +52.4915+009.6692+049.668/ (latitude, longitude, altitude)
-        
+        """Parse a MediaInfo GPS/location string into latitude/longitude.
+
+        Supports two formats seen from different libmediainfo versions:
+        - Raw ISO 6709 (older libmediainfo):
+          - +40.7484-073.9857/ (latitude, longitude)
+          - +52.4915+009.6692+049.668/ (latitude, longitude, altitude)
+        - Human-readable degrees+cardinal (seen after a libmediainfo package
+          update, e.g. following an HA Core upgrade that reinstalled a newer
+          version):
+          - 47.591095°N 122.230698°W
+
         Args:
-            iso6709_str: ISO 6709 formatted location string
-            
+            iso6709_str: MediaInfo location/GPS string in either format
+
         Returns:
             Tuple of (latitude, longitude) or None if parsing fails
         """
+        # Try the human-readable "DD.DDDDDD°N DD.DDDDDD°W" format first, since
+        # it doesn't start with +/- and would otherwise fail the ISO 6709 parse.
+        cardinal_match = re.match(
+            r'\s*(\d+(?:\.\d+)?)\s*°?\s*([NSns])[,\s]+(\d+(?:\.\d+)?)\s*°?\s*([EWew])',
+            iso6709_str,
+        )
+        if cardinal_match:
+            try:
+                lat = float(cardinal_match.group(1))
+                if cardinal_match.group(2).upper() == 'S':
+                    lat = -lat
+                lon = float(cardinal_match.group(3))
+                if cardinal_match.group(4).upper() == 'W':
+                    lon = -lon
+                return (lat, lon)
+            except ValueError as e:
+                _LOGGER.debug(f"Failed to parse cardinal-direction location '{iso6709_str}': {e}")
+                return None
+
         try:
             # Remove trailing slash if present
             iso6709_str = iso6709_str.rstrip('/')

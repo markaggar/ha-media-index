@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-07-28
+
+### Fixed
+
+- **Video metadata extraction stayed disabled after `install_libmediainfo`, even when logs reported success**: `video_parser.py` computes its own module-level `PYMEDIAINFO_AVAILABLE` flag once, the first time the module is imported into the running Home Assistant process. Installing/repairing the `libmediainfo` system library at runtime (via the `install_libmediainfo` service, or auto-install-on-setup) only ever refreshed the per-entry `pymediainfo_available` flag in `hass.data` (used for the scheduled-scan gate and the diagnostic sensor attribute) — it never re-evaluated the flag `VideoMetadataParser.extract_metadata()` actually checks. Result: install/reload logs showed success and the sensor attribute flipped to available, but pymediainfo extraction silently kept being skipped (falling back to mutagen-only metadata) until Home Assistant Core itself was restarted. Added `video_parser.refresh_pymediainfo_availability()`, now called every time entry setup determines library availability and after auto-install completes, so both flags stay in sync without requiring a full HA restart.
+
+- **Video GPS metadata extraction silently failing after HA Core 2026.7.x upgrades**: A newer `libmediainfo` package (reinstalled as part of the HA Core upgrade) now reports the Apple QuickTime GPS/location field in a human-readable `"47.591095°N 122.230698°W"` format instead of raw ISO 6709 (`+47.5910-122.2307/`). `_parse_iso6709()` only understood the raw ISO 6709 format, so `float()` conversion failed and coordinates were dropped (visible only as a DEBUG-level `Failed to parse ISO 6709 location` message), even though `date_taken`, width/height, and duration all extracted successfully from the same file. `_parse_iso6709()` now also recognizes the degrees+cardinal-direction format and converts it to signed latitude/longitude, while still supporting the older raw ISO 6709 format used on HA 2026.6.x and earlier.
+
+- **Diagnostic logging for video GPS extraction misses**: Video GPS extraction only recognized three hardcoded MediaInfo field names (`comapplequicktimelocationiso6709`, `recorded_location`, `xyz`). If a `libmediainfo` package update renames/changes how this field is exposed, extraction silently returns no coordinates with no indication why (`date_taken`/dimensions can still succeed from unrelated fields, masking the issue). When none of the known fields match, the parser now scans the full MediaInfo track field dump for any GPS/location-like key and logs it at WARNING so the actual field name in use can be identified and added to the known list.
+
 ## [1.9.1] - 2026-06-10
 
 ### Changed
