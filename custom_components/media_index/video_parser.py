@@ -47,18 +47,48 @@ def _check_pymediainfo_availability() -> bool:
 def refresh_pymediainfo_availability() -> bool:
     """Re-test libmediainfo availability and update PYMEDIAINFO_AVAILABLE.
 
+    Unlike the initial import-time check (which only calls `MediaInfo.can_parse()`
+    on the module already in memory), this reloads the `pymediainfo` Python module
+    first to clear any cached ctypes library handle, then performs a real
+    `MediaInfo.parse()` on a temp file to confirm the C library actually loads and
+    works end-to-end - not just that the Python wrapper module is importable.
+    This matters because ctypes caches the loaded library handle at import time;
+    simply reinstalling libmediainfo.so on disk after pymediainfo has already been
+    imported can leave a stale handle that a bare `can_parse()` call won't catch.
+
     Must be called after installing/repairing the libmediainfo system library
     at runtime (e.g. from the `install_libmediainfo` service or auto-install
     logic in __init__.py). See `_check_pymediainfo_availability` docstring for
     why this can't just be re-evaluated automatically.
     """
     global PYMEDIAINFO_AVAILABLE
-    PYMEDIAINFO_AVAILABLE = _check_pymediainfo_availability()
-    if PYMEDIAINFO_AVAILABLE:
+    import sys
+    import importlib
+    import tempfile
+
+    try:
+        if 'pymediainfo' in sys.modules:
+            try:
+                importlib.reload(sys.modules['pymediainfo'])
+            except Exception:
+                pass  # Reload can fail (e.g. no __spec__ in some test environments); fall through
+
+        from pymediainfo import MediaInfo as _MediaInfo
+
+        test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+        os.close(test_fd)
+        try:
+            _MediaInfo.parse(test_path)
+        finally:
+            os.unlink(test_path)
+
+        PYMEDIAINFO_AVAILABLE = True
         _LOGGER.info("[VIDEO] ✅ libmediainfo availability refreshed - pymediainfo extraction re-enabled")
-    else:
-        _LOGGER.warning("[VIDEO] ⚠️ libmediainfo availability refreshed - still NOT available")
-    return PYMEDIAINFO_AVAILABLE
+        return True
+    except Exception as e:
+        PYMEDIAINFO_AVAILABLE = False
+        _LOGGER.warning(f"[VIDEO] ⚠️ libmediainfo availability refreshed - still NOT available: {e}")
+        return False
 
 
 PYMEDIAINFO_AVAILABLE = _check_pymediainfo_availability()

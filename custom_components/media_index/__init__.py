@@ -70,6 +70,7 @@ from .const import (
     SERVICE_INDEX_BURST_GROUPS,
     SERVICE_FIND_DUPLICATE_FILES,
     SERVICE_INSTALL_LIBMEDIAINFO,
+    SERVICE_CHECK_VIDEO_EXTRACTION,
     SERVICE_CHECK_FILE_EXISTS,
     SERVICE_UPDATE_SYNC_STATE,
     SERVICE_GET_SYNC_STATE,
@@ -2323,6 +2324,81 @@ def _register_services(hass: HomeAssistant):
         entry_id = _get_entry_id_from_call(hass, call)
         return await _install_libmediainfo_internal(hass, entry_id)
 
+    async def handle_check_video_extraction(call):
+        """Diagnose whether libmediainfo is installed and video metadata extraction works.
+
+        Runs three independent checks and returns a clear per-step result so the user
+        can pinpoint exactly which layer is broken:
+
+        1. pymediainfo_importable   - Python package present and importable
+        2. c_library_loads          - libmediainfo.so C library loads (MediaInfo.parse on a temp file)
+        3. module_flag_active       - video_parser.PYMEDIAINFO_AVAILABLE is True (extraction will run)
+
+        The top-level ``is_working`` field is True only when all three pass.
+
+        Also calls video_parser.refresh_pymediainfo_availability() to reset the module-level
+        flag so the result reflects the current system state (not a stale cached value from
+        startup), and updates hass.data so the sensor attribute reflects the new state too.
+        """
+        import tempfile
+        import os as _os_diag
+
+        result = {
+            "is_working": False,
+            "pymediainfo_importable": False,
+            "c_library_loads": False,
+            "module_flag_active": False,
+            "details": {},
+        }
+
+        # Step 1: can we import the Python package?
+        try:
+            import importlib
+            import sys as _sys_diag
+            if 'pymediainfo' in _sys_diag.modules:
+                importlib.reload(_sys_diag.modules['pymediainfo'])
+            from pymediainfo import MediaInfo as _MI_diag
+            result["pymediainfo_importable"] = True
+            result["details"]["pymediainfo"] = "Python package is installed and importable"
+        except ImportError as e:
+            result["details"]["pymediainfo"] = f"ImportError: {e}"
+            return result
+
+        # Step 2: does the C library actually load?
+        try:
+            test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+            _os_diag.close(test_fd)
+            try:
+                def _parse_temp():
+                    return _MI_diag.parse(test_path)
+                media_info = await hass.async_add_executor_job(_parse_temp)
+                track_count = len(media_info.tracks) if media_info else 0
+                result["c_library_loads"] = True
+                result["details"]["c_library"] = f"libmediainfo loaded and parsed temp file ({track_count} tracks)"
+            finally:
+                _os_diag.unlink(test_path)
+        except Exception as e:
+            result["details"]["c_library"] = f"Failed to parse temp file: {e}"
+            return result
+
+        # Step 3: call refresh_pymediainfo_availability() to sync the module-level flag, then report it.
+        refreshed = await hass.async_add_executor_job(video_parser.refresh_pymediainfo_availability)
+        result["module_flag_active"] = refreshed
+        if refreshed:
+            result["details"]["module_flag"] = "video_parser.PYMEDIAINFO_AVAILABLE = True (extraction will run)"
+            # Also update hass.data so the sensor attribute reflects the new state
+            entry_id = _get_entry_id_from_call(hass, call)
+            if entry_id and DOMAIN in hass.data and entry_id in hass.data[DOMAIN]:
+                hass.data[DOMAIN][entry_id]["pymediainfo_available"] = True
+        else:
+            result["details"]["module_flag"] = (
+                "video_parser.PYMEDIAINFO_AVAILABLE = False even though C library parsed OK - "
+                "refresh_pymediainfo_availability() returned False unexpectedly"
+            )
+
+        result["is_working"] = result["pymediainfo_importable"] and result["c_library_loads"] and result["module_flag_active"]
+        return result
+
     async def handle_get_stream_url(call):
         """Return a short HMAC-signed stream URL for a media file (PoC for Roku ECP cast).
 
@@ -3007,6 +3083,13 @@ def _register_services(hass: HomeAssistant):
         DOMAIN,
         SERVICE_INSTALL_LIBMEDIAINFO,
         handle_install_libmediainfo,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CHECK_VIDEO_EXTRACTION,
+        handle_check_video_extraction,
         supports_response=SupportsResponse.ONLY,
     )
 

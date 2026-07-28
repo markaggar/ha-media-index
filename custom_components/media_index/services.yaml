@@ -1071,3 +1071,17 @@ mirror_to_cast:
           min: 0
           max: 30
           unit_of_measurement: s
+
+check_video_extraction:
+  name: Check Video Extraction
+  description: >
+    Diagnose whether libmediainfo is installed and video metadata extraction is
+    working end-to-end. Runs three checks: (1) pymediainfo Python package importable,
+    (2) libmediainfo C library loads and parses a temp file, (3) the module-level
+    extraction flag is active. Also refreshes the flag so the result reflects the
+    current system state and is updated immediately without requiring an integration
+    reload. Returns is_working=true only when all three checks pass.
+  target:
+    entity:
+      integration: media_index
+      domain: sensor
