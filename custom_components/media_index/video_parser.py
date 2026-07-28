@@ -22,6 +22,60 @@ except ImportError:
     PYMEDIAINFO_AVAILABLE = False
     _LOGGER.warning("[VIDEO] ❌ pymediainfo Python package not installed")
 
+
+def refresh_availability() -> bool:
+    """Re-check pymediainfo Python package and libmediainfo C library; update module-level flag.
+
+    This must be called after installing libmediainfo so that VideoMetadataParser
+    picks up the newly available library without a full Python process restart.
+    The integration calls this during every ``async_setup_entry`` run so the flag
+    is always in sync with the actual system state.
+
+    Reloads the ``pymediainfo`` module first (clears ctypes cached state), then
+    parses a temporary empty file to confirm the C library loads successfully.
+
+    Returns:
+        True if both the pymediainfo Python package and the libmediainfo C library
+        are available and functional.
+    """
+    global PYMEDIAINFO_AVAILABLE
+    import importlib
+    import sys as _sys
+    import tempfile
+    import os as _os
+
+    try:
+        # Reload the pymediainfo Python module to reset any cached ctypes handle.
+        # This is necessary when libmediainfo.so is installed *after* the module
+        # was first imported (e.g. after an HA Core upgrade removed the library).
+        # Reload can fail if the module has no __spec__ (e.g. in tests with fake
+        # modules, or if the package was never fully installed), which is harmless —
+        # we fall through to import and the parse test below.
+        if 'pymediainfo' in _sys.modules:
+            try:
+                importlib.reload(_sys.modules['pymediainfo'])
+            except Exception:
+                pass  # Module reload failed (e.g. no __spec__); continue with existing module
+
+        from pymediainfo import MediaInfo as _MediaInfo  # noqa: F401 – re-import after reload
+
+        # Actually invoke the C library; a bare import is not sufficient because
+        # pymediainfo lazy-loads libmediainfo.so on first parse call.
+        test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+        _os.close(test_fd)
+        try:
+            _MediaInfo.parse(test_path)
+        finally:
+            _os.unlink(test_path)
+
+        PYMEDIAINFO_AVAILABLE = True
+        _LOGGER.info("[VIDEO] ✅ refresh_availability: pymediainfo and libmediainfo C library confirmed available")
+        return True
+    except Exception as e:
+        PYMEDIAINFO_AVAILABLE = False
+        _LOGGER.warning("[VIDEO] ⚠️ refresh_availability: library not available: %s", e)
+        return False
+
 try:
     from mutagen.mp4 import MP4
     MUTAGEN_AVAILABLE = True

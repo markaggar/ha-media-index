@@ -70,6 +70,7 @@ from .const import (
     SERVICE_INDEX_BURST_GROUPS,
     SERVICE_FIND_DUPLICATE_FILES,
     SERVICE_INSTALL_LIBMEDIAINFO,
+    SERVICE_CHECK_VIDEO_EXTRACTION,
     SERVICE_CHECK_FILE_EXISTS,
     SERVICE_UPDATE_SYNC_STATE,
     SERVICE_GET_SYNC_STATE,
@@ -593,44 +594,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     cache_manager = CacheManager(cache_db_path)
     
-    # Check pymediainfo availability on startup
-    # Must actually test library loading, not just Python module import
-    pymediainfo_available = False
-    libmediainfo_error = None
-    try:
-        from pymediainfo import MediaInfo
-        # Try to actually instantiate to trigger library loading
-        # This will fail with OSError if libmediainfo.so.0 is missing
-        import tempfile
-        import os as os_module
-        # Create a minimal test file
-        test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
-        os_module.close(test_fd)
-        try:
-            MediaInfo.parse(test_path)
-            pymediainfo_available = True
-            _LOGGER.info("✅ libmediainfo is available - video metadata extraction enabled")
-        finally:
-            os_module.unlink(test_path)
-    except (ImportError, OSError, RuntimeError) as e:
-        libmediainfo_error = str(e)
+    # Check pymediainfo availability on startup.
+    # refresh_availability() reloads the pymediainfo Python module (clearing any
+    # cached ctypes state) and parses a temp file to confirm the C library loads.
+    # It also updates video_parser.PYMEDIAINFO_AVAILABLE so VideoMetadataParser
+    # picks up the result immediately — this is the key fix for the stale-flag
+    # bug where PYMEDIAINFO_AVAILABLE stayed False after installing libmediainfo.
+    from .video_parser import refresh_availability as _vp_refresh
+    pymediainfo_available = _vp_refresh()
+    if pymediainfo_available:
+        _LOGGER.info("✅ libmediainfo is available - video metadata extraction enabled")
+    else:
         _LOGGER.warning(
             "⚠️ libmediainfo system library is NOT available - video metadata extraction DISABLED!\n"
             "This usually happens after Home Assistant Core upgrades.\n"
-            "Error: %s\n"
             "Automatic scanning is BLOCKED by default to prevent video metadata loss.\n"
             "To fix: Call 'media_index.install_libmediainfo' service or enable 'auto_install_libmediainfo'.\n"
-            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
-            libmediainfo_error
-        )
-    except Exception as e:
-        # Catch-all for unexpected errors
-        libmediainfo_error = str(e)
-        _LOGGER.warning(
-            "⚠️ Unexpected error testing libmediainfo: %s\n"
-            "Assuming library is not available - scanning blocked by default.\n"
-            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning.",
-            libmediainfo_error
+            "If you only index images (no videos), enable 'scan_without_libmediainfo' to allow scanning."
         )
     
     # Store availability status for services to check
@@ -652,28 +632,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             result = await _install_libmediainfo_internal(hass, entry_id=None)
             if result["status"] == "success":
                 _LOGGER.info("✅ Auto-install successful: %s", result["message"])
-                # Re-test library availability after installation
-                try:
-                    # Clear Python's import cache and reload the module to pick up the newly installed library.
-                    # importlib.reload does blocking filesystem I/O (listdir, read_text), so run it in an
-                    # executor thread to avoid blocking the event loop.
-                    import sys
-                    import importlib
-
-                    def _reload_and_verify():
-                        if 'pymediainfo' in sys.modules:
-                            importlib.reload(sys.modules['pymediainfo'])
-                        from pymediainfo import MediaInfo  # noqa: F401
-
-                    await hass.async_add_executor_job(_reload_and_verify)
+                # Re-test library availability after installation.
+                # refresh_availability() reloads the pymediainfo module (clearing cached
+                # ctypes state), parses a temp file to confirm the C library now works,
+                # and updates video_parser.PYMEDIAINFO_AVAILABLE — all in one step.
+                # Run in executor because it does blocking filesystem I/O.
+                from .video_parser import refresh_availability as _vp_refresh_post_install
+                verified = await hass.async_add_executor_job(_vp_refresh_post_install)
+                if verified:
                     hass.data[DOMAIN][entry.entry_id]["pymediainfo_available"] = True
-                    _LOGGER.info("✅ libmediainfo verified working after installation (import successful)")
-                except Exception as e:
+                    _LOGGER.info("✅ libmediainfo verified working after installation - video metadata extraction enabled")
+                else:
                     _LOGGER.error(
-                        "❌ libmediainfo verification failed after installation: %s\n"
+                        "❌ libmediainfo installed but C library not yet usable by this process.\n"
                         "This is expected - Python's process needs to restart to load the new library.\n"
-                        "Video metadata extraction will be available after Home Assistant restart.",
-                        e
+                        "Video metadata extraction will be available after Home Assistant restart."
                     )
             else:
                 _LOGGER.error("❌ Auto-install failed: %s", result["message"])
@@ -2308,6 +2281,84 @@ def _register_services(hass: HomeAssistant):
         entry_id = _get_entry_id_from_call(hass, call)
         return await _install_libmediainfo_internal(hass, entry_id)
 
+    async def handle_check_video_extraction(call):
+        """Diagnose whether libmediainfo is installed and video metadata extraction works.
+
+        Runs three independent checks and returns a clear per-step result so the user
+        can pinpoint exactly which layer is broken:
+
+        1. pymediainfo_importable   – Python package present and importable
+        2. c_library_loads          – libmediainfo.so C library loads (MediaInfo.parse on a temp file)
+        3. module_flag_active       – video_parser.PYMEDIAINFO_AVAILABLE is True (extraction will run)
+
+        The top-level ``is_working`` field is True only when all three pass.
+
+        Also calls refresh_availability() to reset the module-level flag so the result
+        reflects the current system state (not a stale cached value from startup).
+        """
+        import tempfile
+        import os as _os_diag
+
+        result = {
+            "is_working": False,
+            "pymediainfo_importable": False,
+            "c_library_loads": False,
+            "module_flag_active": False,
+            "details": {},
+        }
+
+        # Step 1: can we import the Python package?
+        try:
+            import importlib
+            import sys as _sys_diag
+            if 'pymediainfo' in _sys_diag.modules:
+                importlib.reload(_sys_diag.modules['pymediainfo'])
+            from pymediainfo import MediaInfo as _MI_diag
+            result["pymediainfo_importable"] = True
+            result["details"]["pymediainfo"] = "Python package is installed and importable"
+        except ImportError as e:
+            result["details"]["pymediainfo"] = f"ImportError: {e}"
+            return result
+
+        # Step 2: does the C library actually load?
+        try:
+            test_fd, test_path = tempfile.mkstemp(suffix='.mp4')
+            _os_diag.close(test_fd)
+            try:
+                def _parse_temp():
+                    return _MI_diag.parse(test_path)
+                media_info = await hass.async_add_executor_job(_parse_temp)
+                track_count = len(media_info.tracks) if media_info else 0
+                result["c_library_loads"] = True
+                result["details"]["c_library"] = f"libmediainfo loaded and parsed temp file ({track_count} tracks)"
+            finally:
+                _os_diag.unlink(test_path)
+        except Exception as e:
+            result["details"]["c_library"] = f"Failed to parse temp file: {e}"
+            return result
+
+        # Step 3: call refresh_availability() to sync the module-level flag, then report it.
+        from .video_parser import refresh_availability as _vp_refresh_diag, PYMEDIAINFO_AVAILABLE as _pma_before
+        refreshed = await hass.async_add_executor_job(_vp_refresh_diag)
+
+        # Import the updated value after refresh
+        from .video_parser import PYMEDIAINFO_AVAILABLE as _pma_after
+        result["module_flag_active"] = _pma_after
+        if refreshed:
+            result["details"]["module_flag"] = "video_parser.PYMEDIAINFO_AVAILABLE = True (extraction will run)"
+            # Also update hass.data so the sensor attribute reflects the new state
+            entry_id = _get_entry_id_from_call(hass, call)
+            if entry_id and DOMAIN in hass.data and entry_id in hass.data[DOMAIN]:
+                hass.data[DOMAIN][entry_id]["pymediainfo_available"] = True
+        else:
+            result["details"]["module_flag"] = (
+                "video_parser.PYMEDIAINFO_AVAILABLE = False even though C library parsed OK — "
+                "refresh_availability() returned False unexpectedly"
+            )
+
+        result["is_working"] = result["pymediainfo_importable"] and result["c_library_loads"] and result["module_flag_active"]
+        return result
+
     async def handle_get_stream_url(call):
         """Return a short HMAC-signed stream URL for a media file (PoC for Roku ECP cast).
 
@@ -2992,6 +3043,13 @@ def _register_services(hass: HomeAssistant):
         DOMAIN,
         SERVICE_INSTALL_LIBMEDIAINFO,
         handle_install_libmediainfo,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CHECK_VIDEO_EXTRACTION,
+        handle_check_video_extraction,
         supports_response=SupportsResponse.ONLY,
     )
 

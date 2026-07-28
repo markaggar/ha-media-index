@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.9.1] - 2026-06-10
 
-### Changed
+### Added
+
+- **`check_video_extraction` diagnostic service**: Runs three independent checks — Python package importable, C library loads and parses a test file, module extraction flag active — and returns a clear `is_working` result. Also calls `refresh_availability()` to reset the module-level flag immediately, so calling this service after `install_libmediainfo` re-enables extraction without an additional integration reload.
+
+### Fixed
+
+- **Video metadata extraction silently skipped after `install_libmediainfo` + reload**: `video_parser.PYMEDIAINFO_AVAILABLE` is a module-level constant evaluated once at Python import time. After HA Core upgrades remove `libmediainfo.so`, the flag is set to `False`. Previously, even though `install_libmediainfo` successfully installed the library and reloaded the integration, `PYMEDIAINFO_AVAILABLE` remained `False` for the lifetime of the process. `VideoMetadataParser.extract_metadata()` checks this flag, so pymediainfo was silently skipped and video metadata was never extracted. Fixed by:
+  1. Adding `refresh_availability()` to `video_parser.py` — reloads the `pymediainfo` Python module (clearing cached ctypes state) and parses a temp file to confirm the C library is working, then updates the global `PYMEDIAINFO_AVAILABLE` flag.
+  2. Replacing the inline pymediainfo check in `async_setup_entry` with a call to `refresh_availability()`, so the module flag is always in sync with the verified system state on every integration setup.
+  3. Replacing the post-install verification in the auto-install path with a call to `refresh_availability()`, so the flag is updated correctly (and the previous false-positive "import successful" message is eliminated).
 
 - **`scan_on_startup` default changed to `false` and scoped to watched folders**: Rescanning on every HA restart was wasteful and slowed startup. The default is now `false`. When enabled and watched folders are configured, the restart scan is restricted to those folders only (the paths most likely to have changed while HA was offline); it falls back to a full scan when no watched folders are specified. The config label is updated to reflect this behaviour.
 
