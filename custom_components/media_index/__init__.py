@@ -643,7 +643,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # flag, which is normally only computed once at first import - without this call
     # it would stay stale (e.g. False) across config entry reloads even though the
     # check above just verified the library loads fine.
-    video_parser.refresh_pymediainfo_availability()
+    # Runs importlib.reload(), tempfile I/O, and MediaInfo.parse() - all blocking -
+    # so it must run in an executor to avoid blocking the event loop during setup.
+    await hass.async_add_executor_job(video_parser.refresh_pymediainfo_availability)
 
     # Auto-install if missing and auto_install is enabled - DO IT NOW before continuing setup
     if not pymediainfo_available:
@@ -2352,12 +2354,23 @@ def _register_services(hass: HomeAssistant):
         }
 
         # Step 1: can we import the Python package?
-        try:
+        # importlib.reload() and the import both do blocking filesystem I/O, so run them
+        # in an executor to avoid blocking the event loop. Reload failures (e.g. a stubbed
+        # module missing __spec__ in some environments) are tolerated and fall through to
+        # the import - only a genuine ImportError on the import itself should fail this step.
+        def _reload_and_import():
             import importlib
             import sys as _sys_diag
             if 'pymediainfo' in _sys_diag.modules:
-                importlib.reload(_sys_diag.modules['pymediainfo'])
+                try:
+                    importlib.reload(_sys_diag.modules['pymediainfo'])
+                except Exception:
+                    pass
             from pymediainfo import MediaInfo as _MI_diag
+            return _MI_diag
+
+        try:
+            _MI_diag = await hass.async_add_executor_job(_reload_and_import)
             result["pymediainfo_importable"] = True
             result["details"]["pymediainfo"] = "Python package is installed and importable"
         except ImportError as e:
@@ -2384,12 +2397,14 @@ def _register_services(hass: HomeAssistant):
         # Step 3: call refresh_pymediainfo_availability() to sync the module-level flag, then report it.
         refreshed = await hass.async_add_executor_job(video_parser.refresh_pymediainfo_availability)
         result["module_flag_active"] = refreshed
+        # Always update hass.data so the sensor attribute reflects the current state -
+        # not just on success. Otherwise a previously-True flag would keep reporting
+        # "available" even after this check just proved it False.
+        entry_id = _get_entry_id_from_call(hass, call)
+        if entry_id and DOMAIN in hass.data and entry_id in hass.data[DOMAIN]:
+            hass.data[DOMAIN][entry_id]["pymediainfo_available"] = refreshed
         if refreshed:
             result["details"]["module_flag"] = "video_parser.PYMEDIAINFO_AVAILABLE = True (extraction will run)"
-            # Also update hass.data so the sensor attribute reflects the new state
-            entry_id = _get_entry_id_from_call(hass, call)
-            if entry_id and DOMAIN in hass.data and entry_id in hass.data[DOMAIN]:
-                hass.data[DOMAIN][entry_id]["pymediainfo_available"] = True
         else:
             result["details"]["module_flag"] = (
                 "video_parser.PYMEDIAINFO_AVAILABLE = False even though C library parsed OK - "

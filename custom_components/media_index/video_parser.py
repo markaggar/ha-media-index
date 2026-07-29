@@ -61,7 +61,7 @@ def refresh_pymediainfo_availability() -> bool:
     logic in __init__.py). See `_check_pymediainfo_availability` docstring for
     why this can't just be re-evaluated automatically.
     """
-    global PYMEDIAINFO_AVAILABLE
+    global PYMEDIAINFO_AVAILABLE, MediaInfo
     import sys
     import importlib
     import tempfile
@@ -81,6 +81,12 @@ def refresh_pymediainfo_availability() -> bool:
             _MediaInfo.parse(test_path)
         finally:
             os.unlink(test_path)
+
+        # Rebind the module-level MediaInfo symbol to the (possibly reloaded) class.
+        # extract_metadata() calls the global MediaInfo.parse() directly, so without
+        # this rebind it would keep using the pre-reload class/ctypes handle even
+        # after a successful refresh, defeating the purpose of the reload above.
+        MediaInfo = _MediaInfo
 
         PYMEDIAINFO_AVAILABLE = True
         _LOGGER.info("[VIDEO] ✅ libmediainfo availability refreshed - pymediainfo extraction re-enabled")
